@@ -85,30 +85,74 @@ public partial class WidgetViewModel
     }
 
     /// <summary>
-    /// Moves an item to a new position without persisting to config.
-    /// Used for real-time reordering during drag-over for visual feedback.
-    /// Switches to Manual mode if needed.  Call PersistManualOrder on drop.
+    /// Moves a block of items to a new insertion position without persisting
+    /// to config. Only effective when SortMode is Manual; otherwise the call
+    /// is ignored. The block keeps its relative order and the resulting order
+    /// is applied through Move events so cut-state and stack projection
+    /// rebuild logic see a consistent transition. Call PersistManualOrder on
+    /// drop.
     /// </summary>
-    public bool MoveItemForReorder(WidgetItem item, int targetIndex)
+    public bool MoveItemsForReorder(
+        IReadOnlyList<WidgetItem> items,
+        int insertionIndex)
     {
         if (Config.SortMode != WidgetSortMode.Manual)
         {
             return false;
         }
 
-        int currentIndex = Items.IndexOf(item);
-        if (currentIndex < 0)
+        List<WidgetItem> block = [];
+        List<int> draggedIndices = [];
+        for (int index = 0; index < Items.Count; index++)
+        {
+            WidgetItem item = Items[index];
+            if (items.Contains(item))
+            {
+                block.Add(item);
+                draggedIndices.Add(index);
+            }
+        }
+
+        if (block.Count == 0)
         {
             return false;
         }
 
-        targetIndex = Math.Clamp(targetIndex, 0, Items.Count - 1);
-        if (currentIndex == targetIndex)
+        int destination = ReorderDropIndexCalculator.ResolveBlockInsertionIndex(
+            draggedIndices,
+            insertionIndex,
+            Items.Count);
+
+        List<WidgetItem> targetOrder = Items
+            .Where(item => !block.Contains(item))
+            .ToList();
+        targetOrder.InsertRange(destination, block);
+
+        bool changed = false;
+        for (int index = 0; index < targetOrder.Count; index++)
+        {
+            if (!ReferenceEquals(Items[index], targetOrder[index]))
+            {
+                changed = true;
+                break;
+            }
+        }
+
+        if (!changed)
         {
             return false;
         }
 
-        Items.Move(currentIndex, targetIndex);
+        for (int targetIndex = 0; targetIndex < targetOrder.Count; targetIndex++)
+        {
+            WidgetItem item = targetOrder[targetIndex];
+            int currentIndex = Items.IndexOf(item);
+            if (currentIndex >= 0 && currentIndex != targetIndex)
+            {
+                Items.Move(currentIndex, targetIndex);
+            }
+        }
+
         return true;
     }
 

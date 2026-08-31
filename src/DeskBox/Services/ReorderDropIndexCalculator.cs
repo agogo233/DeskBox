@@ -269,6 +269,35 @@ public static class ReorderDropIndexCalculator
             : Math.Clamp(firstVisibleIndex, 0, list.Items.Count);
     }
 
+    /// <summary>
+    /// Converts a drop insertion boundary into the destination index of a
+    /// multi-item block within the post-removal collection. The boundary is
+    /// expressed in current-list coordinates (which still include the dragged
+    /// items), so each dragged item located before the boundary vacates one
+    /// slot once removed. The result is clamped to the valid insertion range.
+    /// A single dragged item yields exactly the classic
+    /// "decrement only when moving forward" adjustment.
+    /// </summary>
+    public static int ResolveBlockInsertionIndex(
+        IReadOnlyList<int> draggedIndices,
+        int insertionIndex,
+        int totalCount)
+    {
+        int beforeBoundary = 0;
+        foreach (int draggedIndex in draggedIndices)
+        {
+            if (draggedIndex < insertionIndex)
+            {
+                beforeBoundary++;
+            }
+        }
+
+        return Math.Clamp(
+            insertionIndex - beforeBoundary,
+            0,
+            totalCount - draggedIndices.Count);
+    }
+
     private static FrameworkElement? FindNearestRealizedContainer(
         ListViewBase list,
         int insertionIndex)

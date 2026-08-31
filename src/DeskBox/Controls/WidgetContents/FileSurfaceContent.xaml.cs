@@ -53,7 +53,7 @@ public sealed partial class FileSurfaceContent :
     private int _surfaceReorderInsertionIndex = -1;
     private Windows.Foundation.Point _surfaceReorderLastPosition;
     private bool _surfaceReorderHasLastPosition;
-    private WidgetItem? _surfaceReorderDraggedItem;
+    private readonly List<WidgetItem> _surfaceReorderDraggedItems = [];
     private HashSet<string>? _surfaceReorderPathSet;
     private ListViewBase? _surfaceReorderLastView;
     private WidgetItem[] _pendingPointerDragItems = [];
@@ -909,7 +909,7 @@ public sealed partial class FileSurfaceContent :
         _surfaceReorderInsertionIndex = -1;
         _surfaceReorderLastPosition = default;
         _surfaceReorderHasLastPosition = false;
-        _surfaceReorderDraggedItem = null;
+        _surfaceReorderDraggedItems.Clear();
         _surfaceReorderPathSet = null;
         _surfaceReorderLastView = null;
         WidgetStackItem? stack =
@@ -3047,7 +3047,7 @@ public sealed partial class FileSurfaceContent :
                     stackKey,
                     StringComparison.Ordinal))
             {
-                _surfaceReorderDraggedItem = null;
+                _surfaceReorderDraggedItems.Clear();
                 _surfaceReorderPathSet = null;
                 _surfaceReorderLastView = null;
             }
@@ -3068,14 +3068,26 @@ public sealed partial class FileSurfaceContent :
         _surfaceReorderPathSet ??= paths
             .Select(Path.GetFullPath)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        WidgetItem? draggedItem = _surfaceReorderDraggedItem ??
-            ViewModel.Items.FirstOrDefault(item =>
-                _surfaceReorderPathSet.Contains(Path.GetFullPath(item.Path)));
-        if (draggedItem is null)
+        if (_surfaceReorderDraggedItems.Count == 0)
+        {
+            PopulateDraggedItemsFromPathSet();
+        }
+
+        if (_surfaceReorderDraggedItems.Count == 0)
         {
             return;
         }
 
+        // Stack projection reorders a single display unit or expanded-stack
+        // member. Multi-select reordering is deliberately not supported in
+        // that mode, so keep the preview inactive for multi-item drags.
+        if (ViewModel.UsesStackProjection &&
+            _surfaceReorderDraggedItems.Count > 1)
+        {
+            return;
+        }
+
+        WidgetItem draggedItem = _surfaceReorderDraggedItems[0];
         if (!_isSurfaceReorderDragActive)
         {
             if (ViewModel.UsesStackProjection)
@@ -3092,7 +3104,6 @@ public sealed partial class FileSurfaceContent :
 
             _isSurfaceReorderDragActive = true;
             _surfaceReorderPaths = paths;
-            _surfaceReorderDraggedItem = draggedItem;
         }
 
         UpdateSurfaceReorderPreview(position);
@@ -3105,16 +3116,38 @@ public sealed partial class FileSurfaceContent :
         if (!_isSurfaceReorderDragActive)
         {
             _surfaceReorderPaths = paths.ToArray();
-            _isSurfaceReorderDragActive =
-                _surfaceReorderPaths.Length > 0;
             _surfaceReorderPathSet = _surfaceReorderPaths
                 .Select(Path.GetFullPath)
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
-            _surfaceReorderDraggedItem = ViewModel.Items.FirstOrDefault(item =>
-                _surfaceReorderPathSet.Contains(Path.GetFullPath(item.Path)));
+            _surfaceReorderDraggedItems.Clear();
+            PopulateDraggedItemsFromPathSet();
+            if (ViewModel.UsesStackProjection &&
+                _surfaceReorderDraggedItems.Count > 1)
+            {
+                return;
+            }
+
+            _isSurfaceReorderDragActive =
+                _surfaceReorderDraggedItems.Count > 0;
         }
 
         CommitSurfaceReorder(position);
+    }
+
+    private void PopulateDraggedItemsFromPathSet()
+    {
+        if (_surfaceReorderPathSet is null)
+        {
+            return;
+        }
+
+        foreach (WidgetItem item in ViewModel.Items)
+        {
+            if (_surfaceReorderPathSet.Contains(Path.GetFullPath(item.Path)))
+            {
+                _surfaceReorderDraggedItems.Add(item);
+            }
+        }
     }
 
     private void UpdateSurfaceReorderPreview(
@@ -3223,32 +3256,20 @@ public sealed partial class FileSurfaceContent :
             return;
         }
 
-        if (_surfaceReorderPaths.Length == 0)
-        {
-            return;
-        }
-
-        _surfaceReorderPathSet ??= _surfaceReorderPaths
-            .Select(Path.GetFullPath)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        WidgetItem? draggedItem = _surfaceReorderDraggedItem ??
-            ViewModel.Items.FirstOrDefault(item =>
-                _surfaceReorderPathSet.Contains(Path.GetFullPath(item.Path)));
-        if (draggedItem is null)
-        {
-            return;
-        }
-
-        int currentIndex = ViewModel.UsesStackProjection
-            ? activeView.Items.IndexOf(draggedItem)
-            : ViewModel.Items.IndexOf(draggedItem);
-        if (currentIndex < 0)
+        if (_surfaceReorderDraggedItems.Count == 0)
         {
             return;
         }
 
         if (ViewModel.UsesStackProjection)
         {
+            WidgetItem draggedItem = _surfaceReorderDraggedItems[0];
+            int currentIndex = activeView.Items.IndexOf(draggedItem);
+            if (currentIndex < 0)
+            {
+                return;
+            }
+
             if (!draggedItem.IsStackChild &&
                 ViewModel.Config.SortMode != WidgetSortMode.Manual)
             {
@@ -3260,18 +3281,8 @@ public sealed partial class FileSurfaceContent :
             return;
         }
 
-        if (targetIndex > currentIndex)
-        {
-            targetIndex--;
-        }
-
-        if (targetIndex == currentIndex || targetIndex < 0)
-        {
-            return;
-        }
-
-        ViewModel.MoveItemForReorder(
-            draggedItem,
+        ViewModel.MoveItemsForReorder(
+            _surfaceReorderDraggedItems,
             targetIndex);
     }
 
@@ -3282,7 +3293,7 @@ public sealed partial class FileSurfaceContent :
         _surfaceReorderPaths = [];
         _surfaceReorderStackKey = null;
         _surfaceReorderInsertionIndex = -1;
-        _surfaceReorderDraggedItem = null;
+        _surfaceReorderDraggedItems.Clear();
         _surfaceReorderPathSet = null;
         _surfaceReorderLastView = null;
         _surfaceReorderLastPosition = default;
