@@ -1038,7 +1038,6 @@ public partial class App : Application
 
             await EnsureOnboardingAsync(isInteractiveLaunch: !IsStartupMode);
 
-            ScheduleBackgroundUpdateCheck();
             _diagnosticsService = new AppDiagnosticsService(UiDispatcherQueue);
             _diagnosticsService.StartAll();
 
@@ -1281,43 +1280,6 @@ public partial class App : Application
         {
             Log($"[Lifecycle] Settings flush threw for {reason}: {ex}");
         }
-    }
-
-    private void ScheduleBackgroundUpdateCheck()
-    {
-        if (DistributionService.IsMicrosoftStore)
-        {
-            return;
-        }
-
-        if (!SettingsService.Settings.AutoCheckForUpdates)
-        {
-            return;
-        }
-
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                await Task.Delay(IsStartupMode ? TimeSpan.FromSeconds(45) : TimeSpan.FromSeconds(12));
-                var result = await AppUpdateService.CheckForUpdatesAsync();
-                SettingsService.Settings.LastUpdateCheckAt = DateTimeOffset.Now;
-                SettingsService.SaveDebounced(notifySubscribers: false);
-
-                if (result.IsUpdateAvailable && result.Manifest is not null)
-                {
-                    Log($"[Update] New version available: {result.Manifest.Version}");
-                }
-                else if (result.Status == AppUpdateCheckStatus.Failed)
-                {
-                    Log($"[Update] Background check failed: {result.ErrorMessage}");
-                }
-            }
-            catch (Exception ex)
-            {
-                Log($"[Update] Background check crashed: {ex}");
-            }
-        });
     }
 
     internal void RefreshQuickCaptureClipboardService(bool captureCurrent = false)
