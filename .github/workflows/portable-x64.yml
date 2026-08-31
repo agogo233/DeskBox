@@ -1,0 +1,66 @@
+# Standalone x64 portable pipeline: manual dispatch only, fully isolated from
+# other workflows. Runs the authoritative scripts/publish-aot-retail.ps1 to
+# produce the AOT self-contained publish directory and zips it as an artifact.
+# Note: the GitHub UI dispatch button only appears after this file lands on the
+# default branch; on feature branches use
+# `gh workflow run portable-x64.yml --ref <branch>`.
+name: Portable x64
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: portable-x64-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build x64 portable package
+    runs-on: windows-latest
+    timeout-minutes: 90
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: 1
+      DOTNET_NOLOGO: 1
+      RestoreLockedMode: true
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pinned .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.303
+
+      # The retail script embeds full validation (PE machine, forbidden files,
+      # smoke-harness tokens, warning-code allowlist); any failure aborts.
+      # Rust 1.96.0 is auto-installed by rustup from rust-toolchain.toml.
+      - name: AOT retail publish
+        shell: pwsh
+        run: .\scripts\publish-aot-retail.ps1 -Platform x64
+
+      - name: Package portable zip
+        shell: pwsh
+        run: |
+          $short = (git rev-parse --short HEAD).Trim()
+          $zip = "DeskBox_Portable_${short}_x64.zip"
+          Compress-Archive -Path ".\.artifacts\aot-retail\win-x64\publish\*" `
+            -DestinationPath $zip -CompressionLevel Optimal
+          if (-not (Test-Path -LiteralPath $zip -PathType Leaf)) {
+            throw "Portable zip artifact is missing: $zip"
+          }
+          Write-Output "ZIP_NAME=$zip" >> $env:GITHUB_ENV
+
+      # summary.json rides along for provenance and validation cross-checks
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ZIP_NAME }}
+          path: |
+            ${{ env.ZIP_NAME }}
+            .artifacts/aot-retail/win-x64/summary.json
+          retention-days: 30
+          if-no-files-found: error
