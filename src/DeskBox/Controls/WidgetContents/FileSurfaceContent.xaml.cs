@@ -2051,6 +2051,7 @@ public sealed partial class FileSurfaceContent :
                             ViewModel.CurrentFolderPath));
             }
             ResetDragPayloadCache();
+            NotifyHostXamlDropResult(false);
             return;
         }
 
@@ -2078,6 +2079,7 @@ public sealed partial class FileSurfaceContent :
                 CloseStackPopover();
             }
             ResetDragPayloadCache();
+            NotifyHostXamlDropResult(true);
             return;
         }
 
@@ -2092,6 +2094,7 @@ public sealed partial class FileSurfaceContent :
             e.AcceptedOperation = DataPackageOperation.Link;
             PersistSurfaceReorder();
             ResetDragPayloadCache();
+            NotifyHostXamlDropResult(true);
             return;
         }
 
@@ -2108,6 +2111,7 @@ public sealed partial class FileSurfaceContent :
         // spend seconds materializing a large payload before paths are
         // available; that preparation time is part of the import operation.
         BeginTrackedImport();
+        bool xamlDropNotified = false;
         try
         {
             using DroppedFileBatch batch = await GetSurfaceDropFilesAsync(e.DataView);
@@ -2116,6 +2120,9 @@ public sealed partial class FileSurfaceContent :
                 $"[DropOperation] operation={dropOperationId} widget={WidgetId} " +
                 $"stage=PayloadMaterialized count={droppedFiles.Count} " +
                 $"skipped={batch.SkippedCount}");
+            // Notify host for dedup: success only when payload non-empty.
+            NotifyHostXamlDropResult(droppedFiles.Count > 0);
+            xamlDropNotified = true;
             string[] paths = droppedFiles
                 .Select(file => file.Path)
                 .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -2208,6 +2215,11 @@ public sealed partial class FileSurfaceContent :
             App.Log(
                 $"[DropOperation] operation={dropOperationId} widget={WidgetId} " +
                 "stage=Canceled");
+            if (!xamlDropNotified)
+            {
+                NotifyHostXamlDropResult(false);
+                xamlDropNotified = true;
+            }
             if (_activeImportCancellation is not null)
             {
                 await CompleteTrackedImportAsync(
@@ -2224,6 +2236,11 @@ public sealed partial class FileSurfaceContent :
                 ex.Message,
                 WidgetFeedbackSeverity.Error,
                 "file-drop-error"));
+            if (!xamlDropNotified)
+            {
+                NotifyHostXamlDropResult(false);
+                xamlDropNotified = true;
+            }
             if (_activeImportCancellation is not null)
             {
                 await CompleteTrackedImportAsync(
@@ -2673,7 +2690,84 @@ public sealed partial class FileSurfaceContent :
             return new DroppedFileBatch(files, temporaryDirectory: null, skippedCount: 0);
         }
 
-        return await DeskBoxDragData.TryGetDroppedFilesAsync(dataView);
+        DroppedFileBatch batch = await DeskBoxDragData.TryGetDroppedFilesAsync(dataView);
+        if (batch.SkippedCount > 0)
+        {
+            // WinRT StorageItems can fail for Hidden|System .lnk (0x8007016C).
+            // Fall back to direct filesystem probes so the same drag that
+            // succeeds via native CF_HDROP also succeeds via XAML.
+            try
+            {
+                string[]? rawPaths = TryExtractRawPathsFromDataView(dataView);
+                if (rawPaths is { Length: > 0 })
+                {
+                    var existingSet = new HashSet<string>(batch.Files.Select(f => f.Path), StringComparer.OrdinalIgnoreCase);
+                    DroppedFilePath[] fallback = await Task.Run(() => rawPaths
+                            .Where(path => !string.IsNullOrWhiteSpace(path))
+                            .Select(path =>
+                            {
+                                try { return Path.GetFullPath(path); }
+                                catch { return string.Empty; }
+                            })
+                            .Where(path => File.Exists(path) || Directory.Exists(path))
+                            .Distinct(StringComparer.OrdinalIgnoreCase)
+                            .Where(path => !existingSet.Contains(path))
+                            .Select(path => new DroppedFilePath(path, Path.GetFileName(path), ForceManagedCopy: false))
+                            .ToArray())
+                        .ConfigureAwait(false);
+                    if (fallback.Length > 0)
+                    {
+                        var merged = batch.Files.Concat(fallback).ToArray();
+                        int oldSkipped = batch.SkippedCount;
+                        string? tempDir = batch.ReleaseTemporaryDirectory();
+                        int remainingSkipped = Math.Max(0, oldSkipped - fallback.Length);
+                        App.Log($"[DropOperation] StorageItems fallback recovered {fallback.Length} path(s) skipped={oldSkipped}->{remainingSkipped}");
+                        batch.Dispose();
+                        return new DroppedFileBatch(merged, tempDir, remainingSkipped);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                App.Log($"[DropOperation] StorageItems fallback failed: {ex.Message}");
+            }
+        }
+
+        return batch;
+    }
+
+    private static string[]? TryExtractRawPathsFromDataView(DataPackageView dataView)
+    {
+        // Best-effort: internal DeskBox drags carry SourcePathsProperty.
+        // External Explorer Hidden|System .lnk failures are handled via
+        // native fallback (Clear marker -> Native IDropTarget), not here.
+        try
+        {
+            if (dataView.Properties.TryGetValue(DeskBoxDragData.SourcePathsProperty, out object? value))
+            {
+                return value switch
+                {
+                    string[] arr => arr,
+                    IReadOnlyList<string> list => list.ToArray(),
+                    IEnumerable<string> seq => seq.ToArray(),
+                    _ => null
+                };
+            }
+        }
+        catch { }
+        return null;
+    }
+
+    private void NotifyHostXamlDropResult(bool success)
+    {
+        try
+        {
+            if (App.Current?.WidgetManager?.ContentWidgets.TryGetValue(WidgetId, out var host) == true)
+            {
+                host.NotifyXamlDropResult(success, WidgetId);
+            }
+        }
+        catch { }
     }
 
     private async Task<IReadOnlyList<string>> ImportDroppedFilesAsync(

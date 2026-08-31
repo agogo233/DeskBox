@@ -33,7 +33,9 @@ public sealed partial class ContentWidgetWindow
     private Task? _groupFileDropCacheTask;
     private DroppedFileBatch? _groupFileDropBatch;
     private CancellationTokenSource? _pendingNativeFileDropCts;
+    private volatile bool _isXamlDropPending;
     private DateTimeOffset _lastXamlFileDropUtc = DateTimeOffset.MinValue;
+    private readonly object _xamlDropGate = new();
     private bool _isCachingGroupFileDrop;
     private bool _isGroupFileDropTracking;
     private bool _isGroupFileManualImporting;
@@ -439,11 +441,34 @@ public sealed partial class ContentWidgetWindow
 
     private void GroupFileDrop_Drop(object sender, DragEventArgs e)
     {
-        // The nested FileSurfaceContent received a normal Drop event, so the
-        // fallback must not import the cached source a second time.
-        _lastXamlFileDropUtc = DateTimeOffset.UtcNow;
+        // Mark pending; actual success/failure will be reported by
+        // FileSurfaceContent.Root_Drop via NotifyXamlDropResult.
+        _isXamlDropPending = true;
+        lock (_xamlDropGate) _lastXamlFileDropUtc = DateTimeOffset.UtcNow;
         CancelPendingNativeFileDropFallback();
         StopGroupFileDropTracking(disposeCachedBatch: true);
+    }
+
+    internal void NotifyXamlDropResult(bool success, string widgetId)
+    {
+        if (!string.Equals(_config.Id, widgetId, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        _isXamlDropPending = false;
+        lock (_xamlDropGate)
+        {
+            _lastXamlFileDropUtc = success ? DateTimeOffset.UtcNow : DateTimeOffset.MinValue;
+        }
+        App.LogVerbose(success
+            ? $"[DropDiagnostic] XAML drop succeeded id={widgetId}"
+            : $"[DropDiagnostic] XAML drop empty id={widgetId} cleared marker for native fallback");
+    }
+
+    private DateTimeOffset GetLastXamlDropUtc()
+    {
+        lock (_xamlDropGate) return _lastXamlFileDropUtc;
     }
 
     private void BeginGroupFileDropTracking(DataPackageView dataView)
@@ -1002,7 +1027,12 @@ public sealed partial class ContentWidgetWindow
         }
 
         string[] ownedPaths = paths.ToArray();
-        if (DateTimeOffset.UtcNow - _lastXamlFileDropUtc <
+        if (_isXamlDropPending)
+        {
+            App.LogVerbose("[DropTarget] Native import deferred because XAML drop is pending.");
+            // Don't skip, wait for completion in CompleteNativeFileDropFallbackAsync.
+        }
+        else if (DateTimeOffset.UtcNow - GetLastXamlDropUtc() <
             TimeSpan.FromMilliseconds(500))
         {
             if (containsTemporaryFiles)
@@ -1011,7 +1041,7 @@ public sealed partial class ContentWidgetWindow
             }
 
             App.LogVerbose(
-                "[DropTarget] Native import skipped because WinUI handled the drop.");
+                "[DropTarget] Native import skipped because WinUI handled the drop (success).");
             return;
         }
 
@@ -1042,10 +1072,24 @@ public sealed partial class ContentWidgetWindow
         {
             await Task.Delay(120, cancellation.Token);
             if (cancellation.IsCancellationRequested ||
-                !ReferenceEquals(_pendingNativeFileDropCts, cancellation) ||
-                DateTimeOffset.UtcNow - _lastXamlFileDropUtc <
+                !ReferenceEquals(_pendingNativeFileDropCts, cancellation))
+            {
+                return;
+            }
+            if (_isXamlDropPending)
+            {
+                App.LogVerbose("[DropTarget] Native import waiting for XAML result - deferred");
+                // Wait a bit more for XAML result before deciding.
+                await Task.Delay(300, cancellation.Token);
+                if (_isXamlDropPending)
+                {
+                    return;
+                }
+            }
+            if (DateTimeOffset.UtcNow - GetLastXamlDropUtc() <
                 TimeSpan.FromMilliseconds(500))
             {
+                App.LogVerbose("[DropTarget] Native import skipped after delay because WinUI succeeded");
                 return;
             }
 

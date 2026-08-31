@@ -544,7 +544,8 @@ public sealed record DroppedFilePath(string Path, string DisplayName, bool Force
 
 public sealed class DroppedFileBatch : IDisposable
 {
-    private readonly string? _temporaryDirectory;
+    private string? _temporaryDirectory;
+    private bool _disposed;
 
     internal DroppedFileBatch(
         IReadOnlyList<DroppedFilePath> files,
@@ -560,8 +561,22 @@ public sealed class DroppedFileBatch : IDisposable
 
     public int SkippedCount { get; }
 
+    internal string? TemporaryDirectory => _temporaryDirectory;
+
+    internal string? ReleaseTemporaryDirectory()
+    {
+        string? dir = _temporaryDirectory;
+        _temporaryDirectory = null;
+        return dir;
+    }
+
     public void Dispose()
     {
+        if (_disposed)
+        {
+            return;
+        }
+        _disposed = true;
         if (string.IsNullOrWhiteSpace(_temporaryDirectory) ||
             !Directory.Exists(_temporaryDirectory))
         {
