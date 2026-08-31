@@ -111,6 +111,8 @@ public partial class SettingsViewModel
                     SettingsService.ManagedDropActionCopy,
                 SettingsService.ManagedDropActionFollowWindows =>
                     SettingsService.ManagedDropActionFollowWindows,
+                SettingsService.ManagedDropActionShortcutOutsideDesktop =>
+                    SettingsService.ManagedDropActionShortcutOutsideDesktop,
                 _ => SettingsService.ManagedDropActionMove
             };
             if (!SetProperty(ref _selectedManagedDropAction, normalized))
