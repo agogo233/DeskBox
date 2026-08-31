@@ -1105,7 +1105,8 @@ set => WidgetOpacity = Math.Clamp(1.0 - value / 100d, SettingsService.MinWidgetO
     [
         SettingsService.ManagedDropActionCopy,
         SettingsService.ManagedDropActionMove,
-        SettingsService.ManagedDropActionFollowWindows
+        SettingsService.ManagedDropActionFollowWindows,
+        SettingsService.ManagedDropActionShortcutOutsideDesktop
     ];
 
     public string[] AvailableManagedDropActionDisplayNames =>
@@ -1120,6 +1121,9 @@ set => WidgetOpacity = Math.Clamp(1.0 - value / 100d, SettingsService.MinWidgetO
                 _localizationService.T("Settings.DropAction.Move"),
             SettingsService.ManagedDropActionFollowWindows =>
                 _localizationService.T("Settings.DropAction.System"),
+            SettingsService.ManagedDropActionShortcutOutsideDesktop =>
+                _localizationService.T(
+                    "Settings.DropAction.ShortcutOutsideDesktop"),
             _ => _localizationService.T("Settings.DropAction.Copy")
         };
 
