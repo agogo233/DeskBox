@@ -131,6 +131,7 @@ public partial class SettingsViewModel
             SelectedLayoutDensity = SettingsService.ResolveLayoutDensityPreset(settings);
             ShowFileExtensions = settings.ShowFileExtensions;
             HideShortcutExtensionWhenShowingFileExtensions = settings.HideShortcutExtensionWhenShowingFileExtensions;
+            IdleWorkingSetTrimEnabled = settings.IdleWorkingSetTrimEnabled;
 
             ApplyContentEditorSettingsSnapshot(settings);
             ApplyFileStackSettingsSnapshot(settings);
@@ -218,7 +219,6 @@ public partial class SettingsViewModel
                 SettingsService.WeatherRefreshMaxMinutes);
 
             ManagedStorageRootPath = SettingsService.NormalizeManagedStorageRootPath(settings.DefaultManagedStorageRootPath);
-            ManagedStorageDesktopShortcutEnabled = settings.ManagedStorageDesktopShortcutEnabled;
             GlobalHotkeyEnabled = settings.GlobalHotkeyEnabled;
         }
         finally
@@ -265,6 +265,7 @@ public partial class SettingsViewModel
         OnPropertyChanged(nameof(QuickAccessStatusText));
         OnPropertyChanged(nameof(PinQuickAccessButtonText));
         OnPropertyChanged(nameof(PinQuickAccessToolTipText));
+        OnPropertyChanged(nameof(AutoStartStatusText));
         OnPropertyChanged(nameof(GlobalHotkeyDescription));
         OnPropertyChanged(nameof(GlobalHotkeyWarningText));
         OnPropertyChanged(nameof(GlobalHotkeyText));

@@ -39,6 +39,7 @@ public sealed partial class ContentWidgetWindow
     private bool _isCachingGroupFileDrop;
     private bool _isGroupFileDropTracking;
     private bool _isGroupFileManualImporting;
+    private long _nativeFileDropPointerGeneration;
     private long _groupFileDropGeneration;
     private bool _groupFileDropFormatCached;
     private bool _groupFileDropRequiresFallback;
@@ -751,19 +752,36 @@ public sealed partial class ContentWidgetWindow
         int screenY,
         bool hasFileData)
     {
-        ObserveNativeFileDragPointer(screenX, screenY, hasFileData);
+        long pointerGeneration =
+            System.Threading.Interlocked.Increment(
+                ref _nativeFileDropPointerGeneration);
+        ObserveNativeFileDragPointer(
+            screenX,
+            screenY,
+            hasFileData,
+            GetNativeFileDropPathHints(),
+            pointerGeneration);
     }
 
     private void NativeFileDropTarget_DragOverEvent(int screenX, int screenY)
     {
+        bool hasFileData = _nativeFileDropTargets.Values.Any(
+            target => target.HasFileData);
+        long pointerGeneration =
+            System.Threading.Interlocked.Increment(
+                ref _nativeFileDropPointerGeneration);
         ObserveNativeFileDragPointer(
             screenX,
             screenY,
-            _nativeFileDropTargets.Values.Any(target => target.HasFileData));
+            hasFileData,
+            GetNativeFileDropPathHints(),
+            pointerGeneration);
     }
 
     private void NativeFileDropTarget_DragLeaveEvent()
     {
+        System.Threading.Interlocked.Increment(
+            ref _nativeFileDropPointerGeneration);
         _nativeFileDropItemTarget = null;
         RunOnNativeFileDropUiThread(file =>
             file.ClearDragSessionVisualState());
@@ -772,15 +790,48 @@ public sealed partial class ContentWidgetWindow
     private void ObserveNativeFileDragPointer(
         int screenX,
         int screenY,
-        bool hasFileData)
+        bool hasFileData,
+        IReadOnlyList<string>? pathHints = null,
+        long pointerGeneration = 0)
     {
-        _nativeFileDropItemTarget = hasFileData &&
-            CurrentContent is FileSurfaceContent
-                ? NormalizeNativeFileDropItemTarget(
-                    FindNativeDropDataContext<WidgetItem>(screenX, screenY))
-                : null;
         RunOnNativeFileDropUiThread(file =>
-            file.ObserveNativeDragPointer(screenX, screenY, hasFileData));
+        {
+            if (pointerGeneration != 0 &&
+                pointerGeneration != System.Threading.Interlocked.Read(
+                    ref _nativeFileDropPointerGeneration))
+            {
+                // Native OLE callbacks run off the UI thread. A queued
+                // DragOver can arrive after a newer pointer location has
+                // already been received, which used to re-apply an old stack
+                // target over the user's current non-stack location.
+                return;
+            }
+
+            WidgetItem? nativeTarget = hasFileData &&
+                CurrentContent is FileSurfaceContent
+                    ? NormalizeNativeFileDropItemTarget(
+                        FindNativeDropDataContext<WidgetItem>(
+                            screenX,
+                            screenY))
+                    : null;
+            _nativeFileDropItemTarget = nativeTarget;
+            file.ObserveNativeDragPointer(
+                screenX,
+                screenY,
+                hasFileData,
+                pathHints,
+                nativeTarget);
+        });
+    }
+
+    private IReadOnlyList<string> GetNativeFileDropPathHints()
+    {
+        return _nativeFileDropTargets.Values
+            .Where(target => target.HasFileData)
+            .SelectMany(target => target.DragPathHints)
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
     }
 
     private void RunOnNativeFileDropUiThread(Action<FileSurfaceContent> action)
@@ -810,6 +861,8 @@ public sealed partial class ContentWidgetWindow
         bool containsTemporaryFiles,
         bool copyWhenMapped)
     {
+        System.Threading.Interlocked.Increment(
+            ref _nativeFileDropPointerGeneration);
         if (_nativeDropIntentHandledForLegacyCallback)
         {
             // The richer callback below already owns this drop. Keep this
@@ -819,12 +872,16 @@ public sealed partial class ContentWidgetWindow
             return;
         }
 
-        RunOnNativeFileDropUiThread(file =>
-            file.ClearDragSessionVisualState());
         App.Log(
             $"[DropDiagnostic] content id={_config.Id} stage=NativeIDropTargetDrop " +
             $"count={paths.Count} temporary={containsTemporaryFiles} " +
             $"copyWhenMapped={copyWhenMapped}");
+        // Native OLE commonly raises DragLeave immediately after Drop.  Latch
+        // the visible insertion line before the asynchronous import is queued,
+        // otherwise the leave cleanup clears it and the files fall back to the
+        // append position.
+        RunOnNativeFileDropUiThread(file =>
+            file.CaptureNativeDropInsertion(screenX, screenY));
         ScheduleNativeFileDropFallback(
             paths,
             containsTemporaryFiles,
@@ -837,10 +894,9 @@ public sealed partial class ContentWidgetWindow
     private void NativeFileDropTarget_DropIntentEvent(
         NativeDropIntentEventArgs args)
     {
+        System.Threading.Interlocked.Increment(
+            ref _nativeFileDropPointerGeneration);
         _nativeDropIntentHandledForLegacyCallback = true;
-        RunOnNativeFileDropUiThread(file =>
-            file.ClearDragSessionVisualState());
-
         bool followWindows = ShouldFollowWindowsNativeFileDrop();
         FileDropIntent? forcedIntent = args.ShortcutRequested &&
             !args.ContainsTemporaryFiles
@@ -857,6 +913,11 @@ public sealed partial class ContentWidgetWindow
             $"count={args.Paths.Count} temporary={args.ContainsTemporaryFiles} " +
             $"shortcut={args.ShortcutRequested} rightButton={args.RightButtonDrag} " +
             $"effect={args.FeedbackEffect}");
+
+        // Capture the insertion index synchronously on the UI thread before
+        // Explorer's native drag loop sends DragLeave and clears the preview.
+        RunOnNativeFileDropUiThread(file =>
+            file.CaptureNativeDropInsertion(args.ScreenX, args.ScreenY));
 
         // A right-button drag is intentionally resolved after release. The
         // native OLE callback cannot wait for a WinUI flyout without blocking
@@ -889,6 +950,8 @@ public sealed partial class ContentWidgetWindow
                     await ShowNativeRightButtonDropChoiceAsync(args);
                 if (choice == FileDropIntent.None)
                 {
+                    RunOnNativeFileDropUiThread(file =>
+                        file.ClearPendingNativeDropInsertion());
                     if (args.ContainsTemporaryFiles)
                     {
                         CleanupNativeTemporaryDropFiles(args.Paths);
@@ -1035,6 +1098,10 @@ public sealed partial class ContentWidgetWindow
         else if (DateTimeOffset.UtcNow - GetLastXamlDropUtc() <
             TimeSpan.FromMilliseconds(500))
         {
+            // The routed WinUI path already committed this drop. Do not leave
+            // the native preview index armed for a later unrelated import.
+            RunOnNativeFileDropUiThread(file =>
+                file.ClearPendingNativeDropInsertion());
             if (containsTemporaryFiles)
             {
                 CleanupNativeTemporaryDropFiles(ownedPaths);
@@ -1185,7 +1252,9 @@ public sealed partial class ContentWidgetWindow
                             FindNativeDropDataContext<WidgetItem>(
                                 screenX,
                                 screenY)),
-                        forcedIntent);
+                        forcedIntent,
+                        screenX,
+                        screenY);
                     break;
 
                 case QuickCaptureSurfaceContent quickCapture:
