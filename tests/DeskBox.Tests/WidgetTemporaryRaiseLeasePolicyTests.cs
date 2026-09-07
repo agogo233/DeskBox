@@ -126,4 +126,44 @@ public sealed class WidgetTemporaryRaiseLeasePolicyTests
         Assert.Equal(new[] { new IntPtr(202) }, remaining.ActiveWindowHandles);
         Assert.Equal(current.Generation, remaining.Generation);
     }
+
+    [Fact]
+    public void StartupAbsoluteSettle_SurvivesForgetAndRelease()
+    {
+        WidgetTemporaryRaiseLease startup =
+            WidgetTemporaryRaiseLeasePolicy.Acquire(
+                default,
+                [new IntPtr(101), new IntPtr(202)],
+                absoluteSettle: true);
+
+        WidgetTemporaryRaiseLease afterForget =
+            WidgetTemporaryRaiseLeasePolicy.Forget(startup, new IntPtr(101));
+        Assert.True(afterForget.AbsoluteSettle);
+
+        WidgetTemporaryRaiseLease afterRelease =
+            WidgetTemporaryRaiseLeasePolicy.Release(
+                afterForget,
+                afterForget.Generation);
+        Assert.True(afterRelease.AbsoluteSettle);
+        Assert.False(afterRelease.IsActive);
+    }
+
+    [Fact]
+    public void InteractiveAcquire_OverridesAbsoluteSettleToRelative()
+    {
+        WidgetTemporaryRaiseLease startup =
+            WidgetTemporaryRaiseLeasePolicy.Acquire(
+                default,
+                [new IntPtr(101)],
+                absoluteSettle: true);
+
+        WidgetTemporaryRaiseLease titleInteraction =
+            WidgetTemporaryRaiseLeasePolicy.Acquire(
+                startup,
+                [new IntPtr(202)]);
+
+        Assert.True(startup.AbsoluteSettle);
+        Assert.False(titleInteraction.AbsoluteSettle);
+        Assert.True(titleInteraction.Generation > startup.Generation);
+    }
 }

@@ -273,6 +273,64 @@ public sealed class WidgetZOrderRestoreContractTests
         Assert.DoesNotContain("MoveToDesktopBottom", tryBring, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void StartupSettle_UsesAbsoluteDesktopBottomWhileInteractivePathsStayRelative()
+    {
+        string manager = File.ReadAllText(TestPaths.FromRepository(
+            "src/DeskBox/Services/WidgetManager.cs"));
+        string zOrder = File.ReadAllText(TestPaths.FromRepository(
+            "src/DeskBox/Services/WidgetManager.ZOrder.cs"));
+        string interaction = File.ReadAllText(TestPaths.FromRepository(
+            "src/DeskBox/Views/WidgetWindowBase.Interaction.cs"));
+        string app = File.ReadAllText(TestPaths.FromRepository(
+            "src/DeskBox/App.xaml.cs"));
+
+        // The startup presentation batch is the only raise that settles to the
+        // absolute desktop bottom, regardless of the login-time foreground.
+        Assert.Contains(
+            "RaiseVisibleWidgetsTemporarily(\"startup-restore\", absoluteSettle: true)",
+            manager,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "window.ForceRestoreDesktopLayerFromManager(absoluteSettle);",
+            zOrder,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "\"startup-explorer-desktop-ready\",",
+            app,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "absoluteDesktopBottom: true",
+            app,
+            StringComparison.Ordinal);
+
+        // The absolute branch bypasses the relative policy; the default branch
+        // must keep using it so interactive restores are unchanged.
+        string clearTopMost = SliceMethod(
+            interaction,
+            "protected void ClearTopMostOnly(bool absoluteDesktopBottom",
+            "// ── Drag logic");
+        Assert.Contains("WidgetLayerService.MoveToDesktopBottom(HWnd)", clearTopMost, StringComparison.Ordinal);
+        Assert.Contains("WidgetLayerService.ClearTopMostPreservingForeground(HWnd)", clearTopMost, StringComparison.Ordinal);
+
+        // A tray raise or in-flight interaction racing the startup refresh
+        // must not be flattened.
+        string refresh = SliceMethod(
+            manager,
+            "public void RefreshVisibleWidgetDesktopLayers(",
+            "private void ApplyAppearancePreview()");
+        Assert.Contains("absoluteDesktopBottom &&", refresh, StringComparison.Ordinal);
+        Assert.Contains("!_widgetsRaisedFromTray &&", refresh, StringComparison.Ordinal);
+        Assert.Contains("!IsWidgetInteractionActive;", refresh, StringComparison.Ordinal);
+
+        // Tray-session restore keeps the group-relative policy.
+        string trayRestore = SliceMethod(
+            manager,
+            "private void RestoreRaisedWidgetsToDesktopLayer(bool force)",
+            "public bool SetWidgetPositionLocked");
+        Assert.Contains("window.ForceRestoreDesktopLayerFromManager();", trayRestore, StringComparison.Ordinal);
+    }
+
     private static string SliceMethod(string source, string startMarker, string endMarker)
     {
         int start = source.IndexOf(startMarker, StringComparison.Ordinal);

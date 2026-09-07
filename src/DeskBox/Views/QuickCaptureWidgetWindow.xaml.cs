@@ -761,11 +761,11 @@ _isHideAnimationRunning = true;
         RestoreDesktopLayer(force: true);
     }
 
-    public void ForceRestoreDesktopLayerFromManager()
+    public void ForceRestoreDesktopLayerFromManager(bool absoluteDesktopBottom = false)
     {
         _restoreDesktopLayerWhenIdle = true;
         _keepRaisedUntilDeactivate = false;
-        RestoreDesktopLayer(force: true);
+        RestoreDesktopLayer(force: true, absoluteDesktopBottom: absoluteDesktopBottom);
     }
 
     private void SetupEventHandlers()

@@ -1,4 +1,4 @@
-﻿﻿using DeskBox.Models;
+﻿using DeskBox.Models;
 using DeskBox.Helpers;
 using DeskBox.Controls.WidgetContents;
 using DeskBox.ViewModels;
@@ -92,7 +92,7 @@ internal interface IDesktopWidgetWindow
     void CompleteCoordinatedMoveBoundsPreview();
     void ApplyCoordinatedMoveBoundsFallback(Windows.Graphics.RectInt32 bounds);
     void CompleteCoordinatedMoveParticipation(bool hasMoved, bool isSource);
-    void ForceRestoreDesktopLayerFromManager();
+    void ForceRestoreDesktopLayerFromManager(bool absoluteDesktopBottom = false);
     void RestoreDesktopLayerFromManager();
     Task WaitForFirstPresentedFrameAsync(CancellationToken cancellationToken);
     void SetGroupDropPreview(
@@ -705,11 +705,14 @@ public sealed partial class WidgetManager
         RefreshVisibleWidgetDesktopLayers("layer-mode-changed");
     }
 
-    public void RefreshVisibleWidgetDesktopLayers(string reason)
+    public void RefreshVisibleWidgetDesktopLayers(
+        string reason,
+        bool absoluteDesktopBottom = false)
     {
         if (!HasUiThreadAccess())
         {
-            App.UiDispatcherQueue.TryEnqueue(() => RefreshVisibleWidgetDesktopLayers(reason));
+            App.UiDispatcherQueue.TryEnqueue(
+                () => RefreshVisibleWidgetDesktopLayers(reason, absoluteDesktopBottom));
             return;
         }
 
@@ -720,6 +723,12 @@ public sealed partial class WidgetManager
             return;
         }
 
+        // A tray raise or an in-flight interaction that lands inside the
+        // startup settle window must not be flattened to the desktop bottom;
+        // fall back to the relative policy.
+        bool absolute = absoluteDesktopBottom &&
+            !_widgetsRaisedFromTray &&
+            !IsWidgetInteractionActive;
         ClearTemporaryRaiseLease(reason);
         foreach (var window in GetLoadedDesktopWindows())
         {
@@ -730,7 +739,7 @@ public sealed partial class WidgetManager
 
             try
             {
-                window.ForceRestoreDesktopLayerFromManager();
+                window.ForceRestoreDesktopLayerFromManager(absolute);
             }
             catch (Exception ex)
             {
@@ -850,7 +859,7 @@ public sealed partial class WidgetManager
         }
         else if (configs.Count > 0)
         {
-            RaiseVisibleWidgetsTemporarily("startup-restore");
+            RaiseVisibleWidgetsTemporarily("startup-restore", absoluteSettle: true);
             _sessionManager.MarkDesktopResting("restore-widgets");
             QueueVisibleGroupedFileIconRecoveryAfterStartup();
         }

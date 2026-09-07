@@ -1117,7 +1117,8 @@ public partial class App : Application
             $"[Startup] Applying deferred widget desktop layer " +
             $"explorerReady={explorerDesktopReady}");
         widgetManager.RefreshVisibleWidgetDesktopLayers(
-            "startup-explorer-desktop-ready");
+            "startup-explorer-desktop-ready",
+            absoluteDesktopBottom: true);
     }
 
     private void InitializeGlobalHotkeyService(LocalizationService localizationService)

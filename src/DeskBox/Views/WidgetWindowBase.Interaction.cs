@@ -188,7 +188,7 @@ public abstract partial class WidgetWindowBase
                Win32Helper.GetAncestor(foregroundWindow, Win32Helper.GA_ROOTOWNER) == HWnd;
     }
 
-    protected void RestoreDesktopLayer(bool force = false)
+    protected void RestoreDesktopLayer(bool force = false, bool absoluteDesktopBottom = false)
     {
         if (!WidgetTemporaryRaiseLeasePolicy.CanRestoreDesktopLayer(
                 Visible,
@@ -215,7 +215,7 @@ public abstract partial class WidgetWindowBase
         }
 
         CancelPendingDesktopLayerRestore();
-        ClearTopMostOnly();
+        ClearTopMostOnly(absoluteDesktopBottom);
         ApplyBackdropPreference();
     }
 
@@ -227,12 +227,24 @@ public abstract partial class WidgetWindowBase
         RestoreDesktopLayerWhenIdle = false;
     }
 
-    protected void ClearTopMostOnly()
+    protected void ClearTopMostOnly(bool absoluteDesktopBottom = false)
     {
         IsRaisedFromManager = false;
         IsAtDesktopLayer = true;
-        IntPtr foreground = WidgetLayerService.ClearTopMostPreservingForeground(HWnd);
-        App.LogVerbose($"[ZOrder] {LogPrefix} ClearTopMostOnly hwnd=0x{HWnd.ToInt64():X} fg=0x{foreground.ToInt64():X}");
+        if (absoluteDesktopBottom)
+        {
+            // Startup settle: ignore the foreground owner and rest directly on
+            // the desktop layer so widgets cannot stay floating above apps when
+            // a login-time window still holds the foreground.
+            WidgetLayerService.MoveToDesktopBottom(HWnd);
+            App.LogVerbose($"[ZOrder] {LogPrefix} ClearTopMostOnly absolute hwnd=0x{HWnd.ToInt64():X}");
+        }
+        else
+        {
+            IntPtr foreground = WidgetLayerService.ClearTopMostPreservingForeground(HWnd);
+            App.LogVerbose($"[ZOrder] {LogPrefix} ClearTopMostOnly hwnd=0x{HWnd.ToInt64():X} fg=0x{foreground.ToInt64():X}");
+        }
+
         App.Current.WidgetManager?.QueueIdleWidgetZOrderNormalization(
             $"{LogPrefix}-desktop-layer-restored");
     }
