@@ -1,13 +1,14 @@
-# Standalone x64 portable pipeline: manual dispatch only, fully isolated from
-# other workflows. Runs the authoritative scripts/publish-aot-retail.ps1 to
-# produce the AOT self-contained publish directory and zips it as an artifact.
-# Note: the GitHub UI dispatch button only appears after this file lands on the
-# default branch; on feature branches use
-# `gh workflow run portable-x64.yml --ref <branch>`.
+# Standalone x64 portable pipeline: runs on pushes to main and manual dispatch,
+# fully isolated from other workflows. Runs the authoritative
+# scripts/publish-aot-retail.ps1 to produce the AOT self-contained publish
+# directory and uploads it; the artifact download is the portable zip itself.
 name: Portable x64
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
 
 permissions:
   contents: read
@@ -42,25 +43,16 @@ jobs:
         shell: pwsh
         run: .\scripts\publish-aot-retail.ps1 -Platform x64
 
-      - name: Package portable zip
+      - name: Resolve package name
         shell: pwsh
         run: |
           $short = (git rev-parse --short HEAD).Trim()
-          $zip = "DeskBox_Portable_${short}_x64.zip"
-          Compress-Archive -Path ".\.artifacts\aot-retail\win-x64\publish\*" `
-            -DestinationPath $zip -CompressionLevel Optimal
-          if (-not (Test-Path -LiteralPath $zip -PathType Leaf)) {
-            throw "Portable zip artifact is missing: $zip"
-          }
-          Write-Output "ZIP_NAME=$zip" >> $env:GITHUB_ENV
+          Write-Output "ZIP_NAME=DeskBox_Portable_${short}_x64" >> $env:GITHUB_ENV
 
-      # summary.json rides along for provenance and validation cross-checks
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.ZIP_NAME }}
-          path: |
-            ${{ env.ZIP_NAME }}
-            .artifacts/aot-retail/win-x64/summary.json
+          path: .artifacts/aot-retail/win-x64/publish
           retention-days: 30
           if-no-files-found: error
