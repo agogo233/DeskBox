@@ -25,9 +25,9 @@
     <DeskBoxAotAudit Condition="'$(DeskBoxAotAudit)' == ''">false</DeskBoxAotAudit>
     <!-- Native AOT smoke scenarios are a test harness, never a retail default. -->
     <DeskBoxAotSmokeHarness Condition="'$(DeskBoxAotSmokeHarness)' == ''">false</DeskBoxAotSmokeHarness>
-    <!-- Build/package the selected native module for explicit JIT/AOT use;
-         ordinary JIT feature backends still default to C#. -->
-    <DeskBoxRustNative Condition="'$(DeskBoxRustNative)' == ''">false</DeskBoxRustNative>
+    <!-- Package signature verification requires the native crypto module in
+         both JIT and AOT builds. Feature backend selection remains separate. -->
+    <DeskBoxRustNative Condition="'$(DeskBoxRustNative)' == ''">true</DeskBoxRustNative>
     <!-- Stage 7C0 keeps CRT linkage explicit so A/B outputs cannot be reused
          across incompatible native dependency policies. -->
     <DeskBoxRustCrtLinkage Condition="'$(DeskBoxRustCrtLinkage)' == ''">Static</DeskBoxRustCrtLinkage>
@@ -187,6 +187,30 @@
     <PackageReference Include="Markdig" Version="1.3.2" />
   </ItemGroup>
 
+  <!--
+    Retail bundles the Windows App Runtime. WindowsAppSDKSelfContained must
+    stay project-local: as a command-line global it flows into every project
+    of the graph and the WindowsAppSDK targets reject it on the
+    DeskBox.Abstractions class library. The retail script passes the
+    DeskBoxRetailBundle marker global instead; this group sits after the
+    audit group so the marker wins over its framework-dependent default.
+  -->
+  <PropertyGroup Condition="'$(DeskBoxRetailBundle)' == 'true'">
+    <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+  </PropertyGroup>
+
+  <!--
+    Shared widget contracts (IWidgetContent family, WidgetConfig, descriptors,
+    chrome enums) live in the Abstractions assembly; namespaces are unchanged
+    so all consumers compile without using-directive edits (pluginization
+    roadmap section 7, stage 1). GlobalPropertyToRemove stops the retail
+    WindowsAppSDKSelfContained=true global property from flowing into the
+    class library, which the WindowsAppSDK targets reject.
+  -->
+  <ItemGroup>
+    <ProjectReference Include="..\DeskBox.Abstractions\DeskBox.Abstractions.csproj" GlobalPropertyToRemove="WindowsAppSDKSelfContained" />
+  </ItemGroup>
+
   <ItemGroup>
     <None Remove="ThirdParty\Everything\Everything64.dll" />
     <None Remove="ThirdParty\Everything\EverythingARM64.dll" />
@@ -204,6 +228,10 @@
     </Content>
     <None Update="ThirdParty\Everything\LICENSE.txt">
       <TargetPath>ThirdParty\Everything\LICENSE.txt</TargetPath>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </None>
+    <None Update="ThirdParty\PluginCrypto\NOTICES.txt">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
     </None>

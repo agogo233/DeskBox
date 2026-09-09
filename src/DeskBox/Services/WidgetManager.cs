@@ -1,4 +1,5 @@
-﻿using DeskBox.Models;
+﻿using DeskBox.Contracts;
+using DeskBox.Models;
 using DeskBox.Helpers;
 using DeskBox.Controls.WidgetContents;
 using DeskBox.ViewModels;
@@ -13,11 +14,6 @@ public sealed record ManagedStorageMigrationResult(
     int AffectedWidgetCount,
     string OldRootPath,
     string NewRootPath);
-
-public sealed record QuickCaptureFileWidgetTarget(
-    string WidgetId,
-    string Name,
-    string FolderPath);
 
 public enum WidgetRemovalAction
 {
@@ -105,9 +101,16 @@ internal interface IDesktopWidgetWindow
 }
 
 /// <summary>
-/// Manages the lifecycle of all desktop organizer widgets.
+/// Manages the lifecycle of all desktop organizer widgets. Implements the
+/// stage 3b host-internal capability ports (pluginization roadmap stage 3)
+/// while their implementations still live here - callers depend on the
+/// Contracts interfaces, physical extraction is deferred until the
+/// dependency set is stable.
 /// </summary>
-public sealed partial class WidgetManager
+public sealed partial class WidgetManager :
+    ITodoReminderPresenter,
+    IFileWidgetImportTarget,
+    IFeatureStateEvents
 {
     private const string ManagedShortcutDescriptionPrefix = "DeskBox mapped widget shortcut:";
 
@@ -1639,6 +1642,20 @@ public sealed partial class WidgetManager
                 if (!hasRemainingGlanceWidget)
                 {
                     SetFeatureWidgetEnabledState(WidgetKind.Glance, false);
+                }
+            }
+            else if (config.WidgetKind == WidgetKind.Todo)
+            {
+                // Todo widgets can coexist; deleting one removes its store and
+                // attachments, and only disables the feature when the last
+                // instance goes away (mirroring the Glance branch above).
+                await TodoWidgetStore.DeleteForWidgetAsync(config.Id);
+                bool hasRemainingTodoWidget = _settingsService.Settings.Widgets.Any(widget =>
+                    widget.WidgetKind == WidgetKind.Todo &&
+                    !IsDeleted(widget.Id));
+                if (!hasRemainingTodoWidget)
+                {
+                    SetFeatureWidgetEnabledState(WidgetKind.Todo, false);
                 }
             }
             else

@@ -1,6 +1,7 @@
 using DeskBox.Contracts;
 using DeskBox.Controls.WidgetContents;
 using DeskBox.Models;
+using DeskBox.Services.Plugins;
 using Microsoft.UI.Xaml;
 
 namespace DeskBox.Services;
@@ -18,6 +19,8 @@ public sealed class WidgetContentFactory
     {
         _localizationService = localizationService;
         _contentProviders = CreateContentProviders();
+        // Install the native dev package at app startup (D2 chain proof).
+        NativeWidgetPilot.Initialize();
     }
 
     private static readonly IReadOnlyList<WidgetContentDescriptor> DescriptorList =
@@ -182,6 +185,15 @@ public sealed class WidgetContentFactory
             settingsService,
             todoStoreFactory,
             GetDescriptor);
+
+        // Development pilot seam (infrastructure-owned, env-gated, default off):
+        // native package content wins for the piloted kind; any failure or
+        // absence falls through to the built-in provider path.
+        if (config.WidgetKind == WidgetKind.Glance &&
+            NativeWidgetPilot.TryCreate(config, out IWidgetContent? pilotContent))
+        {
+            return pilotContent!;
+        }
         return provider.CreateDetachedContent(config, context);
     }
 
