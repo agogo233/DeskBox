@@ -71,6 +71,30 @@ internal struct NativeHostApiV1
     public nint SetConfigChangedHandler;
 }
 
+/// <summary>
+/// Versioned host→package lifecycle event payload (ABI v4). Must stay
+/// layout-identical to the package-side DeskBoxWidgetEventV1 (pinned by
+/// NativeWidgetLifecycleAbiTests). Append-only: future payload fields
+/// consume Reserved slots or grow Size with a Version bump; existing
+/// fields are never reordered or repurposed.
+/// </summary>
+[StructLayout(LayoutKind.Sequential)]
+internal struct NativeWidgetEventV1
+{
+    public uint Size;
+    public uint Version;
+    public uint Kind;
+    public uint Flags;
+    public double Width;
+    public double Height;
+    public ulong Reserved0;
+    public ulong Reserved1;
+    public ulong Reserved2;
+    public ulong Reserved3;
+
+    public const uint CurrentVersion = 1;
+}
+
 /// <summary>Host-side callbacks exposed to native packages via the HostApi table.</summary>
 internal static unsafe class NativeHostApiBridge
 {
@@ -133,7 +157,7 @@ internal static unsafe class NativeHostApiBridge
 }
 
 /// <summary>
-/// Batch C1 runtime contract (ABI v2): one session per loaded module identity
+/// Batch C1 runtime contract (ABI v4): one session per loaded module identity
 /// (publisher + packageId + contentHash), activated exactly once; widget
 /// instances are created per (contribution, instance) pair and destroyed by
 /// opaque handle; the last successful destroy shuts the package down. NativeAOT
@@ -144,7 +168,7 @@ internal static unsafe class NativeHostApiBridge
 /// </summary>
 internal static class NativeWidgetRuntimeManager
 {
-    public const int RequiredAbiVersion = 2;
+    public const int RequiredAbiVersion = 4;
     public const string NativeRuntimeType = "native";
     private static readonly object Gate = new();
     private static readonly Dictionary<string, NativePackageSession> Sessions = [];
@@ -295,6 +319,33 @@ internal sealed class NativeWidgetLease : IDisposable
     }
 
     void IDisposable.Dispose() => NativeWidgetRuntimeManager.Release(this);
+
+    /// <summary>Forward a host lifecycle event to the package (no-op if the package has no event export).</summary>
+    internal void InvokeWidgetEvent(WidgetLifecycleEventKind kind, double width, double height, uint flags)
+    {
+        _session.SendWidgetEvent(_handle, kind, width, height, flags);
+    }
+}
+
+/// <summary>Typed host→package lifecycle events (ABI v4, audit rounds 15-17). Wire
+/// values are pinned against the package-side constants by NativeWidgetLifecycleAbiTests.</summary>
+internal enum WidgetLifecycleEventKind : uint
+{
+    RefreshRequested = 1,
+    AppearanceChanged = 2,
+    Activated = 3,
+    Deactivated = 4,
+    VisibilityChanged = 5,     // flags bit 0: 1=visible, 0=hidden
+    RevealCompleted = 6,
+    LongHidden = 7,
+    CompactStateChanged = 8,   // flags bit 0: 1=collapsed, 0=expanded
+    ViewportChanged = 9,       // width/height carry the new size
+    PerformanceSettingsChanged = 10,
+    InteractiveResizeBegin = 11,
+    InteractiveResizeEnd = 12,
+    ResponsiveLayoutBegin = 13,   // capsule/breakpoint transition (not user drag)
+    ResponsiveLayoutComplete = 14,
+    ResponsiveLayoutCancel = 15,
 }
 
 internal sealed unsafe class NativePackageSession
@@ -303,6 +354,7 @@ internal sealed unsafe class NativePackageSession
     private readonly nint _createExport;
     private readonly nint _destroyExport;
     private readonly nint _shutdownExport;
+    private readonly nint _widgetEventExport; // required export at ABI v4
     private readonly object _instanceGate = new();
     private readonly HashSet<nint> _liveHandles = [];
 
@@ -313,7 +365,8 @@ internal sealed unsafe class NativePackageSession
         nint activateExport,
         nint createExport,
         nint destroyExport,
-        nint shutdownExport)
+        nint shutdownExport,
+        nint widgetEventExport)
     {
         Identity = identity;
         PackageRoot = packageRoot;
@@ -322,6 +375,7 @@ internal sealed unsafe class NativePackageSession
         _createExport = createExport;
         _destroyExport = destroyExport;
         _shutdownExport = shutdownExport;
+        _widgetEventExport = widgetEventExport;
     }
 
     internal NativePackageIdentity Identity { get; }
@@ -416,12 +470,48 @@ internal sealed unsafe class NativePackageSession
         return true;
     }
 
+    /// <summary>Forward a lifecycle event through the versioned ABI v4 payload
+    /// struct; logs when the package reports failure.</summary>
+    internal unsafe void SendWidgetEvent(nint handle, WidgetLifecycleEventKind kind, double width, double height, uint flags)
+    {
+        if (_widgetEventExport == 0) return;
+        try
+        {
+            NativeWidgetEventV1 payload = new()
+            {
+                Size = (uint)sizeof(NativeWidgetEventV1),
+                Version = NativeWidgetEventV1.CurrentVersion,
+                Kind = (uint)kind,
+                Flags = flags,
+                Width = width,
+                Height = height,
+            };
+            var send = (delegate* unmanaged[Cdecl]<nint, NativeWidgetEventV1*, int>)_widgetEventExport;
+            int status = send(handle, &payload);
+            if (status != 0)
+            {
+                App.LogVerbose($"[NativePackage] widget event {kind} returned 0x{status:X8}");
+            }
+        }
+        catch (Exception error)
+        {
+            App.LogVerbose($"[NativePackage] widget event {kind} failed: {error.Message}");
+        }
+    }
+
     internal void Shutdown()
     {
         try
         {
-            ((delegate* unmanaged[Cdecl]<int>)_shutdownExport)();
-            App.Log($"[NativePackage] session shut down: {Identity.Key}");
+            int status = ((delegate* unmanaged[Cdecl]<int>)_shutdownExport)();
+            if (status != 0)
+            {
+                App.Log($"[NativePackage] shutdown reported 0x{status:X8} for {Identity.Key}; the package still holds state (lifecycle bug upstream)");
+            }
+            else
+            {
+                App.Log($"[NativePackage] session shut down: {Identity.Key}");
+            }
         }
         catch (Exception error)
         {
@@ -430,16 +520,18 @@ internal sealed unsafe class NativePackageSession
     }
 }
 
-/// <summary>Module loading + ABI resolution for the runtime manager (ABI v2).</summary>
+/// <summary>Module loading + ABI resolution for the runtime manager (ABI v4).</summary>
 internal static class NativeWidgetPackageLoader
 {
     public const string DevelopmentPackageEnvironmentVariable = "DESKBOX_DEV_NATIVE_GLANCE";
     public const string DevelopmentPackageDllFileName = "DeskBox.Glance.NativePackage.dll";
     public const string ProductEntryModuleFileName = "package.dll";
-    public const string DevelopmentPublisherFingerprint = "dev-pilot";
-    public const string DevelopmentContentHash = "dev";
 
-    /// <summary>Path validation only - no module loading (unit-testable).</summary>
+    /// <summary>
+    /// Path validation only - no module loading (unit-testable). Compiled in
+    /// all configurations on purpose: it stays inert unless a pilot-gated
+    /// caller consumes it. Release builds have no such caller.
+    /// </summary>
     public static string? TryGetDevelopmentPackageRoot()
     {
         string? configured = Environment.GetEnvironmentVariable(DevelopmentPackageEnvironmentVariable);
@@ -460,6 +552,13 @@ internal static class NativeWidgetPackageLoader
         }
     }
 
+#if DESKBOX_NATIVE_DEV_PILOT
+    // Raw-directory load identity. Pilot builds only (audit round 17): the
+    // descriptor builder and its constants compile out of Release so no
+    // unverified module path can be constructed outside the B1 pipeline.
+    public const string DevelopmentPublisherFingerprint = "dev-pilot";
+    public const string DevelopmentContentHash = "dev";
+
     public static NativePackageDescriptor CreateDevelopmentDescriptor(string packageRoot)
     {
         string packageId = new DirectoryInfo(packageRoot).Name;
@@ -470,6 +569,7 @@ internal static class NativeWidgetPackageLoader
             packageRoot,
             DevelopmentPackageDllFileName);
     }
+#endif
 
     internal static unsafe NativePackageSession? TryOpenSession(NativePackageDescriptor descriptor, string dataDirectory)
     {
@@ -483,9 +583,10 @@ internal static class NativeWidgetPackageLoader
                 !TryGetExport(module, "deskbox_package_activate", out nint activateExport) ||
                 !TryGetExport(module, "deskbox_widget_create", out nint createExport) ||
                 !TryGetExport(module, "deskbox_widget_destroy", out nint destroyExport) ||
-                !TryGetExport(module, "deskbox_package_shutdown", out nint shutdownExport))
+                !TryGetExport(module, "deskbox_package_shutdown", out nint shutdownExport) ||
+                !TryGetExport(module, "deskbox_widget_event", out nint widgetEventExport))
             {
-                App.LogVerbose("[NativePackage] unified ABI v2 exports missing");
+                App.LogVerbose("[NativePackage] unified ABI v4 exports missing");
                 return null;
             }
             int version = ((delegate* unmanaged[Cdecl]<int>)versionExport)();
@@ -496,7 +597,7 @@ internal static class NativeWidgetPackageLoader
             }
             var session = new NativePackageSession(
                 descriptor.Identity, descriptor.PackageRoot, packageDataRoot,
-                activateExport, createExport, destroyExport, shutdownExport);
+                activateExport, createExport, destroyExport, shutdownExport, widgetEventExport);
             NativePackageSession.Activate(session);
             return session;
         }

@@ -148,28 +148,65 @@ public sealed class PluginPackageManager
     public NativeInstalledPackageHandle? TryCreateNativeHandle(string packageId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(packageId);
-        InstalledPackageRecord? record = Find(packageId);
+        // Read the registry without full verification (single-verify pattern,
+        // audit round 14). Publisher trust and identity binding are checked
+        // AFTER verification below (audit round 15 P0).
+        InstalledPackageRecord? record = null;
+        lock (_lock)
+        {
+            try
+            {
+                record = LoadRegistry().FirstOrDefault(r => r.PackageId == packageId);
+            }
+            catch (Exception error) when (IsStorageFailure(error)) { return null; }
+        }
         if (record is null || record.Runtime != NativeWidgetRuntimeManager.NativeRuntimeType) return null;
-        // Native packages are in-process full-trust code; Development-mode
-        // records are refused unless the explicit dev override is set (audit
-        // round 13 §5: a valid signature alone is insufficient - the publisher
-        // must be trusted, which Development-mode records skip by design).
         if (record.IsDevelopment &&
             Environment.GetEnvironmentVariable("DESKBOX_ALLOW_UNTRUSTED_NATIVE_DEV") != "1")
         {
             return null;
         }
+        // Publisher authorization (audit round 15 P0: in-process full-trust
+        // native code must never be activated on signature validity alone).
+        if (!record.IsDevelopment && !_trustedPublishers.Contains(record.PublisherFingerprint)) return null;
         string installRoot = ResolveInstallPath(record);
-        // Re-verify the installed content and rebuild the typed model; the
-        // runtime needs the actual EntryMain, not a hardcoded DLL name.
+        // Single verification pass with the ACTUAL content hash from disk.
         PluginPackageVerifier.VerificationResult verification = PluginPackageVerifier.Verify(installRoot, PluginPackageVerificationPolicy.Store);
         if (!verification.IsValid) return null;
         try
         {
+            // Use the actual verified content hash, not the registry value
+            // (audit round 15 P0: registry hash may be stale or tampered).
+            string actualContentHash = PluginPackageVerifier.Sha256HexFile(
+                Path.Combine(installRoot, "package.integrity"));
             using var document = System.Text.Json.JsonDocument.Parse(
                 System.IO.File.ReadAllText(Path.Combine(installRoot, "manifest.json")));
-            VerifiedPluginPackage? verified = BuildVerifiedModel(document.RootElement, record.ContentHash);
+            VerifiedPluginPackage? verified = BuildVerifiedModel(document.RootElement, actualContentHash);
             if (verified is null) return null;
+            // Identity binding: the verified package must match the registry
+            // record on all identity dimensions (audit round 15 P0).
+            if (!string.Equals(verified.PackageId, record.PackageId, StringComparison.Ordinal) ||
+                !string.Equals(verified.PublisherFingerprint, record.PublisherFingerprint, StringComparison.Ordinal) ||
+                !string.Equals(verified.Version, record.Version, StringComparison.Ordinal) ||
+                !string.Equals(verified.Runtime, record.Runtime, StringComparison.Ordinal) ||
+                !string.Equals(verified.ContentHash, record.ContentHash, StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+            // Compatibility gate: architecture must match the running host process.
+            if (verified.EntryArchitecture is { } arch)
+            {
+                string hostArch = System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture switch
+                {
+                    System.Runtime.InteropServices.Architecture.X64 => "x64",
+                    System.Runtime.InteropServices.Architecture.Arm64 => "arm64",
+                    _ => "unsupported",
+                };
+                if (!string.Equals(arch, hostArch, StringComparison.OrdinalIgnoreCase))
+                {
+                    return null;
+                }
+            }
             return new NativeInstalledPackageHandle(record, verified, installRoot);
         }
         catch
@@ -308,8 +345,8 @@ public sealed class PluginPackageManager
                 contributions.Add(new VerifiedContribution(
                     contribution.GetProperty("id").GetString()!,
                     contribution.GetProperty("displayName").GetString()!,
-                    // Template is optional for runtime:native (native renders via its own DLL).
-                    contribution.TryGetProperty("template", out JsonElement templateElement) ? templateElement.GetString()! : "native",
+                    // Template is nullable: null for runtime:native (renders via its own DLL).
+                    contribution.TryGetProperty("template", out JsonElement templateElement) ? templateElement.GetString() : null,
                     payloadFields,
                     bindings)
                 {
@@ -317,7 +354,12 @@ public sealed class PluginPackageManager
                     DefaultSize = contribution.TryGetProperty("defaultSize", out JsonElement size)
                         ? new VerifiedWidgetSize(size.GetProperty("width").GetInt32(), size.GetProperty("height").GetInt32()) : null,
                     ActivationEvents = contribution.TryGetProperty("activationEvents", out JsonElement activation)
-                        ? activation.EnumerateArray().Select(e => e.GetString()!).ToArray() : []
+                        ? activation.EnumerateArray().Select(e => e.GetString()!).ToArray() : [],
+                    UnavailableFallback = contribution.TryGetProperty("fallback", out JsonElement fallbackElement) && fallbackElement.ValueKind == JsonValueKind.Object
+                        ? new VerifiedContributionFallback(
+                            fallbackElement.TryGetProperty("template", out JsonElement fbTemplate) ? fbTemplate.GetString() ?? "status" : "status",
+                            fallbackElement.TryGetProperty("message", out JsonElement fbMessage) ? fbMessage.GetString() : null)
+                        : null,
                 });
             }
 
@@ -341,6 +383,11 @@ public sealed class PluginPackageManager
                             entry.TryGetProperty("main", out JsonElement main) &&
                             main.ValueKind == JsonValueKind.String
                     ? main.GetString()
+                    : null,
+                EntryArchitecture = root.TryGetProperty("entry", out JsonElement entryArch) &&
+                            entryArch.TryGetProperty("architecture", out JsonElement arch) &&
+                            arch.ValueKind == JsonValueKind.String
+                    ? arch.GetString()
                     : null
             };
         }
