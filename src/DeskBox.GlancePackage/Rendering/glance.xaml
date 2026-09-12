@@ -27,20 +27,116 @@
         </ResourceDictionary>
     </Grid.Resources>
 
-    <Grid x:Name="BackgroundImageLayer" IsHitTestVisible="False">
-        <Border x:Name="BackgroundA" Opacity="0" />
-        <Border x:Name="BackgroundB" Opacity="0" />
+        <Grid x:Name="BackgroundImageLayer" IsHitTestVisible="False">
+            <Border
+                x:Name="BackgroundA"
+                Opacity="0"
+                RenderTransformOrigin="0.5,0.5">
+                <Border.RenderTransform>
+                    <CompositeTransform />
+                </Border.RenderTransform>
+            </Border>
+            <Border
+                x:Name="BackgroundB"
+                Opacity="0"
+                RenderTransformOrigin="0.5,0.5">
+                <Border.RenderTransform>
+                    <CompositeTransform />
+                </Border.RenderTransform>
+            </Border>
+        </Grid>
+        <Border
+            x:Name="ReadabilityLayer"
+            Background="Black"
+            IsHitTestVisible="False"
+            Opacity="0" />
+        <Border
+            x:Name="CalendarReadabilityLayer"
+            Background="{StaticResource SolidBackgroundFillColorBaseBrush}"
+            IsHitTestVisible="False"
+            Opacity="0" />
+        <Border
+            x:Name="NonCalendarGradientLayer"
+            IsHitTestVisible="False"
+            Opacity="0.34"
+            Visibility="Collapsed">
+            <Border.Background>
+                <LinearGradientBrush StartPoint="0.5,0" EndPoint="0.5,1">
+                    <GradientStop Color="#00000000" Offset="0.34" />
+                    <GradientStop Color="#78000000" Offset="1" />
+                </LinearGradientBrush>
+            </Border.Background>
+        </Border>
+
+    <Grid
+        x:Name="ImageForegroundThemeScope"
+        Padding="20,22,20,18"
+        Visibility="{Binding ForegroundVisibility}">
+        <StackPanel
+            x:Name="ImmersiveLayoutRoot"
+            HorizontalAlignment="Left"
+            VerticalAlignment="Bottom"
+            Spacing="-2"
+            Visibility="{Binding ImmersiveVisibility}">
+            <TextBlock
+                FontFamily="{Binding TimeFontFamily}"
+                FontSize="{Binding TimeFontSize}"
+                FontWeight="SemiBold"
+                Foreground="{StaticResource TextFillColorPrimaryBrush}"
+                IsTextSelectionEnabled="False"
+                Text="{Binding TimeText}"
+                Typography.NumeralAlignment="Tabular"
+                Visibility="{Binding TimeVisibility}" />
+            <StackPanel Orientation="Horizontal" Spacing="8">
+                <TextBlock FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource TextFillColorPrimaryBrush}" Text="{Binding DateText}" Typography.NumeralAlignment="Tabular" Visibility="{Binding DateVisibility}" />
+                <TextBlock FontSize="14" Foreground="{StaticResource TextFillColorSecondaryBrush}" Text="{Binding WeekdayText}" Visibility="{Binding WeekdayVisibility}" />
+            </StackPanel>
+        </StackPanel>
+
+        <StackPanel
+            x:Name="CenteredLayoutRoot"
+            HorizontalAlignment="Center"
+            VerticalAlignment="Center"
+            Spacing="2"
+            Visibility="{Binding CenteredVisibility}">
+            <TextBlock
+                HorizontalAlignment="Center"
+                FontFamily="{Binding TimeFontFamily}"
+                FontSize="{Binding TimeFontSize}"
+                FontWeight="SemiBold"
+                Foreground="{StaticResource TextFillColorPrimaryBrush}"
+                IsTextSelectionEnabled="False"
+                Text="{Binding TimeText}"
+                Typography.NumeralAlignment="Tabular"
+                Visibility="{Binding TimeVisibility}" />
+            <StackPanel HorizontalAlignment="Center" Orientation="Horizontal" Spacing="8">
+                <TextBlock FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource TextFillColorPrimaryBrush}" Text="{Binding DateText}" Typography.NumeralAlignment="Tabular" Visibility="{Binding DateVisibility}" />
+                <TextBlock FontSize="14" Foreground="{StaticResource TextFillColorSecondaryBrush}" Text="{Binding WeekdayText}" Visibility="{Binding WeekdayVisibility}" />
+            </StackPanel>
+        </StackPanel>
+
+        <Grid x:Name="EditorialLayoutRoot" Visibility="{Binding EditorialVisibility}">
+            <StackPanel HorizontalAlignment="Left" VerticalAlignment="Top" Spacing="2">
+                <TextBlock FontSize="16" FontWeight="SemiBold" Foreground="{StaticResource TextFillColorPrimaryBrush}" Text="{Binding DateText}" Visibility="{Binding DateVisibility}" />
+                <TextBlock FontSize="13" Foreground="{StaticResource TextFillColorSecondaryBrush}" Text="{Binding WeekdayText}" Visibility="{Binding WeekdayVisibility}" />
+            </StackPanel>
+            <TextBlock
+                HorizontalAlignment="Right"
+                VerticalAlignment="Bottom"
+                FontFamily="{Binding TimeFontFamily}"
+                FontSize="{Binding CompactTimeFontSize}"
+                FontWeight="SemiBold"
+                Foreground="{StaticResource TextFillColorPrimaryBrush}"
+                Text="{Binding TimeText}"
+                Typography.NumeralAlignment="Tabular"
+                Visibility="{Binding TimeVisibility}" />
+        </Grid>
     </Grid>
 
-    <Border
-        x:Name="ReadabilityLayer"
-        Background="Black"
-        IsHitTestVisible="False"
-        Opacity="0.42" />
-
-    <Grid x:Name="CalendarLayoutRoot" Padding="20,22,20,18">
-        <Border
-            x:Name="CalendarGlassSurface"
+    <Grid x:Name="CalendarLayoutRoot" Padding="20,22,20,18" Visibility="{Binding CalendarSurfaceVisibility}">
+                <Border
+                    x:Name="CalendarGlassSurface"
+                    Visibility="{Binding CalendarSurfaceVisibility}"
             Height="{Binding CalendarPanelHeight}"
             HorizontalAlignment="Center"
             Margin="-6,0,-6,0"
@@ -59,8 +155,12 @@
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="*" />
                     </Grid.RowDefinitions>
-                    <Grid Grid.Row="0" Height="27" Margin="13,7,6,0" Visibility="Collapsed">
-                        <TextBlock x:Name="CompactTimeText" Margin="0,5,0,-5" HorizontalAlignment="Left" FontSize="22" FontWeight="SemiBold" Foreground="{StaticResource TextFillColorPrimaryBrush}" LineHeight="26" LineStackingStrategy="BlockLineHeight" Text="{Binding TimeText}" Typography.NumeralAlignment="Tabular" />
+                    <Grid Grid.Row="0" Height="27" Margin="13,7,6,0" Visibility="{Binding CalendarHeaderVisibility}">
+                        <TextBlock x:Name="CompactTimeText" Margin="0,5,0,-5" HorizontalAlignment="Left" FontSize="22" FontWeight="SemiBold" Foreground="{StaticResource TextFillColorPrimaryBrush}" LineHeight="26" LineStackingStrategy="BlockLineHeight" Text="{Binding TimeText}" Typography.NumeralAlignment="Tabular" Visibility="{Binding TimeVisibility}" />
+                        <StackPanel Margin="0,5,0,-5" HorizontalAlignment="Right" VerticalAlignment="Top">
+                            <TextBlock HorizontalAlignment="Right" FontSize="10" FontWeight="SemiBold" Foreground="{StaticResource TextFillColorPrimaryBrush}" LineHeight="12" LineStackingStrategy="BlockLineHeight" Text="{Binding CompactCalendarDateText}" Typography.NumeralAlignment="Tabular" Visibility="{Binding DateVisibility}" />
+                            <TextBlock HorizontalAlignment="Right" FontSize="9.5" Foreground="{StaticResource TextFillColorSecondaryBrush}" LineHeight="11" LineStackingStrategy="BlockLineHeight" Text="{Binding WeekdayText}" Visibility="{Binding WeekdayVisibility}" />
+                        </StackPanel>
                     </Grid>
                     <Grid Grid.Row="1">
                         <CalendarView

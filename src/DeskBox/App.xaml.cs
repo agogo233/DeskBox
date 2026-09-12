@@ -889,6 +889,15 @@ public partial class App : Application
 
         try
         {
+            // Official-package bindings (audit round 20 §18): one registration
+            // per official package — the generic pilot, data sync, and HostApi
+            // write-through resolve everything feature-specific through this
+            // registry, so adding a package never branches the plugin layer.
+            DeskBox.Services.Plugins.PackageBindingRegistry.Register(
+                new DeskBox.Services.Plugins.OfficialPackageBinding(
+                    DeskBox.Models.WidgetKind.Glance, "deskbox.glance", "glance",
+                    DeskBox.Services.GlanceInstanceMigration.Instance));
+
             // Dev native package bootstrap: install through the B1 pipeline
             // once at startup when DESKBOX_DEV_NATIVE_GLANCE points at a
             // package directory. Compiled only with EnableDeskBoxNativeDevPilot.
@@ -936,6 +945,11 @@ public partial class App : Application
             ThemeService = Services.GetRequiredService<ThemeService>();
             LocalizationService = Services.GetRequiredService<LocalizationService>();
             LocalizationService.LanguageChanged += OnLanguageChanged;
+            // Live config push to activated native packages (audit 20 §23):
+            // language changes re-fire every registered config-changed
+            // callback so native widgets rebuild on the new locale at once.
+            LocalizationService.LanguageChanged += static () =>
+                DeskBox.Services.Plugins.NativeHostApiBridge.PushConfigChanged();
 
             var quickCaptureService = QuickCaptureService;
             var themeService = ThemeService;

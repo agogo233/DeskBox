@@ -1,146 +1,104 @@
+using System.Globalization;
 using System.Text.Json;
+using DeskBox.GlancePackage.Services;
 using DeskBox.Models;
-using DeskBox.Services;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using Microsoft.UI.Xaml.Markup;
 using Microsoft.UI.Xaml.Media;
-using WinRT;
 
 namespace DeskBox.GlancePackage.Rendering;
 
 /// <summary>
-/// Builds the Glance widget view from runtime text XAML, driven by
-/// production business services (layout calculator, traditional calendar,
-/// festival service) linked from the host during the D3 transition.
+/// Static construction helpers for the glance widget view; the live
+/// instance state (timers, lifecycle, settings) lives in
+/// GlanceWidgetController (audit rounds 18-19).
 /// </summary>
 internal static class GlanceViewBuilder
 {
-    public static FrameworkElement Create(string packageRoot, string contributionId, string instanceId, string instanceDataRoot)
+    private static readonly string[] ImageExtensions = [".png", ".jpg", ".jpeg", ".webp", ".bmp"];
+
+    internal static string[] LoadImages(GlanceWidgetData settings, string packageRoot)
     {
-        // Build the month data through production services.
-        var state = GlancePackageState.LoadOrCreate(instanceDataRoot);
-        (GlanceCalendarMonth month, bool isCompact, double panelHeight, double panelWidth, double dayItemHeight, bool showSecondary) = GlanceMonthPipeline.Build(state.ShowTraditional, state.ShowFestivals);
-
-        var presentation = GlanceMonthPipeline.CreatePresentation(month, isCompact, panelHeight, panelWidth);
-        FrameworkElement content = (FrameworkElement)XamlReader.Load(
-            File.ReadAllText(Path.Combine(packageRoot, "glance.xaml")));
-        content.DataContext = presentation;
-
-        // Calendar day decoration (single subscription, mutable state).
-        var calendarView = content.FindName("NativeCalendarView").As<CalendarView>();
-        var decoration = new CalendarDecorationState(month, dayItemHeight, state.ShowTraditional, state.ShowFestivals);
-        SubscribeDayDecoration(calendarView, decoration);
-
-        // Background image rotation from package-local backgrounds/ folder.
-        string[] images = LoadImages(Path.Combine(packageRoot, "backgrounds"));
-        var backgroundA = content.FindName("BackgroundA").As<Border>();
-        var backgroundB = content.FindName("BackgroundB").As<Border>();
-        bool showingA = true;
-        void Show(int index)
+        IEnumerable<string> files = settings.BackgroundSource switch
         {
-            if (images.Length == 0) return;
-            state.ImageIndex = ((index % images.Length) + images.Length) % images.Length;
-            var brush = new ImageBrush { ImageSource = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(new Uri(images[state.ImageIndex])), Stretch = Stretch.UniformToFill };
-            Border next = showingA ? backgroundB : backgroundA;
-            Border fadeOut = showingA ? backgroundA : backgroundB;
-            next.Background = brush;
-            next.Opacity = 1;
-            fadeOut.Opacity = 0;
-            showingA = !showingA;
+            // Explicit file list: user order is meaningful, never re-sort.
+            GlanceBackgroundSource.LocalFiles => settings.LocalImagePaths.Where(File.Exists),
+            GlanceBackgroundSource.LocalFolder when !string.IsNullOrWhiteSpace(settings.LocalFolderPath) &&
+                                                    Directory.Exists(settings.LocalFolderPath)
+                => EnumerateImageFiles(settings.LocalFolderPath),
+            _ => BundledBackgrounds(packageRoot, settings.BackgroundSource),
+        };
+        string[] images = files.ToArray();
+        if (settings.RandomOrder && images.Length > 1)
+        {
+            // Approximate random rotation with a per-load shuffle.
+            for (int index = images.Length - 1; index > 0; index--)
+            {
+                int swap = Random.Shared.Next(index + 1);
+                (images[swap], images[index]) = (images[index], images[swap]);
+            }
         }
-        Show(state.ImageIndex);
-
-        var timer = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread().CreateTimer();
-        timer.Interval = TimeSpan.FromSeconds(3);
-        timer.Tick += (_, _) => { if (!state.Paused) Show(state.ImageIndex + 1); };
-        if (!state.Paused && images.Length > 1) timer.Start();
-        content.Unloaded += (_, _) => timer.Stop();
-
-        // Action bar.
-        var pauseButton = content.FindName("PauseButton").As<Button>();
-        void TogglePause()
-        {
-            state.Paused = !state.Paused;
-            if (state.Paused) timer.Stop();
-            else if (images.Length > 1) timer.Start();
-        }
-        pauseButton.Click += (_, _) => TogglePause();
-        var nextButton = content.FindName("NextButton").As<Button>();
-        nextButton.Click += (_, _) => Show(state.ImageIndex + 1);
-
-        // Settings panel (in-namescope for host-side probes).
-        var settingsLayer = content.FindName("SettingsLayer").As<FrameworkElement>();
-        var festivalToggle = content.FindName("FestivalToggle").As<ToggleSwitch>();
-        var traditionalToggle = content.FindName("TraditionalToggle").As<ToggleSwitch>();
-        festivalToggle.IsOn = state.ShowFestivals;
-        traditionalToggle.IsOn = state.ShowTraditional;
-        festivalToggle.Toggled += (_, _) =>
-        {
-            state.ShowFestivals = festivalToggle.IsOn;
-            RebuildMonth(decoration, state);
-            state.Save(instanceDataRoot);
-        };
-        traditionalToggle.Toggled += (_, _) =>
-        {
-            state.ShowTraditional = traditionalToggle.IsOn;
-            RebuildMonth(decoration, state);
-            state.Save(instanceDataRoot);
-        };
-
-        // Right-click menu (code-built: runtime XAML cannot wire handlers).
-        var menu = new MenuFlyout();
-        var nextItem = new MenuFlyoutItem { Text = "下一张背景" };
-        nextItem.Click += (_, _) => Show(state.ImageIndex + 1);
-        var pauseItem = new MenuFlyoutItem { Text = "暂停轮播" };
-        pauseItem.Click += (_, _) => TogglePause();
-        var settingsItem = new MenuFlyoutItem { Text = "设置" };
-        settingsItem.Click += (_, _) =>
-        {
-            settingsLayer.Visibility = settingsLayer.Visibility == Visibility.Visible
-                ? Visibility.Collapsed : Visibility.Visible;
-        };
-        menu.Items.Add(nextItem);
-        menu.Items.Add(pauseItem);
-        menu.Items.Add(settingsItem);
-        content.ContextFlyout = menu;
-
-        return content;
+        return images;
     }
 
-    private static void RebuildMonth(CalendarDecorationState decoration, GlancePackageState state)
+    private static IEnumerable<string> BundledBackgrounds(string packageRoot, GlanceBackgroundSource configured)
     {
-        (GlanceCalendarMonth rebuilt, _, _, _, double itemHeight, _) = GlanceMonthPipeline.Build(state.ShowTraditional, state.ShowFestivals);
-        decoration.Update(rebuilt, itemHeight, state.ShowTraditional, state.ShowFestivals);
-    }
-
-    private static string[] LoadImages(string backgroundsDirectory) =>
-        Directory.Exists(backgroundsDirectory)
-            ? Directory.GetFiles(backgroundsDirectory, "*.png")
-                .Concat(Directory.GetFiles(backgroundsDirectory, "*.jpg"))
-                .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
-                .ToArray()
-            : [];
-
-    private sealed class CalendarDecorationState(
-        GlanceCalendarMonth month, double dayItemHeight, bool showTraditional, bool showFestivals)
-    {
-        public GlanceCalendarMonth Month = month;
-        public double DayItemHeight = dayItemHeight;
-        public bool ShowTraditional = showTraditional;
-        public bool ShowFestivals = showFestivals;
-
-        public void Update(GlanceCalendarMonth rebuilt, double itemHeight, bool traditional, bool festivals)
+        if (configured is not (GlanceBackgroundSource.Online or GlanceBackgroundSource.Bing))
         {
-            Month = rebuilt; DayItemHeight = itemHeight; ShowTraditional = traditional; ShowFestivals = festivals;
+            yield break;
+        }
+        // Online/Bing sources need a network path the package does not have
+        // yet; fall back to the bundled backgrounds until that batch lands.
+        PackageLogger.LogVerbose(
+            $"[GlancePackage] background source {configured} is not available natively yet; using bundled backgrounds");
+        foreach (string file in EnumerateImageFiles(Path.Combine(packageRoot, "backgrounds")))
+        {
+            yield return file;
         }
     }
 
-    private static void SubscribeDayDecoration(CalendarView calendarView, CalendarDecorationState decoration)
+    private static IEnumerable<string> EnumerateImageFiles(string directory)
     {
-        System.Globalization.CultureInfo culture = GlanceMonthPipeline.Culture;
-        DateOnly pinned = new(GlanceMonthPipeline.PinnedYear, GlanceMonthPipeline.PinnedMonth, 1);
-        DateOnly today = DateOnly.FromDateTime(DateTime.Today);
+        // Built-in parity: the same extension set, and a failing folder
+        // (network share hiccup, permissions) yields nothing instead of
+        // throwing the whole widget away.
+        foreach (string extension in ImageExtensions)
+        {
+            string[]? files = null;
+            try
+            {
+                files = Directory.GetFiles(directory, "*" + extension);
+            }
+            catch (Exception error)
+            {
+                PackageLogger.LogVerbose($"[GlancePackage] failed to enumerate {directory}: {error.Message}");
+                yield break;
+            }
+            foreach (string file in files)
+            {
+                yield return file;
+            }
+        }
+    }
+
+    internal static void ShowGradientFallback(Border background)
+    {
+        // No resolvable image set: an explicit gradient surface instead of a
+        // dead black widget (the official package ships no bundled images
+        // yet; the online-source batch will replace this).
+        var gradient = new LinearGradientBrush
+        {
+            StartPoint = new Windows.Foundation.Point(0, 0),
+            EndPoint = new Windows.Foundation.Point(1, 1),
+        };
+        gradient.GradientStops.Add(new GradientStop { Color = Microsoft.UI.ColorHelper.FromArgb(255, 0x33, 0x3D, 0x4D), Offset = 0 });
+        gradient.GradientStops.Add(new GradientStop { Color = Microsoft.UI.ColorHelper.FromArgb(255, 0x14, 0x14, 0x14), Offset = 1 });
+        background.Background = gradient;
+        background.Opacity = 1;
+    }
+
+    internal static void SubscribeDayDecoration(CalendarView calendarView, CalendarDecorationState decoration)
+    {
         calendarView.CalendarViewDayItemChanging += (_, args) =>
         {
             CalendarViewDayItem item = args.Item;
@@ -151,16 +109,23 @@ internal static class GlanceViewBuilder
             {
                 if (candidate.Date == date) { day = candidate; break; }
             }
-            string secondaryText = !decoration.ShowTraditional ? string.Empty
+            // Built-in parity: the secondary line only renders when the
+            // responsive layout says there is room for it (audit round 19).
+            string secondaryText = !decoration.ShowSecondary || !decoration.ShowTraditional ? string.Empty
                 : decoration.ShowFestivals && !string.IsNullOrWhiteSpace(day?.FestivalText) ? day.FestivalText
                 : day?.TraditionalText ?? string.Empty;
             bool hasSecondaryText = !string.IsNullOrWhiteSpace(secondaryText);
             bool isFestival = hasSecondaryText && day?.HasFestival == true;
-            bool isCurrentMonth = day?.IsCurrentMonth ?? date.Month == pinned.Month;
+            bool isCurrentMonth = day?.IsCurrentMonth ?? date.Month == decoration.Month.Month.Month;
+            // Regression pass: "today" and the culture are read PER CALL, not
+            // captured - a captured snapshot left the yesterday highlight
+            // marked as today after any midnight rollover, and kept the old
+            // locale's digit shaping after a live language switch.
+            DateOnly today = DateOnly.FromDateTime(DateTime.Today);
             item.MinHeight = decoration.DayItemHeight;
             item.Height = decoration.DayItemHeight;
             item.Tag = new GlanceDayDecoration(
-                day?.DayText ?? date.Day.ToString(culture),
+                day?.DayText ?? date.Day.ToString(decoration.Culture),
                 secondaryText,
                 hasSecondaryText ? Visibility.Visible : Visibility.Collapsed,
                 date == today ? Visibility.Visible : Visibility.Collapsed,
@@ -169,6 +134,24 @@ internal static class GlanceViewBuilder
                 isCurrentMonth ? 1.0 : 0.42,
                 !isCurrentMonth ? 0.34 : isFestival ? 0.88 : 0.62);
         };
+    }
+}
+
+/// <summary>Mutable decoration state shared with the day-item callback.</summary>
+internal sealed class CalendarDecorationState(
+    GlanceCalendarMonth month, double dayItemHeight, bool showTraditional, bool showFestivals, bool showSecondary,
+    CultureInfo culture)
+{
+    public GlanceCalendarMonth Month = month;
+    public double DayItemHeight = dayItemHeight;
+    public bool ShowTraditional = showTraditional;
+    public bool ShowFestivals = showFestivals;
+    public bool ShowSecondary = showSecondary;
+    public CultureInfo Culture = culture;
+
+    public void Update(GlanceCalendarMonth rebuilt, double itemHeight, bool traditional, bool festivals, bool secondary, CultureInfo culture)
+    {
+        Month = rebuilt; DayItemHeight = itemHeight; ShowTraditional = traditional; ShowFestivals = festivals; ShowSecondary = secondary; Culture = culture;
     }
 }
 
@@ -184,24 +167,24 @@ public sealed partial record GlanceDayDecoration(
     double PrimaryOpacity,
     double SecondaryOpacity);
 
-/// <summary>Per-instance persisted state.</summary>
-internal sealed class GlancePackageState
+/// <summary>
+/// Per-instance runtime state (paused flag, current image index). Settings
+/// live in the lossless GlanceWidgetData document; only ephemeral runtime
+/// bits persist here, atomically with a backup kept.
+/// </summary>
+internal sealed class GlanceRuntimeState
 {
     public int ImageIndex;
     public bool Paused;
-    public bool ShowFestivals = true;
-    public bool ShowTraditional = true;
 
-    public static GlancePackageState LoadOrCreate(string instanceDataRoot)
+    public static GlanceRuntimeState LoadOrCreate(string instanceDataRoot)
     {
-        string path = Path.Combine(instanceDataRoot, "glance-state.json");
-        if (!File.Exists(path)) return new();
+        string? content = PackageFileStore.TryReadText(Path.Combine(instanceDataRoot, "glance-state.json"));
+        if (content is null) return new();
         try
         {
-            using JsonDocument document = JsonDocument.Parse(File.ReadAllText(path));
-            var state = new GlancePackageState();
-            if (document.RootElement.TryGetProperty("showFestivals", out var f)) state.ShowFestivals = f.GetBoolean();
-            if (document.RootElement.TryGetProperty("showTraditional", out var t)) state.ShowTraditional = t.GetBoolean();
+            using JsonDocument document = JsonDocument.Parse(content);
+            var state = new GlanceRuntimeState();
             if (document.RootElement.TryGetProperty("paused", out var p)) state.Paused = p.GetBoolean();
             if (document.RootElement.TryGetProperty("imageIndex", out var i)) state.ImageIndex = i.GetInt32();
             return state;
@@ -209,16 +192,33 @@ internal sealed class GlancePackageState
         catch { return new(); }
     }
 
-    public void Save(string instanceDataRoot)
+    public static void Save(GlanceRuntimeState state, string instanceDataRoot) =>
+        PackageFileStore.WriteAtomically(
+            Path.Combine(instanceDataRoot, "glance-state.json"),
+            writer =>
+            {
+                writer.WriteStartObject();
+                writer.WriteBoolean("paused", state.Paused);
+                writer.WriteNumber("imageIndex", state.ImageIndex);
+                writer.WriteEndObject();
+            });
+
+    /// <summary>
+    /// Total no-throw variant (audit round 20): ephemeral runtime state must
+    /// never turn into an ABI destroy failure, so a failed save is logged
+    /// and reported as false instead of propagating.
+    /// </summary>
+    public static bool TrySave(GlanceRuntimeState state, string instanceDataRoot)
     {
-        Directory.CreateDirectory(instanceDataRoot);
-        using var stream = File.Create(Path.Combine(instanceDataRoot, "glance-state.json"));
-        using var writer = new Utf8JsonWriter(stream);
-        writer.WriteStartObject();
-        writer.WriteBoolean("showFestivals", ShowFestivals);
-        writer.WriteBoolean("showTraditional", ShowTraditional);
-        writer.WriteBoolean("paused", Paused);
-        writer.WriteNumber("imageIndex", ImageIndex);
-        writer.WriteEndObject();
+        try
+        {
+            Save(state, instanceDataRoot);
+            return true;
+        }
+        catch (Exception error)
+        {
+            PackageLogger.LogVerbose($"[GlancePackage] failed to save runtime state: {error.Message}");
+            return false;
+        }
     }
 }

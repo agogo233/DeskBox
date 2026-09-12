@@ -4,7 +4,7 @@
 
 本文件为当前执行依据，替代 [历史路线](pluginization-roadmap.md) 中的“零功能拆分默认策略”“Declarative-only 首发”“必须跨三次公开发布”和“冻结宿主 schema 10”。历史技术分析和已经合入的基础设施继续保留；冲突时以本文件为准。
 
-用户仍使用 1.5.0，这批改造尚未发布。核对起点是本地 `527f63d8`（B2a 执行器，PR #267）；1.5.0 的配置 schema 为 9，开发分支为 10。PR 完成、自动测试通过、NativeAOT 试点通过、真实设备交互和正式渠道升级分别记录，不相互替代。
+公开稳定版仍为 1.5.0，这批改造尚未发布。历史执行起点是 `527f63d8`（B2a 执行器，PR #267）；1.5.0 的配置 schema 为 9，1.6.0 开发线为 10。当前进度以本文“当前阶段”表和后续执行记录为准。PR 完成、自动测试通过、NativeAOT 试点通过、真实设备交互和正式渠道升级分别记录，不相互替代。
 
 ## 首发判据
 
@@ -13,7 +13,7 @@
 3. 固定同一份 AOT 宿主二进制，仅更新包 v1→v2，至少改变一处业务行为和一处可见 UI。原有数据和布局保留。
 4. 缺包、损坏、不兼容或启动失败时保留实例、叠放关系与数据，显示可恢复占位。不得归一化为文件格子。
 5. 首发允许下载后重启 DeskBox 生效。独立更新不要求热卸载；禁用/停止实例与二进制卸载分别处理。
-6. 1.5.0 用户升级后原有功能离线可用，必要时使用随过渡版提供的兼容官方包。新装按需下载与旧用户升级保留分别验收。
+6. 1.5.0 是最后一个 1.5.x 版本。1.6.0 发布介质必须提供六个经过验证的官方包，使 1.5.0 用户一次升级后原有功能仍可离线使用；全新安装继续按需获取。两条路径分别验收。
 7. Direct、Store 分别验证。x64、ARM64、数据迁移、备份恢复和真实输入/拖放/合并/叠放检查均明确记录。
 
 ## 实施顺序
@@ -27,6 +27,37 @@
 | E 商店及发布 | 浏览、安装、更新、禁用、卸载、故障恢复及渠道升级 | 全部首发判据完成后进入正式发布 |
 
 声明式卡片继续复用，但六模板不是旧六功能的替代实现。WASM/Process 社区插件、AI/MCP、多发布者账号及收费后置。其原型保留，不纳入官方功能包首发完成度。
+
+### 当前阶段
+
+| 批次 | 状态 | 当前结论 |
+| --- | --- | --- |
+| A 包底座 | 完成 | 安装、验证、不可变版本目录、签名校验和故障边界已落地 |
+| B 真实功能试点 | 技术路线完成 | Glance 已证明独立 NativeAOT DLL、运行时 XAML、双版本替换和真实宿主接线可行；正式渠道证据归 E |
+| C 正式契约 | 完成 | `runtime:native`、三根存储、ABI/HostApi v4、实例归属和通用 package binding 已冻结为首个兼容基线 |
+| D 六功能迁移 | 进行中 | Glance 正在做生产行为对齐；Music、Search、Weather、Todo、QuickCapture 尚未迁移，六功能仍保留内置实现 |
+| E 商店及发布 | 未开始 | 正式发布者、包管理界面、Direct/Store 交付、单跳升级和发布验收尚未闭环 |
+
+## 发布列车与 PR 纪律
+
+- **1.5.0 是最后一个 1.5.x 正式版本**。不规划 1.5.1，不建立 `release/1.5.x`；下一稳定公开版本只有 **1.6.0**。
+- 源码进入 1.6.0 开发线：应用、MSIX 和安装器使用 `1.6.0` 数字版本，开发构建使用 `1.6.0-dev` 信息版本。GitHub latest、官网稳定清单、README 下载入口继续指向 1.5.0，直到最终发布。
+- 中间验证使用固定提交的 CI 产物、测试安装包和 Partner Center 私有 flight，不创建公开 prerelease。未满足首发判据前不创建稳定 tag，也不切换公开更新清单。
+- 功能包使用独立版本号和 HostApi 兼容范围，不与应用版本绑定；同一份 1.6.0 宿主必须通过包 v1→v2 独立更新验收。
+- 一个可独立验收的纵向批次使用一个短期分支和一个 Draft PR。审计、复评、修正和补测试继续进入同一 PR，退出条件满足后一次合并；只有前一 PR 已合并或后续修复可独立发布时才另开 PR。
+- PR 合并后删除 head branch。需要长期保留的未合并快照改用 annotated tag；普通 `backup/*`、`archive/*` 不长期充当活跃分支。
+- 稳定候选必须来自干净且固定的源码提交，并重新完成 x64 全量测试、当前提交的 NativeAOT 审计、ARM64 构建审计、Direct/Store 分渠道检查、1.5.0 覆盖升级与回滚、离线启动以及真实输入/拖放/合并/叠放验收。旧提交或 dirty 工作树的通过记录只作开发证据。
+
+## 1.6.0 单跳升级模型
+
+| 场景 | 包供应 | 数据处理 | 完成条件 |
+| --- | --- | --- | --- |
+| 1.5.0 覆盖升级 | 1.6.0 发布介质携带 x64/ARM64 六个官方包；升级时自动部署全部六包 | 先建立 1.5.0 兼容快照，再按包复制迁移并保留旧存储 | 断网状态下原有六功能、实例、布局和启用状态全部恢复 |
+| 1.6.0 全新安装 | 宿主无功能包也能启动，用户按需安装 | 未安装包不创建业务数据 | 安装、禁用、卸载和再次安装互不破坏宿主数据 |
+| 迁移中断或包校验失败 | 不提交损坏包，不切换完成标记 | 迁移日志可重入，保留实例、叠放关系、原数据和快照 | 重启后可继续或恢复，不把实例归一化成文件格子 |
+| 包独立更新 | 固定宿主，仅原子切换包 v1→v2 | 包级和实例级数据根保持不变 | 可见 UI 与业务行为更新，失败可回到上一已验证版本 |
+
+1.6.0 不删除 1.5.0 的旧字段和旧业务存储。它们至少保留到一个后续稳定版本完成真实降级、快照恢复和用户迁移观察后，再通过独立清理批次删除。
 
 ## 原生试点边界
 
@@ -54,7 +85,7 @@ NativeAOT DLL 不支持 FreeLibrary 卸载，首发按重启应用新版本设�
 
 迁移前完整快照，复制迁移、校验后提交，中断可重试。功能包分别声明设置/数据版本。降级 1.5.0 的恢复以实际验证的快照恢复路径为准，不承诺旧版能直接读取新结构。
 
-Store 路径在批次 B 前期就核对，不能等发布前才验证。动态代码、依赖披露及实际提交类型需对应 [当前 Store 政策](https://learn.microsoft.com/en-us/windows/apps/publish/store-policies#102-security)。MSIX optional code package 的 related set/许可要求及旧 UWP 示例不能直接推导当前 NativeAOT 方案可行。
+Store 路径不能等发布前才验证。迁移 Music 之前，先以 Glance 在 Partner Center 私有 flight 验证 executable optional package 的 related set、许可、获取、升级和 1.5.0 覆盖升级。动态代码、依赖披露及实际提交类型需对应 [当前 Store 政策](https://learn.microsoft.com/en-us/windows/apps/publish/store-policies#102-security)。旧 UWP 示例不能直接推导当前 NativeAOT 方案可行。
 
 ### Store 政策核对结论（2026-09-08，政策版本 7.19 原文）
 
@@ -69,18 +100,18 @@ Store 路径在批次 B 前期就核对，不能等发布前才验证。动态�
 
 **已修的产品/代码缺陷**：①试点内容未实现 IDisposable——宿主只 Dispose `IDisposable`（WidgetManager:1598/2099），导致 `widget_destroy`/`shutdown` 从未被调用；已实现 Dispose→DestroyWidget（不触发 shutdown，防误伤其他实例）。②试点每 Widget 重新 Activate 覆盖包静态会话——已加宿主侧会话缓存（每包根一次激活）。③FullGlance 每次 Rebuild 重复订阅 CalendarViewDayItemChanging（叠处理器+旧状态捕获）——已改单订阅+可变状态持有者。④脚本 XBF 拷贝路径硬编码 x64——已改平台感知。
 
-**C1（下一批，运行时契约收口，全部真运行测试而非源码扫描）**：
+**C1（已完成；以下保留为运行时契约收口的历史输入）**：
 - ABI 重塑：`activate(packageRoot, packageDataRoot, hostApi*)` 去掉 instanceId（包生命周期）；`create_widget(contributionId, instanceId, instanceDataRoot, out widgetHandle, out view)`（补贡献身份+实例数据根+包侧不透明句柄）；`destroy_widget(widgetHandle)`；`shutdown()`。
 - `NativePackageSession/RuntimeManager`：PackageId+ContentHash→会话（module/roots/liveInstances[]）；最后实例销毁才 shutdown；模块仍不 FreeLibrary。
 - **加载器只接受 `VerifiedInstalledPackage`**（B1 管线绑定：验证→不可变根→LoadLibrary，禁止任意目录直载）。
 - **PackageDataRoot 绝不由安装目录名推导**（叶子名=内容哈希，更新即漂移）：`data/packages/<publisherFingerprint>/<packageId>/`，实例 `instances/<instanceId>/`。
 - 必测：同包双实例数据隔离、销毁 A 后 B 继续工作、关窗恰好销毁一次、v1→v2 更新后数据根不变、包更新不丢数据。
 
-**C2（宿主 UI/主题/输入）**：真实 `WidgetTitleIcon` 替代 HostBadge；Segmented 订阅自身事件验证完整交互契约；主题走 HostApi GetTheme/ThemeChanged（非数据根 JSON；合并而非替换资源字典）；本地化 zh-CN/en-US 切换实测；Drag/Drop/KeyDown/IME/焦点；**Host UI Kit 不直接暴露 CommunityToolkit**（版本耦合风险，宿主包一层 DeskBox 控件）。
+**C2（已完成技术探针；具体功能行为归各 D 批次）**：真实 `WidgetTitleIcon` 替代 HostBadge；Segmented 订阅自身事件验证完整交互契约；主题走 HostApi GetTheme/ThemeChanged（非数据根 JSON；合并而非替换资源字典）；本地化 zh-CN/en-US 切换实测；Drag/Drop/KeyDown/IME/焦点；**Host UI Kit 不直接暴露 CommunityToolkit**（版本耦合风险，宿主包一层 DeskBox 控件）。
 
 **批次 D 迁移顺序（审计建议，已采纳）**：Glance→Music→Search→Weather→Todo→QuickCapture（最重交互最后）。
 
-**措辞收窄**：XBF 结论限定为"当前 NativeAOT 动态 DLL+运行时文本 XAML 路线中，宿主编译 Page 的 XBF 须保持 ms-appx 可解析"；Direct/Store 渠道分别实测，非平台定律。FullGlance 设置仍写包目录=已知 spike 债务（README 已标注反模式，C1 随三根落地一并清理）。
+**历史措辞收窄**：XBF 结论限定为"当前 NativeAOT 动态 DLL+运行时文本 XAML 路线中，宿主编译 Page 的 XBF 须保持 ms-appx 可解析"；Direct/Store 渠道分别实测，非平台定律。FullGlance 写包目录的 spike 债务已经由后续三根存储和 HostApi write-through 批次消化。
 
 
 
@@ -108,9 +139,33 @@ Store 路径在批次 B 前期就核对，不能等发布前才验证。动态�
 - 批次 C 综合 probe（2026-09-08 末，九场景全绿）：**宿主自定义控件与 toolkit 控件均可在包运行时文本 XAML 中解析并实例化**（HostBadge+Segmented 实测）；前提=**宿主 Page XBF 必须随安装目录落盘**（publish 不带，ms-appx 文件级解析需要，进契约）；三根 ABI（activate(packageRoot,dataRoot,instanceId)/create/destroy/shutdown）+数据零写包目录断言+主题 token 注入（解析期默认+代码替换双层）落地；注意 toolkit Segmented SelectionChanged 需订阅控件自身事件。宿主 UI Kit 复用路线打通，批次 C 最大不确定项消除。
 - 真实宿主接线（2026-09-08 末）：**开发试点已接入产品 DeskBox**——`Services/Plugins/NativeWidgetPackageLoader.cs`（统一五导出 ABI：get_abi_version/activate 三根/create/destroy/shutdown；模块进程常驻）+ `NativeWidgetPilot.cs`（IWidgetContent 包装），接缝在 WidgetContentFactory（基础设施层，棘轮要求：试点文件不带功能 token、不进功能命名空间），`DESKBOX_DEV_NATIVE_GLANCE` 环境变量门控默认关，任何失败回落内置 Glance。spike 包新增同名统一导出。**真机实测**：Debug 宿主日志 `[NativePackage] pilot package active: glance-dev (instance <id>)`，ABI 版本握手+三根 activate+widget 创建全链路通，3545/3545 全绿（+4 试点测试：路径校验/数据根/工厂接缝回退/JSON 基线与功能 token 防线）。B1 安装管线与加载器的验证绑定（"验证与打开模块生命周期绑定"）仍留批次 C。
 - **C1 运行时契约落地（2026-09-09，九 spike 场景全绿+真机冒烟）**：ABI v2——`activate(packageRoot, packageDataRoot, HostApi*)`（包生命周期，无实例参）+ `create_widget(contributionId, instanceId, instanceDataRoot, out widgetHandle, out view)`（贡献身份+实例数据根+包侧不透明句柄）+ `destroy_widget(widgetHandle)` + `shutdown()`；HostApi v1 函数表（log 回调实测 6 次往返）。产品侧 `NativeWidgetRuntimeManager`（每身份一会话恰激活一次、实例租约、末实例销毁→shutdown）+`NativePackageIdentity`（**数据根键=publisher指纹/packageId/instances/instanceId，与安装路径解耦——单测钉住 v1/v2 换路径数据根不变**）+`TryCreateFromVerified(VerifiedPluginPackage, installDirectory, ...)` 绑定入口（EntryMain 为原生标记；runtime 类型 schema 扩展随包格式冻结）。真运行矩阵全过：双实例数据隔离（A=["条目甲"]/B=["条目乙"]）+销毁 A 后 B 继续工作+包根零写入+激活恰 1/关停恰 1/创建 2/余 0。开发试点整体迁移到会话管理器。
-- **C1.1 运行时加固（2026-09-09，第十二轮审计吸收）**：①试点内容 IDisposable 回归修复（#281 意外丢失接口）+类型测试钉住（宿主只 Dispose `is IDisposable`）；②ABI 引用恰一次释放（finally 单点）+partial-failure 回滚（包侧句柄销毁+ABI 释放）；③销毁状态机=包返回 0 才移出活集+租约标记已释放（失败可重试、不误触发 shutdown）；④**InstanceStorageKey=SHA256 哈希路径**（持久化实例 ID 是输入，绝不直接当路径片段——traversal/保留名/尾点全免疫）；⑤**模块身份+=ContentHash**（数据身份=publisher/packageId 稳定不变；已加载包的同 ID 不同哈希=NeedRestart 拒载，与"更新重启生效"策略一致）；⑥**HostApi 加 Size/Version 头**（后续 GetTheme/ThemeChanged 不再抬整包 ABI）；⑦**包代码永不于管理器锁内调用**（锁只做查找/预约/提交，activate/create/destroy/shutdown 全锁外——为 C2 回调防重入死锁）；⑧**NativeInstalledPackageHandle 结构性配对**（record+安装根只能由 PackageManager.TryCreateNativeHandle 组装，runtime==native 门在注册表加载校验处天然 fail-closed 直至包格式冻结；产品路径入口改用句柄+ProductEntryModuleFileName，开发路径保留常量）。当前表述校正：B1→原生运行时=**适配器接缝已建立**（非闭环）。待包格式冻结：schema runtime:native（仅官方可信发布者）、EntryMain 进完整性清单。剩余审计项（产品级 close→destroy→shutdown 集成测试待真机自动化、内存矩阵等）随 C2/冻结批次。
+- **C1.1 运行时加固（2026-09-09，第十二轮审计吸收）**：①试点内容 IDisposable 回归修复（#281 意外丢失接口）+类型测试钉住（宿主只 Dispose `is IDisposable`）；②ABI 引用恰一次释放（finally 单点）+partial-failure 回滚（包侧句柄销毁+ABI 释放）；③销毁状态机=包返回 0 才移出活集+租约标记已释放（失败可重试、不误触发 shutdown）；④**InstanceStorageKey=SHA256 哈希路径**（持久化实例 ID 是输入，绝不直接当路径片段——traversal/保留名/尾点全免疫）；⑤**模块身份+=ContentHash**（数据身份=publisher/packageId 稳定不变；已加载包的同 ID 不同哈希=NeedRestart 拒载，与"更新重启生效"策略一致）；⑥**HostApi 加 Size/Version 头**（后续 GetTheme/ThemeChanged 不再抬整包 ABI）；⑦**包代码永不于管理器锁内调用**（锁只做查找/预约/提交，activate/create/destroy/shutdown 全锁外——为 C2 回调防重入死锁）；⑧**NativeInstalledPackageHandle 结构性配对**（record+安装根只能由 PackageManager.TryCreateNativeHandle 组装；在当时尚未冻结的包格式下，runtime==native 门保持 fail-closed；产品路径入口改用句柄+ProductEntryModuleFileName，开发路径保留常量）。当前表述校正：B1→原生运行时=**适配器接缝已建立**（非闭环）。当时遗留的 schema runtime:native 和 EntryMain 完整性清单已由下一条“包格式冻结”批次完成；其余运行验证继续归后续批次。
 - **包格式冻结·runtime:native 落地（2026-09-09）**：schema v0 加 `runtime:native`（官方可信首方进程内全信任 NativeAOT DLL；仅官方发布者可声明，第三方 native 安装期拒）；entry.main 描述覆盖 native（DLL 文件名，须完整性清单+包路径文法）；验证器接纳 native 枚举+native 必签名（未签名 native 永远无效）；注册表加载校验同步。产品入口 `TryCreateFromInstalled` 不再天然 fail-closed——native 包从此可走完整 B1 安装→验证→激活链路。发布者白名单/正式密钥仍留批次 E（签名验证已闭环，白名单是授权层）。
 - **ABI v4：versioned 事件结构（2026-09-09，第十七轮审计吸收）**：ABI v3 增补记录——#293 加 `deskbox_widget_event(handle, kind, width, height, flags)` 第六导出（12 个 typed 事件全转发）、#295 加固（widget_event 必需导出/try-catch 全函数/dev 与生产 Manager 拆分/事件 13-14-15 Responsive 拆分）。第十七轮审计对码核实发现 v3 两端漂移：**宿主已发 13-15 而包端仍只收 1..12**（胶囊 Responsive 事件全被 E_INVALIDARG 拒）、`0x80070510` 注释写成 ERROR_INVALID_HANDLE（实为 ERROR_BLOCKED_BY_POLICY=1296，E_HANDLE 应为 0x80070006）、Destroy 对 unknown handle 静默成功、Shutdown 带活实例仍返回成功、dev 安装链路断（bootstrap 用默认 Store policy → isDevelopment=false → 环境变量门永不命中 → 只能走 raw DLL）。**因插件化未发过版本（用户停 1.5.0，无中间态兼容负担），直接升 ABI v4 重做事件通道**：`deskbox_widget_event(handle, DeskBoxWidgetEventV1*)`——Size/Version 头 + Kind/Flags/Width/Height + 4×Reserved 追加位（两端布局由 `NativeWidgetLifecycleAbiTests` 源码对照钉死）；包端常量补 13-15 且范围检查从常量表推导（不再有魔法数）；Destroy unknown→E_HANDLE、Shutdown 活实例>0→E_UNEXPECTED（宿主侧记录 shutdown 状态）；新增生命周期映射测试（真 marshaling 走反向 P/Invoke stub 断言全部 15 个事件+flags/尺寸载荷+InitializeAsync 零事件）+ 两端事件表数值对照测试；CI 补 `src/DeskBox.GlancePackage` 编译步骤（宿主不引用包项目，此前包编译坏了 CI 照绿）。
 - **Dev 链路修复 + Release 收口（2026-09-09，第十七轮审计吸收续）**：审计核实 dev 烟测链路自 #295 起实际断裂——`RunDevBootstrap` 用默认 **Store policy** 安装 dev 包（`PluginPackageManager` 注册记录 `isDevelopment=false`），激活端为 dev 记录设计的 `DESKBOX_ALLOW_UNTRUSTED_NATIVE_DEV=1` 门永远不命中，空信任集的生产 Manager 又必拒该记录 → dev 烟测从未走过 B1 安装链、一直在静默退化为 raw DLL。修复：bootstrap 显式传 `PluginPackageVerificationPolicy.Development`（记录标记 dev → 环境变量门生效 → 走完整验证+身份绑定的已安装路径）。收口：`TryCreate` 的 raw directory fallback 与 `CreateDevelopmentDescriptor`（及其 dev 常量）全部收进 `#if DESKBOX_NATIVE_DEV_PILOT`——**Release 二进制不再存在任何绕过 manifest/签名/B1 安装的加载入口**；`TryGetDevelopmentPackageRoot` 保留无条件编译（纯路径校验、被单测消费、不加载模块——新增源码棘轮钉住它永不长出加载逻辑）。`NativeWidgetDevPathContractTests` 四条源码棘轮：fallback 在 pilot 守卫内/bootstrap 传 Development policy/描述符创建 pilot 门控/路径校验器保持零加载。
 - **D3 Phase 2 收官：源码所有权全量转移（2026-09-09）**：最后一个链接文件 `GlanceTraditionalCalendarService`（367 行）复制归包（8/8 全部包所有，宿主 Compile Include 清零、HostSourceRoot 属性移除）；`Seams.cs` 删除——两个过渡桩替换为包自有能力：`CultureRules.IsTraditionalChineseCulture`（真实区域规则，原桩逻辑迁入）+ `PackageLogger`（activate 时接线 HostApi Log 回调——原 `App.LogVerbose` 桩是静默丢弃，包内诊断日志现在真到宿主日志）。包与宿主副本自此允许分叉，宿主副本保留为 oracle 直到行为对照等价后删除。
-- 批次 C–E：C1/C2 完成。六功能仍保留在现有应用中；商店界面和升级迁移未在本批次提前切换。
+- **D3 产品迁移第一刀：真实 locale/当前月/响应式视口（2026-09-09）**：包端开始消费 HostApi v2 config 通道——`HostConfig`（activate 时存 GetConfigJson 指针，两次调用契约取 `{"locale","accent"}`，坏载荷/未知 locale 静默降级 null→回退宿主 CurrentUICulture）；渲染管线三处固定值全部去除：**PinnedYear/Month(2026-9)→当前月**、**Culture(zh-CN 固定)→宿主 locale**、日期格式 "M月d日"→文化感知 "M" 标准模式；尺寸参数化（默认 440×560 直到首个 ViewportChanged）+ **ViewportChanged(事件 9) 接防抖重建**（120ms 单发 timer，重跑月数据+面板尺寸+presentation，宿主连续 resize 只在尺寸稳定后重建一次）；右键菜单走 `PackageStrings`（strings/{locale}.json 精确匹配→en-US→内联回退，Glance 三键 menuNextBackground/menuPauseRotation/menuSettings 双语就位——包拿不到宿主 PRI，本地化必须随包走，批次 B/C 结论）。`NativeGlanceHostConfigContractTests` 四条源码棘轮钉死"不回固定值"。SetConfigChangedHandler 推送侧仍未接（宿主端只有注册日志，实际推送等主题批次一起做）。accent 已解析未消费（留主题批次）。
+- **D3 产品迁移第二刀：legacy 数据迁移（2026-09-09）**：宿主在首次原生创建前把内置 Glance 的存储文件（`data/glance/widgets/<id>.json`）**逐字节拷贝**进包实例数据根（`NativeWidgetDataMigration.TryMigrate`，幂等、包数据优先、best-effort 不阻塞创建；文件名不带功能 token 是棘轮要求——Glance 冻结清单 19 文件不动）——不经 JsonSerializer（冻结 JSON 基线零扰动），真实机器上存在 v7 老文件故包端读取器全字段容缺省。包端新增 `GlanceDataFile`（JsonDocument/Utf8JsonWriter 手读手写 camelCase+字符串枚举子集），`GlanceViewBuilder` 改由迁移数据驱动：**TraditionalCalendarMode≠None**（替代固定开关）、**ShowChineseFestivals**、**RotationIntervalMinutes**（真实轮播间隔，替代固定 3 秒；钳位 0.1min~1440min）、**RandomOrder**（加载时洗牌）、**背景源**（LocalFiles=LocalImagePaths / LocalFolder=目录枚举 / Online与Bing=暂回退包内 backgrounds 并记日志——网络能力后续批次）、**ImageFit**（Fill/Fit→Stretch）、**ShowPhotoControls**（隐藏操作按钮）；设置改动写回 `glance-data.json`（包自有格式），暂停/图片进度拆到 `glance-state.json`（卸载时保存）。**尚未接的 GlanceWidgetData 字段**（显示元素开关/Layout 四模式/Transition/Readability/透明度/材质/在线图源）留给后续 parity 批次。测试 +4（逐字节一致/幂等包数据优先/缺存储零副作用/包端无 JsonSerializer 棘轮）。
+- **D3 数据所有权加固（2026-09-09，第十八轮审计吸收·六项 P0 全修）**：审计核实"数据 copy ≠ 数据 ownership"，修复批以用户数据完整性为先：①**无损 round-trip**——`GlanceDataFile` 保留原始文档（JsonElement.Clone），Save 只替换包拥有的 9 个属性、其余逐字保留、缺失的 owned 字段追加（未接入字段/未来未知字段在每次写入后存活）；②**迁移语义反转=pre-cutover 宿主权威**——取消"target 存在即永久迁移"，每次原生创建都从宿主 store 重新同步（失败的原生创建不再留下 stale snapshot，宿主侧设置变更总能到达下个原生会话；正式 cutover marker 留待所有权切换批）；③**候选链继承恢复能力**——primary→primary.bak→legacy `glance/glance.json`→其 .bak，逐个验证为合法 JSON 对象再拷贝（撕写主文件不再把包钉死在默认值；v7 等老文件/整数枚举照读——`TryEnum` 接受字符串与整数双格式，对齐仓库 golden"写名读数"语义）；④**原子写**——`PackageFileStore`（temp→Replace 留 .bak；读=primary→.bak）用于 glance-data.json 与 glance-state.json；⑤**RotationIntervalMinutes≤0=禁用**（不再钳成 6 秒轮播）；⑥**真实 TraditionalCalendarMode 贯通管线**（Auto 经 ResolveMode 解析；Hebrew/JapaneseEra 等不再塌缩成农历；开关关闭再开恢复用户原历法而非覆盖）。附带：HostApi 表 Version/Size 先验证再取指针（Activate 否则 E_INVALIDARG）；Shutdown 清空 _hostLog/HostConfig/PackageLogger static（防下次 activate 见旧回调）；宿主 GetConfigJson 改用 **DeskBox 自选语言**（LocalizationService.CurrentCultureName，非 OS CurrentUICulture）且每次调用现算；图片加载对齐内置语义（LocalFiles 保用户顺序、扩展名补 jpeg/webp/bmp、枚举失败降级不砸 widget、无图时显式渐变空态）。**测试升级：tests 直引 GlancePackage（extern alias 消同名 DeskBox.Models 歧义）+golden 数据测试 5 条**（无损 round-trip/整数枚举/v7 容缺省/撕写主文件回 .bak/坏文件降级 null），迁移测试重写为宿主权威语义 +5 场景。**遗留到后续批**：时钟冻结/生命周期能耗（需包侧 Controller）、设置 UI 写包 store（cutover 步）、data/plugins 备份排除、instance 删除清理、Shutdown failure→Faulted、manifest nativeAbi。
+- **D3 数据所有权收口（2026-09-09，第十九轮审计吸收·四项核心全修）**：审计指出 #303 留下"宿主权威但原生仍直写副本"的假保存语义等四项，全部修复：
+  ①**HostApi v3 写回通道**——表新增 `SetInstanceConfigJson(instanceId, json)`；宿主侧 `InstanceConfigPatch`（JsonDocument 严格类型解析，坏载荷在碰权威前拒绝，接受字符串/整数枚举、空串清 Folder）经 `GlanceWidgetStore.UpdateAsync` 提交（fire-and-forget 不阻塞 UI、Changed 事件让内置实时刷新）；包端开关全部走 write-through，**无通道/失败则回退开关**（read-only 语义，杜绝"看起来保存成功下次被覆盖"）；本地 glance-data.json 降级为缓存。
+  ②**version 不再归 partial writer**——原文档有 version 则逐字保留（v7 保持 7、未来宿主 v11 不被降级），仅新建文件时落 CurrentVersion；正式 cutover 时再区分 legacy schema version 与包自有 schema。
+  ③**PackageFileStore 全量对齐 ResilientJsonStore**——GUID temp+Replace(ignoreMetadataErrors)+1175 重试梯（50/150ms）+就地回退（WriteThrough+读回验证）；读取=primary→坏文件隔离（.corrupt- 时间戳保留）→备份→**恢复 primary**（防止恢复链退化为好主+坏备）；宿主迁移同步写入同款弹性 Replace（同步移植——UI 线程上不能 GetAwaiter().GetResult 等 WinUI SyncContext 续体）。
+  ④**迁移候选项语义验证**——结构合法≠数据合法：owned 字段类型全验（bool/number/string-array/null），`{"rotationIntervalMinutes":"abc"}` 这类内置反序列化会拒的文件现在正确落到 .bak。
+  附带（审计 §12/§13）：布局计算三处硬编码 `true` 改传真实 `hasTraditional`（None 模式不再预留次行空间）；`showSecondary` 真正消费——日项次行按响应式空间门控（对齐内置 `ShowCalendarTraditionalDetails`）。
+  测试：patch 4 条（权威提交/类型拒绝/整数枚举/空串清 Folder）+迁移类型腐蚀场景+golden version 断言反转。
+- **D3 生命周期 Controller 批（2026-09-09，第十八/十九轮审计 §16-17 落地）**：包端实例状态从 ViewBuilder 闭包收进 **`GlanceWidgetController`**（view/settings/runtime/images/三个 timer/生命周期/写回/Dispose），`GlanceWidgetHandle` 降级为 ABI 事件薄路由（**探针视觉残留清除**——Visibility 的 opacity 0.9、Compact 的 MaxHeight 260 不复存在）：①**时钟**：可见时按 `GlanceLifecyclePolicy.DelayToNextMinute` 单发到下一分钟边界（对齐内置 60-Second 算法+50ms 守卫）刷新时间/日期/星期；tick 里比对前后一分钟日期，**跨午夜自动刷新月历**（修时钟冻结）；②**能耗**：`GlanceLifecyclePolicy` 纯逻辑核（镜像内置 UpdateTimers 条件）决定 clock/rotation 运行——hidden/longHidden 全停、compact 与用户暂停只停轮播、轮播还需间隔>0+图≥2；reveal 时立即刷新时间文本（不显示隐藏期快照）；③**RefreshRequested(1) 首次消费**：刷新时钟+重建月份；④**destroy 显式 Dispose**（停三表+保存 runtime state），Unloaded 降级为带 disposed 守卫的兜底；⑤ViewBuilder 瘦身为静态构建助手。未接事件（2/3/4/6/10/11-15）注释标注归属批次（主题推送/性能策略需 config 通道扩展）。测试 +7（policy 矩阵 6+时钟边界纯函数；真包代码经 extern alias 直跑）。
+- **D3 边界 correctness 收口（2026-09-09，第二十轮审计吸收·八项全修）**：审计在 #304/#305 找到两个回归+一批收严项，全部修复：
+  ①**Destroy 事务恢复**——原 `_handles.Remove` 在 `Dispose`（含磁盘写、可抛）之前，失败即造成"包侧句柄已删/宿主 lease 仍活"的永久分歧（破坏 #281/#295 建立的销毁契约）。修复=`GlanceRuntimeState.TrySave`（total no-throw）+ destroy 改 **TryGetValue→Dispose（不可抛）→Remove** 顺序。
+  ②**Unloaded→Dispose 删除**——宿主组切换会 reparent+可回滚 outgoing 视图，Unloaded 永久 Dispose 会让回滚回来的视图计时器全死。改为 `Unloaded→StopVisualResources()`（停三表）/`Loaded→EnsureCurrentDate+UpdateTimers`；真正的 teardown 只允许 deskbox_widget_destroy；暂停态改在 TogglePause 时即存。
+  ③**写回最小 patch**——原 BuildOwnedPatch 发全部 9 个 owned 字段=用包缓存旧值覆盖宿主并发修改（典型 lost update：宿主设置页改 RandomOrder，原生关一下节日就被旧 false 盖掉）。修复=开关只发**被改的单个字段**（BuildOwnedPatch(params onlyFields)）。
+  ④**写回语义改 accepted-not-committed**——回调返回 0 只表示"已受理"，UpdateAsync fire-and-forget 在宿主 dispatcher 上执行（阻塞 UI 会死锁）；异步持久化失败由宿主日志观测（CommitToAuthorityAsync try/catch），包端只把同步拒绝视为回滚条件；丢失的异步提交经下次 create 权威同步自愈。真正的 ack 等推送通道批次。
+  ⑤**迁移校验 localImagePaths 条件反转修复**——原 `!=Array || All(string)` 会把 `"localImagePaths":"not-array"` 判合法（审计抓到的明确 bug）；改严格 `==Array && All(string)`。
+  ⑥**迁移校验补三个枚举字段**（traditionalCalendarMode/backgroundSource/imageFit：名字可解析或整数在定义域内），`"backgroundSource":{}` 现在正确落 .bak。
+  ⑦**Patch 枚举字符串收严**——`Enum.TryParse` 会把 `"999"` 这类数字字符串解析成未定义枚举值，补 `Enum.IsDefined`。
+  ⑧**隐藏跨午夜/跨月修复**——新增 `EnsureCurrentDate`（_renderedDate 缓存）：reveal/Loaded/RefreshRequested/时钟 tick 统一走它，隐藏跨天后重显自动重建月历（运行中的分钟 tick 检测不到停摆期间的跨日）。
+  测试 +5（未定义枚举拒绝/迁移错型落 .bak/最小 patch 恰一字段/TrySave 失败不抛/destroy 顺序+Unloaded 语义源码契约）。#306 Pomodoro 外部 PR 关闭符合架构方向（正是要消除的"加功能改宿主十几处"路径，未来可作官方包示例）。
+- **PackageBindingRegistry 抽象落地（2026-09-09，audit-20 §18/§19"最大架构 gate"）**：Glance 专属代码全部撤出通用插件层，第二个官方包从此是"一次注册"而非"插件层新分支"：①`DeskBox.Contracts.ILegacyInstanceMigration`（宿主内部端口——DataFileName/ResolveLegacyContent/TryApplyPatch；落 Contracts 是既有 stage-3a 模式，feature 层被棘轮禁止 using Services.Plugins，Contracts 在允许清单内）；②`PackageBindingRegistry`（WidgetKind→binding：PackageId/ContributionId/Migration）+ `PackageInstanceRegistry`（instanceId→packageId 活跃归属表，create 注册/destroy 注销，供写回路由）；③`NativeWidgetDataMigration` 去功能化为通用弹性同步器（适配器解析+验证字节，infra 只做 1175 链写入）；④`NativeWidgetPilot` binding 驱动（删 deskbox.glance 硬编码）；⑤HostApi `SetInstanceConfigJson` 通用路由（实例归属→binding→adapter.TryApplyPatch，桥内零 feature 类型）；⑥`GlanceInstanceMigration`+`GlanceInstanceConfigPatch`（原 NativeInstanceConfigPatch.cs 撤出 Plugins）落 Services 根 glance 领地（冻结计数 19→20 deliberate——`GlanceWidgetStore.GetSafeWidgetFileName` 同池复用）；⑦App 启动一次注册。新源码棘轮：pilot/loader 不得含 feature 类型或包 id 字面量。附带收益：写回回调现在拒绝未注册实例（归属表校验），为 session context 留了路由骨架。
+- **HostApi v4：session context + config 真推送（2026-09-10，audit-20 §31/§23 落地）**：①**归属闭环**——HostApi 表尾部追加 `Context`（append-only 保前缀兼容，CurrentVersion 3→4）：宿主每会话注册 opaque id（纯注册表 id，非真实指针，伪造/未知 id 解析为 null），包端回传；`SetInstanceConfigJson` 签名追加 context 并校验"实例归属=调用会话"（一个包不能再补丁另一个包的实例）；`SetConfigChangedHandler(context, handler)` 订阅同挂 context，shutdown 解绑；②**config 真推送**——包端 activate 时注册 `OnConfigChanged` 回调；宿主 `LocalizationService.LanguageChanged → PushConfigChanged()` 逐会话触发（包异常 contained）；包端经 DispatcherQueue 重读 locale→重配 strings→逐控制器 `ApplyConfigChange`（文化/月数据/presentation/菜单文本原地切换，无需重建格子）。工厂 gate 同步去 Glance 化（`PackageBindingRegistry.TryGetByKind` 决定是否尝试原生路径——工厂不再点名 feature）。3599/3599（+4：context 注册表行为/归属校验棘轮/包端订阅棘轮）。
+- **R1 Runtime/Data Contract Repair（2026-09-10，第二十一轮审计落地）**：audit-21 的六项全修——①**runtime destroy 不再删 InstanceDataRoot**（生命周期 1/2/3 分离：runtime destroy 只释放 handle+归属；persistent data 只归逻辑删除 `NativeInstanceDataLifecycle.DeleteAsync` 所有，按 publisher 扫描+幂等+best-effort）；②逻辑删除挂接 WidgetManager 两处（RemoveWidgetAsync glance 分支+FeatureWidgets duplicate 清理，均通过 `PackageBindingRegistry.TryGetByKind` 泛型解析，不硬编码 feature）；③**Shutdown 去 early-return**——`DetachSession` 在 try/catch 后 always 执行（修正常路径 context+handler 泄漏）；返回 bool；④**Faulted/RestartRequired**——shutdown 失败→`FaultedPackages[identity]=reason`→`TryCreateInstance` 拒绝再激活（进程生命周期内清除仅靠重启）；⑤**HostApi v4 = 首个冻结基线**（v1–v3 内部实验不做兼容目标；v4 起 slot+签名 immutable，新能力追加新 slot）；⑥行为测试 +8（DeleteAsync 跨 publisher 幂等/DetachSession 移除 handler+context/Faulted 标记+拒绝再激活/DestroyWidget 无 Directory.Delete 源码棘轮）。
+- 当前总状态：A 完成；B 的技术路线已由 Glance 证明；C 以 ABI/HostApi v4 和通用 binding 完成首个冻结；D 正在收口 Glance，其他五功能未开始；E 的商店界面、正式分发和 1.5.0 单跳升级尚未开始。六功能仍保留在现有应用中。

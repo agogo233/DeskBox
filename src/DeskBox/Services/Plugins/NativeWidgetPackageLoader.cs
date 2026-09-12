@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+using System.IO;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
@@ -69,6 +71,55 @@ internal struct NativeHostApiV1
     public nint Log;
     public nint GetConfigJson;
     public nint SetConfigChangedHandler;
+    public nint SetInstanceConfigJson;
+    // v4 (append-only): opaque per-session context. The package echoes it
+    // back on config-changed registration and instance-config writes so the
+    // host can attribute every call to the calling session (audit 20 §31).
+    public nint Context;
+}
+
+/// <summary>
+/// Per-session attribution the host attaches to every HostApi table. The
+/// nint handed to the package is a registry id (never a real pointer), so
+/// nothing is pinned and an unknown/forged id resolves to null.
+/// </summary>
+internal sealed class NativePackageContext
+{
+    internal required string PackageId { get; init; }
+}
+
+internal static class NativePackageContextRegistry
+{
+    private static readonly object Gate = new();
+    private static readonly Dictionary<nint, NativePackageContext> Contexts = [];
+    private static long _next;
+
+    public static nint Register(NativePackageContext context)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        lock (Gate)
+        {
+            nint id = (nint)Interlocked.Increment(ref _next);
+            Contexts[id] = context;
+            return id;
+        }
+    }
+
+    public static void Unregister(nint context)
+    {
+        lock (Gate)
+        {
+            Contexts.Remove(context);
+        }
+    }
+
+    public static NativePackageContext? TryResolve(nint context)
+    {
+        lock (Gate)
+        {
+            return Contexts.TryGetValue(context, out NativePackageContext? value) ? value : null;
+        }
+    }
 }
 
 /// <summary>
@@ -98,31 +149,77 @@ internal struct NativeWidgetEventV1
 /// <summary>Host-side callbacks exposed to native packages via the HostApi table.</summary>
 internal static unsafe class NativeHostApiBridge
 {
-    internal const uint CurrentVersion = 2;
+    internal const uint CurrentVersion = 4;
 
-    internal static NativeHostApiV1 Create() => new()
+    internal static NativeHostApiV1 Create(nint context) => new()
     {
         Size = (uint)sizeof(NativeHostApiV1),
         Version = CurrentVersion,
         Log = (nint)(delegate* unmanaged[Cdecl]<byte*, int, void>)&Log,
         GetConfigJson = (nint)(delegate* unmanaged[Cdecl]<byte*, int, int>)&GetConfigJson,
-        SetConfigChangedHandler = (nint)(delegate* unmanaged[Cdecl]<nint, int>)&SetConfigChangedHandler,
+        SetConfigChangedHandler = (nint)(delegate* unmanaged[Cdecl]<nint, nint, int>)&SetConfigChangedHandler,
+        SetInstanceConfigJson = (nint)(delegate* unmanaged[Cdecl]<char*, int, byte*, int, nint, int>)&SetInstanceConfigJson,
+        Context = context,
     };
+
+    // Per-session config-changed subscriptions (package -> host push).
+    private static readonly object HandlerGate = new();
+    private static readonly Dictionary<nint, nint> ConfigChangedHandlers = [];
+
+    /// <summary>
+    /// Fires every registered package config-changed callback. Callers are
+    /// host-side setting sources (language/theme changes); a package
+    /// exception is contained and logged - it must never reach the host.
+    /// </summary>
+    internal static void PushConfigChanged()
+    {
+        nint[] handlers;
+        lock (HandlerGate)
+        {
+            handlers = [.. ConfigChangedHandlers.Values];
+        }
+        foreach (nint handler in handlers)
+        {
+            try
+            {
+                ((delegate* unmanaged[Cdecl]<void>)handler)();
+            }
+            catch (Exception error)
+            {
+                App.LogVerbose($"[NativePackage] config-changed callback failed: {error.Message}");
+            }
+        }
+    }
+
+    internal static void DetachSession(nint context)
+    {
+        NativePackageContextRegistry.Unregister(context);
+        lock (HandlerGate)
+        {
+            ConfigChangedHandlers.Remove(context);
+        }
+    }
 
     /// <summary>Config payload: locale + accent theme tokens (batch C2 contract).</summary>
     internal static string BuildConfigJson(string locale, string accent) =>
         $$"""{"locale":"{{locale}}","accent":"{{accent}}"}""";
 
-    private static readonly string CurrentConfig = BuildConfigJson(
-        System.Globalization.CultureInfo.CurrentUICulture.Name,
-        "#FF4CC2FF");
+    /// <summary>
+    /// DeskBox's own language selection, not the OS UI culture - the user can
+    /// override the OS locale in settings and the built-in widgets follow
+    /// that choice (audit round 18). Falls back to the OS culture when the
+    /// app instance is not available.
+    /// </summary>
+    private static string CurrentLocale() =>
+        App.Current?.LocalizationService?.CurrentCultureName
+        ?? System.Globalization.CultureInfo.CurrentUICulture.Name;
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     private static int GetConfigJson(byte* buffer, int bufferLength)
     {
         try
         {
-            byte[] utf8 = Encoding.UTF8.GetBytes(CurrentConfig);
+            byte[] utf8 = Encoding.UTF8.GetBytes(BuildConfigJson(CurrentLocale(), "#FF4CC2FF"));
             if (utf8.Length > bufferLength) return utf8.Length;
             for (int index = 0; index < utf8.Length; index++) buffer[index] = utf8[index];
             return utf8.Length;
@@ -134,12 +231,88 @@ internal static unsafe class NativeHostApiBridge
     }
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
-    private static int SetConfigChangedHandler(nint handler)
+    private static int SetConfigChangedHandler(nint context, nint handler)
     {
-        // Package-side subscription recorded; the product notification source
-        // (theme/locale change events) wires up during batch D migration.
-        App.LogVerbose($"[NativePackage] config-changed handler registered: 0x{handler:X}");
-        return 0;
+        try
+        {
+            // Only sessions with a live context may subscribe (audit 20 §31:
+            // attribution). handler=0 unsubscribes.
+            if (NativePackageContextRegistry.TryResolve(context) is null)
+            {
+                return unchecked((int)0x80070057);
+            }
+            SubscribeConfigChanged(context, handler);
+            App.LogVerbose($"[NativePackage] config-changed handler registered for context 0x{context:X}");
+            return 0;
+        }
+        catch
+        {
+            return unchecked((int)0x80004005); // E_FAIL
+        }
+    }
+
+    /// <summary>
+    /// Managed seam for the subscription store (behavior-testable without a
+    /// native call), also used by the callback above.
+    /// </summary>
+    internal static void SubscribeConfigChanged(nint context, nint handler)
+    {
+        lock (HandlerGate)
+        {
+            if (handler != 0)
+            {
+                ConfigChangedHandlers[context] = handler;
+            }
+            else
+            {
+                ConfigChangedHandlers.Remove(context);
+            }
+        }
+    }
+
+    internal static int RegisteredConfigChangedHandlerCount
+    {
+        get { lock (HandlerGate) return ConfigChangedHandlers.Count; }
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static int SetInstanceConfigJson(char* instanceId, int instanceIdLength, byte* json, int jsonLength, nint context)
+    {
+        try
+        {
+            if (instanceId is null || json is null || jsonLength <= 0) return unchecked((int)0x80070057);
+            string widgetId = new(instanceId, 0, instanceIdLength);
+            string payload = Encoding.UTF8.GetString(json, jsonLength);
+            // Generic routing with session attribution (audit 20 §31): the
+            // echoed context identifies the calling session, and the
+            // instance must belong to that package - a package cannot patch
+            // another package's instance.
+            NativePackageContext? owner = NativePackageContextRegistry.TryResolve(context);
+            if (owner is null)
+            {
+                return unchecked((int)0x80070057);
+            }
+            string? registeredPackageId = PackageInstanceRegistry.TryResolvePackageId(widgetId);
+            if (!string.Equals(registeredPackageId, owner.PackageId, StringComparison.Ordinal))
+            {
+                App.LogVerbose($"[NativePackage] config patch for instance {widgetId} does not belong to {owner.PackageId}; rejected");
+                return unchecked((int)0x80070057); // E_INVALIDARG
+            }
+            OfficialPackageBinding? binding = PackageBindingRegistry.TryGetByPackageId(owner.PackageId);
+            if (binding?.Migration is null || !binding.Migration.TryApplyPatch(widgetId, payload))
+            {
+                return unchecked((int)0x80070057); // E_INVALIDARG
+            }
+            // The adapter has ACCEPTED the patch; the authoritative store
+            // update runs fire-and-forget (see the adapter's CommitAsync).
+            // The return value means accepted, not committed.
+            return 0;
+        }
+        catch (Exception error)
+        {
+            App.LogVerbose($"[NativePackage] instance config write-through failed: {error.Message}");
+            return unchecked((int)0x80004005); // E_FAIL
+        }
     }
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
@@ -155,6 +328,16 @@ internal static unsafe class NativeHostApiBridge
         }
     }
 }
+
+/// <summary>
+/// HostApi ABI FREEZE POLICY (audit round 21): HostApi v4 is the first
+/// frozen baseline. Versions v1–v3 were internal pre-release experiments
+/// and are not compatibility targets. From v4 onward, existing function
+/// pointer slots AND their signatures are immutable — new capabilities are
+/// added as NEW slots appended at the table end. The package's
+/// Size/Version gate (RequiredHostApiVersion) ensures it never reads past
+/// what the host provides.
+/// </summary>
 
 /// <summary>
 /// Batch C1 runtime contract (ABI v4): one session per loaded module identity
@@ -173,6 +356,19 @@ internal static class NativeWidgetRuntimeManager
     private static readonly object Gate = new();
     private static readonly Dictionary<string, NativePackageSession> Sessions = [];
     private static readonly Dictionary<string, string> LoadedModuleHashes = [];
+    // audit round 21 — Faulted/RestartRequired: a package whose shutdown
+    // reported failure has unknown internal state, and the NativeAOT module
+    // stays resident for the process lifetime. It must never be re-activated
+    // in this process; the flag clears only on restart.
+    private static readonly Dictionary<string, string> FaultedPackages = [];
+
+    internal static bool IsFaulted(string identityKey)
+    {
+        lock (Gate)
+        {
+            return FaultedPackages.ContainsKey(identityKey);
+        }
+    }
 
     public static bool TryCreateInstance(
         NativePackageDescriptor descriptor,
@@ -182,6 +378,17 @@ internal static class NativeWidgetRuntimeManager
         out NativeWidgetLease? lease)
     {
         lease = null;
+        // audit round 21 — Faulted/RestartRequired: a package whose shutdown
+        // failed has unknown resident state; refuse re-activation until
+        // process restart even though the module is still loaded.
+        lock (Gate)
+        {
+            if (FaultedPackages.TryGetValue(descriptor.Identity.Key, out string? reason))
+            {
+                App.Log($"[NativePackage] {descriptor.Identity.Key} is faulted and cannot be re-activated in this process ({reason})");
+                return false;
+            }
+        }
         NativePackageSession? session = null;
         lock (Gate)
         {
@@ -226,9 +433,9 @@ internal static class NativeWidgetRuntimeManager
     }
 
     /// <summary>
-    /// Product entry point (adapter seam until the package-format freeze adds
-    /// runtime:native to the schema; until then every registry record is
-    /// rejected here by construction - fail-closed).
+    /// Product entry point for a verified runtime:native record. The package
+    /// manager supplies the identity-bound immutable install handle; arbitrary
+    /// directories never reach this entry point.
     /// </summary>
     public static bool TryCreateFromInstalled(
         NativeInstalledPackageHandle handle,
@@ -281,7 +488,23 @@ internal static class NativeWidgetRuntimeManager
         }
         if (shutdown)
         {
-            lease.Session.Shutdown();
+            // audit round 21 — Faulted/RestartRequired: a failed package
+            // shutdown leaves the resident module's state unknown, so the
+            // identity is marked faulted and TryCreateInstance refuses
+            // re-activation until process restart.
+            if (lease.Session.Shutdown())
+            {
+                App.Log($"[NativePackage] {lease.Session.Identity.Key} dormant; re-activation allowed");
+            }
+            else
+            {
+                string reason = "package shutdown reported failure; restart required";
+                lock (Gate)
+                {
+                    FaultedPackages[lease.Session.Identity.Key] = reason;
+                }
+                App.Log($"[NativePackage] {lease.Session.Identity.Key} marked FAULTED: {reason}");
+            }
         }
     }
 }
@@ -294,14 +517,18 @@ internal sealed class NativeWidgetLease : IDisposable
     private bool _released;
 
     internal Microsoft.UI.Xaml.FrameworkElement View { get; private set; } = null!;
+    private string _instanceId = null!;
 
     internal NativePackageSession Session => _session;
 
-    internal static NativeWidgetLease Create(NativePackageSession session, nint handle, Microsoft.UI.Xaml.FrameworkElement view) => new()
+    internal static NativeWidgetLease Create(
+        NativePackageSession session, nint handle, Microsoft.UI.Xaml.FrameworkElement view,
+        string instanceId) => new()
     {
         _session = session,
         _handle = handle,
         View = view,
+        _instanceId = instanceId,
     };
 
     /// <summary>
@@ -313,7 +540,11 @@ internal sealed class NativeWidgetLease : IDisposable
     internal bool TryRelease()
     {
         if (_released) return false;
-        if (!_session.DestroyWidget(_handle)) return false;
+        if (!_session.DestroyWidget(_handle))
+        {
+            App.LogVerbose($"[NativePackage] destroy retry pending for instance {_instanceId}");
+            return false;
+        }
         _released = true;
         return true;
     }
@@ -357,6 +588,12 @@ internal sealed unsafe class NativePackageSession
     private readonly nint _widgetEventExport; // required export at ABI v4
     private readonly object _instanceGate = new();
     private readonly HashSet<nint> _liveHandles = [];
+    // audit 20 §18: instance ids for PackageInstanceRegistry unregistration.
+    // audit 21: instance data roots are NOT tracked (or touched) here —
+    // runtime destroy keeps persistent data; logical widget deletion owns
+    // data removal via NativeInstanceDataLifecycle.
+    private readonly Dictionary<nint, string> _instanceIds = [];
+    internal nint _hostApiContext;
 
     internal NativePackageSession(
         NativePackageIdentity identity,
@@ -386,7 +623,11 @@ internal sealed unsafe class NativePackageSession
     internal static void Activate(NativePackageSession session)
     {
         var activate = (delegate* unmanaged[Cdecl]<char*, int, char*, int, NativeHostApiV1*, int>)session._activateExport;
-        NativeHostApiV1 hostApi = NativeHostApiBridge.Create();
+        // Per-session attribution (audit 20 §31): the package echoes this id
+        // back on config-subscription and instance-config calls.
+        session._hostApiContext = NativePackageContextRegistry.Register(
+            new NativePackageContext { PackageId = session.Identity.PackageId });
+        NativeHostApiV1 hostApi = NativeHostApiBridge.Create(session._hostApiContext);
         int status;
         fixed (char* package = session.PackageRoot)
         fixed (char* data = session.PackageDataRoot)
@@ -396,6 +637,7 @@ internal sealed unsafe class NativePackageSession
         }
         if (status != 0)
         {
+            NativeHostApiBridge.DetachSession(session._hostApiContext);
             throw new InvalidOperationException($"[NativePackage] activate failed for {session.Identity.Key}: 0x{status:X8}");
         }
         App.Log($"[NativePackage] session active: {session.Identity.Key}");
@@ -453,11 +695,26 @@ internal sealed unsafe class NativePackageSession
         }
         view.HorizontalAlignment = Microsoft.UI.Xaml.HorizontalAlignment.Stretch;
         view.VerticalAlignment = Microsoft.UI.Xaml.VerticalAlignment.Stretch;
-        lock (_instanceGate) _liveHandles.Add(handle);
-        return NativeWidgetLease.Create(this, handle, view);
+        lock (_instanceGate)
+        {
+            _liveHandles.Add(handle);
+            _instanceIds[handle] = instanceId;
+        }
+        // Ownership for the generic write-through routing (audit 20 §18).
+        PackageInstanceRegistry.Register(Identity.PackageId, instanceId);
+        return NativeWidgetLease.Create(this, handle, view, instanceId);
     }
 
-    /// <summary>Destroys by handle; returns true only when the package confirms success.</summary>
+    /// <summary>
+    /// Destroys by handle; returns true only when the package confirms success.
+    /// Runtime destroy is lifecycle 1 of 3 (audit round 21): it releases the
+    /// widget handle and ownership ONLY — the persistent instance data root
+    /// is deliberately KEPT, because transient teardowns (group switches,
+    /// content rebuilds, reparents) reuse the same instance. Persistent data
+    /// removal belongs exclusively to logical widget deletion
+    /// (NativeInstanceDataLifecycle.DeleteAsync) after the WidgetConfig
+    /// deletion has committed.
+    /// </summary>
     internal bool DestroyWidget(nint handle)
     {
         int status = ((delegate* unmanaged[Cdecl]<nint, int>)_destroyExport)(handle);
@@ -466,7 +723,16 @@ internal sealed unsafe class NativePackageSession
             App.Log($"[NativePackage] destroy 0x{handle:X} failed: 0x{status:X8}; instance remains counted");
             return false;
         }
-        lock (_instanceGate) _liveHandles.Remove(handle);
+        string? instanceId;
+        lock (_instanceGate)
+        {
+            _liveHandles.Remove(handle);
+            _instanceIds.Remove(handle, out instanceId);
+        }
+        if (instanceId is not null)
+        {
+            PackageInstanceRegistry.Unregister(instanceId);
+        }
         return true;
     }
 
@@ -499,11 +765,24 @@ internal sealed unsafe class NativePackageSession
         }
     }
 
-    internal void Shutdown()
+    /// <summary>
+    /// Tears the session down. Returns true only when the package confirmed
+    /// a clean shutdown — a false return means the resident module's
+    /// internal state is unknown, and the caller must mark the package
+    /// Faulted so it is never re-activated in this process (audit round 21).
+    /// Session attribution (context + config subscription) is detached on
+    /// EVERY path: the previous early-return leaked both on the normal
+    /// shutdown path, accumulating stale callbacks across activate cycles.
+    /// Persistent instance data roots are never touched here — runtime
+    /// teardown is lifecycle 1; data removal belongs to logical deletion.
+    /// </summary>
+    internal bool Shutdown()
     {
+        bool succeeded;
         try
         {
             int status = ((delegate* unmanaged[Cdecl]<int>)_shutdownExport)();
+            succeeded = status == 0;
             if (status != 0)
             {
                 App.Log($"[NativePackage] shutdown reported 0x{status:X8} for {Identity.Key}; the package still holds state (lifecycle bug upstream)");
@@ -516,7 +795,29 @@ internal sealed unsafe class NativePackageSession
         catch (Exception error)
         {
             App.Log($"[NativePackage] shutdown failed for {Identity.Key}: {error.Message}");
+            succeeded = false;
         }
+
+        // Release ownership of any still-tracked instances (a destroy that
+        // failed earlier, or a host that tore down without destroying).
+        // Persistent data roots are KEPT — logical deletion owns them.
+        lock (_instanceGate)
+        {
+            foreach (nint handle in _liveHandles.ToArray())
+            {
+                if (_instanceIds.Remove(handle, out string? instanceId))
+                {
+                    PackageInstanceRegistry.Unregister(instanceId);
+                }
+            }
+            _liveHandles.Clear();
+        }
+
+        // No early return above this line: session attribution must detach
+        // on every path (audit round 21 — the normal shutdown path used to
+        // leak the context and config-changed subscription).
+        NativeHostApiBridge.DetachSession(_hostApiContext);
+        return succeeded;
     }
 }
 
