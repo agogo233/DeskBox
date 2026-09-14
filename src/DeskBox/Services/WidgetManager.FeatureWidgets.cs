@@ -1,4 +1,4 @@
-﻿﻿// Copyright (c) DeskBox. All rights reserved.
+﻿// Copyright (c) DeskBox. All rights reserved.
 
 using DeskBox.Contracts;
 using DeskBox.Models;
