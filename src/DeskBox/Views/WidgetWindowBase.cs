@@ -42,7 +42,7 @@ public abstract partial class WidgetWindowBase : Window
     // Set by derived classes in their constructors before calling ConfigureWindowCore().
     protected SettingsService SettingsService = null!;
     protected IntPtr HWnd;
-    protected AppWindow AppWindow = null!;
+    protected new AppWindow AppWindow = null!;
     protected WidgetWindowDiagnostics Diagnostics = null!;
     protected WidgetTrayAnimationController TrayAnimation = null!;
     

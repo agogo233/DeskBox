@@ -34,7 +34,6 @@ public static class WidgetMetadataKeys
     // Foreground text overrides (host-owned)
     public const string WidgetForegroundMode = WidgetForegroundSettings.ModeOverrideMetadataKey;
     public const string WidgetForegroundColor = WidgetForegroundSettings.ColorOverrideMetadataKey;
-    public const string WidgetTextEdgeMode = WidgetForegroundSettings.EdgeOverrideMetadataKey;
 
     // File stack overrides (File-widget owned)
     public const string FileStacksEnabled = WidgetFileStackSettings.EnabledOverrideMetadataKey;

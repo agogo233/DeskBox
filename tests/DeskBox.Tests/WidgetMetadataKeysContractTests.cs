@@ -23,7 +23,6 @@ public sealed class WidgetMetadataKeysContractTests
             "FolderOpenBehavior = FileWidgetFolderOpenBehaviorNames.MetadataKey",
             "WidgetForegroundMode = WidgetForegroundSettings.ModeOverrideMetadataKey",
             "WidgetForegroundColor = WidgetForegroundSettings.ColorOverrideMetadataKey",
-            "WidgetTextEdgeMode = WidgetForegroundSettings.EdgeOverrideMetadataKey",
             "FileStacksEnabled = WidgetFileStackSettings.EnabledOverrideMetadataKey",
             "FileStackGroupBy = WidgetFileStackSettings.GroupByOverrideMetadataKey",
             "FileStackThreshold = WidgetFileStackSettings.ThresholdOverrideMetadataKey",
@@ -44,7 +43,7 @@ public sealed class WidgetMetadataKeysContractTests
             Assert.Contains(alias, registry, StringComparison.Ordinal);
         }
 
-        Assert.Equal(19, requiredAliases.Length);
+        Assert.Equal(18, requiredAliases.Length);
     }
 
     [Fact]
