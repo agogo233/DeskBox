@@ -110,9 +110,58 @@ public sealed class FileOpenInteractionContractTests
         Assert.Contains("await ViewModel.OpenItemAsync(", opening, StringComparison.Ordinal);
         Assert.Contains("Widget.OpenItemFailed", opening, StringComparison.Ordinal);
         Assert.Contains("Widget.OpenItemBusy", opening, StringComparison.Ordinal);
-        Assert.Contains("Widget.OpenItemDispatched", opening, StringComparison.Ordinal);
+        Assert.Contains("Widget.OpenItemShortcutTargetMissing", opening, StringComparison.Ordinal);
+        // Success stays silent: the opened window is its own feedback.
+        Assert.DoesNotContain("Widget.OpenItemDispatched", opening, StringComparison.Ordinal);
         Assert.Contains("OpenItem.DuplicateSuppressed", opening, StringComparison.Ordinal);
         Assert.Contains("await Task.Yield()", opening, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void UnassociatedItems_DeferToPickerAndKeepFailureToasts()
+    {
+        string win32Helper = File.ReadAllText(TestPaths.FromRepository(
+            "src/DeskBox/Helpers/Win32Helper.cs"));
+        string openItem = File.ReadAllText(TestPaths.FromRepository(
+            "src/DeskBox/Services/FileService.OpenItem.cs"));
+        string opening = File.ReadAllText(TestPaths.FromRepository(
+            "src/DeskBox/Controls/WidgetContents/FileSurfaceContent.Opening.cs"));
+
+        // Every Shell dispatch path reports a dismissed picker as a silent
+        // success, and no dialog API exposes a reliable cancellation signal,
+        // so the service defers unassociated items to the UI layer's picker
+        // and a dismissal stays silent by design.
+        Assert.Contains(
+            "return OpenItemResult.RequiresOpenWithPicker;",
+            openItem,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "internal static bool HasShellOpenAssociation(string path)",
+            win32Helper,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "Windows.System.Launcher.LaunchFileAsync",
+            opening,
+            StringComparison.Ordinal);
+        // A picker failure is still a real error path.
+        Assert.Contains(
+            "pickerFailed",
+            opening,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "Widget.OpenItemFailed",
+            opening,
+            StringComparison.Ordinal);
+        // The cancelled-open outcome no longer exists anywhere.
+        Assert.DoesNotContain(
+            "Widget.OpenItemCancelled",
+            opening,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "OpenItemResult.Cancelled",
+            openItem + File.ReadAllText(TestPaths.FromRepository(
+                "src/DeskBox/Services/FileService.cs")),
+            StringComparison.Ordinal);
     }
 
     [Fact]
@@ -152,50 +201,118 @@ public sealed class FileOpenInteractionContractTests
         int successBranch = opening.IndexOf(
             "else if (result == FileService.OpenItemResult.OpenedOrHandled)",
             StringComparison.Ordinal);
-        int clearSelection = opening.IndexOf(
-            "ClearOpenedItemSelection(item, stackPopoverGeneration);",
-            StringComparison.Ordinal);
-        int successFeedback = opening.IndexOf(
-            "T(\"Widget.OpenItemDispatched\")",
-            StringComparison.Ordinal);
 
-        Assert.True(successBranch >= 0 && clearSelection > successBranch);
-        Assert.True(successFeedback > clearSelection);
+        Assert.True(successBranch >= 0);
+        // Success stays silent: the opened window is its own feedback.
+        Assert.DoesNotContain("Widget.OpenItemDispatched", opening, StringComparison.Ordinal);
+        // A finished dispatch ends the double-click's selection gesture: the
+        // definition plus one call per completing branch, each deselecting
+        // immediately and once more after the pending input batch drains.
+        Assert.Contains(
+            "DispatcherQueuePriority.Low",
+            opening,
+            StringComparison.Ordinal);
+        // Late native selection commits are also suppressed at the source:
+        // fast dispatch paths can finish every scheduled deselect first.
+        Assert.Contains(
+            "RegisterOpenedItemSelectionSuppression(item);",
+            opening,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "IsOpenSelectionSuppressed(added)",
+            File.ReadAllText(TestPaths.FromRepository(
+                "src/DeskBox/Controls/WidgetContents/FileSurfaceContent.xaml.cs")),
+            StringComparison.Ordinal);
         Assert.Equal(
-            clearSelection,
-            opening.LastIndexOf(
-                "ClearOpenedItemSelection(item, stackPopoverGeneration);",
-                StringComparison.Ordinal));
+            3,
+            opening.Split(
+                "ClearOpenedItemSelectionAfterDispatch(",
+                StringSplitOptions.None).Length - 1);
+        // Unassociated items get the system application picker here; a
+        // dismissal is silent because the dialog APIs report it as success.
+        Assert.Contains(
+            "DisplayApplicationPicker",
+            opening,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "Windows.System.Launcher.LaunchFileAsync",
+            opening,
+            StringComparison.Ordinal);
         Assert.Contains(
             "generation != _openStateGeneration",
             opening[..successBranch],
             StringComparison.Ordinal);
 
-        int helperStart = opening.IndexOf(
-            "private void ClearOpenedItemSelection(",
-            StringComparison.Ordinal);
-        int helperEnd = opening.IndexOf(
-            "private bool TryBeginOpenItem(",
-            helperStart,
-            StringComparison.Ordinal);
-        Assert.True(helperStart >= 0 && helperEnd > helperStart);
-        string helper = opening[helperStart..helperEnd];
+        // The per-view deselect helper must clear both layouts, the stack
+        // popover, and the pointer feedback without a blanket selection reset.
+        Assert.Contains("ItemsGrid.SelectedItems.Remove(item)", opening, StringComparison.Ordinal);
+        Assert.Contains("ItemsList.SelectedItems.Remove(item)", opening, StringComparison.Ordinal);
+        Assert.Contains("ClearOpenedItemPointerFeedback(ItemsGrid, item)", opening, StringComparison.Ordinal);
+        Assert.Contains("ClearOpenedItemPointerFeedback(ItemsList, item)", opening, StringComparison.Ordinal);
+        Assert.Contains("_stackPopoverItemsView?.SelectedItems.Remove(item)", opening, StringComparison.Ordinal);
+        Assert.Contains("stackPopoverGeneration == _stackPopoverShowGeneration", opening, StringComparison.Ordinal);
+        Assert.Contains("surface.ClearPointerFeedbackAfterOpen()", opening, StringComparison.Ordinal);
+        Assert.Contains("UpdateSelectionCommandBar()", opening, StringComparison.Ordinal);
+        Assert.Contains("RefreshItemSelectionVisuals()", opening, StringComparison.Ordinal);
+        Assert.DoesNotContain("SelectedItems.Clear()", opening, StringComparison.Ordinal);
+    }
 
-        Assert.Contains("ItemsGrid.SelectedItems.Remove(item)", helper, StringComparison.Ordinal);
-        Assert.Contains("ItemsList.SelectedItems.Remove(item)", helper, StringComparison.Ordinal);
-        Assert.Contains("ClearOpenedItemPointerFeedback(ItemsGrid, item)", helper, StringComparison.Ordinal);
-        Assert.Contains("ClearOpenedItemPointerFeedback(ItemsList, item)", helper, StringComparison.Ordinal);
-        Assert.Contains("_stackPopoverItemsView?.SelectedItems.Remove(item)", helper, StringComparison.Ordinal);
-        Assert.Contains("stackPopoverGeneration == _stackPopoverShowGeneration", helper, StringComparison.Ordinal);
-        Assert.Contains("ClearOpenedItemPointerFeedback(popover, item)", helper, StringComparison.Ordinal);
-        Assert.Contains("view.ContainerFromItem(item)", helper, StringComparison.Ordinal);
-        Assert.Contains("ReferenceEquals(surface.DataContext, item)", helper, StringComparison.Ordinal);
-        Assert.Contains("surface.ClearPointerFeedbackAfterOpen()", helper, StringComparison.Ordinal);
-        Assert.Contains("ApplyItemSurfaceVisual(border, surface.VisualState)", helper, StringComparison.Ordinal);
-        Assert.Contains("UpdateSelectionCommandBar()", helper, StringComparison.Ordinal);
-        Assert.Contains("RefreshItemSelectionVisuals()", helper, StringComparison.Ordinal);
-        Assert.DoesNotContain("SelectedItems.Clear()", helper, StringComparison.Ordinal);
-        Assert.DoesNotContain("ClearItemSelection()", helper, StringComparison.Ordinal);
+    [Fact]
+    public void ItemSurfaces_ClearPendingDragSnapshotWhenPointerGestureEnds()
+    {
+        string xaml = File.ReadAllText(TestPaths.FromRepository(
+            "src/DeskBox/Controls/WidgetContents/FileSurfaceContent.xaml"));
+        string visuals = File.ReadAllText(TestPaths.FromRepository(
+            "src/DeskBox/Controls/WidgetContents/FileSurfaceContent.ItemVisuals.cs"));
+        string selection = File.ReadAllText(TestPaths.FromRepository(
+            "src/DeskBox/Controls/WidgetContents/FileSurfaceContent.SelectionAndMenus.cs"));
+
+        // Every item template that stages a drag snapshot on press must clear
+        // it when the gesture ends, so the snapshot cannot keep the
+        // deactivation selection clear guarded after an opened file's app
+        // takes the foreground.
+        int pressedCount = xaml.Split(
+            "PointerPressed=\"ItemSurface_PointerPressed\"",
+            StringSplitOptions.None).Length - 1;
+        int releasedCount = xaml.Split(
+            "PointerReleased=\"ItemSurface_PointerGestureEnded\"",
+            StringSplitOptions.None).Length - 1;
+        int captureLostCount = xaml.Split(
+            "PointerCaptureLost=\"ItemSurface_PointerGestureEnded\"",
+            StringSplitOptions.None).Length - 1;
+        Assert.True(pressedCount > 0);
+        Assert.Equal(pressedCount, releasedCount);
+        Assert.Equal(pressedCount, captureLostCount);
+
+        Assert.Contains(
+            "private void ItemSurface_PointerGestureEnded(",
+            visuals,
+            StringComparison.Ordinal);
+        int handlerStart = visuals.IndexOf(
+            "private void ItemSurface_PointerGestureEnded(",
+            StringComparison.Ordinal);
+        int handlerEnd = visuals.IndexOf(
+            "private void ItemSurface_DragOver(",
+            handlerStart,
+            StringComparison.Ordinal);
+        Assert.True(handlerStart >= 0 && handlerEnd > handlerStart);
+        Assert.Contains(
+            "_pendingPointerDragItems = [];",
+            visuals[handlerStart..handlerEnd],
+            StringComparison.Ordinal);
+
+        int captureLostStart = selection.IndexOf(
+            "private void HandleItemsPointerCaptureLost(",
+            StringComparison.Ordinal);
+        int captureLostEnd = selection.IndexOf(
+            "private bool CanStartBoxSelection(",
+            captureLostStart,
+            StringComparison.Ordinal);
+        Assert.True(captureLostStart >= 0 && captureLostEnd > captureLostStart);
+        Assert.Contains(
+            "_pendingPointerDragItems = [];",
+            selection[captureLostStart..captureLostEnd],
+            StringComparison.Ordinal);
     }
 
     [Fact]

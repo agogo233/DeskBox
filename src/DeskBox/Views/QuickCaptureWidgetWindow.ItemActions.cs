@@ -383,16 +383,13 @@ public sealed partial class QuickCaptureWidgetWindow
     private static void ApplyActionButtonHostTheme(Border actions, DependencyObject itemRoot)
     {
         bool isDark = (itemRoot as FrameworkElement)?.ActualTheme == ElementTheme.Dark;
+        // The hover-revealed action bar is pointer chrome, so it uses the
+        // neutral interaction palette. Only the icons keep the accent tint.
         var accentColor = App.Current.ThemeService?.GetEffectiveAccentColor() ?? AccentColorHelper.DefaultAccentColor;
-        actions.Background = new SolidColorBrush(WithAlpha(
-            BuildAccentSurfaceColor(
-                isDark,
-                accentColor,
-                isDark ? ColorHelper.FromArgb(0xFF, 0x1E, 0x23, 0x29) : ColorHelper.FromArgb(0xFF, 0xFF, 0xFF, 0xFF),
-                accentMix: isDark ? 0.18 : 0.08,
-                overlayMix: isDark ? 0.03 : 0.02),
-            0xFF));
-        actions.BorderBrush = new SolidColorBrush(WithAlpha(accentColor, isDark ? (byte)0x4A : (byte)0x30));
+        actions.Background = new SolidColorBrush(
+            NeutralInteractionBrush.Fill(actions));
+        actions.BorderBrush = new SolidColorBrush(
+            NeutralInteractionBrush.Line(actions));
         actions.BorderThickness = new Thickness(1);
 
         foreach (var button in FindVisualChildren<Button>(actions))
@@ -404,8 +401,11 @@ public sealed partial class QuickCaptureWidgetWindow
     private static void ApplyActionButtonTheme(Button button, bool isDark, Windows.UI.Color accentColor)
     {
         var transparent = new SolidColorBrush(Colors.Transparent);
-        var hoverBackground = new SolidColorBrush(WithAlpha(accentColor, isDark ? (byte)0x24 : (byte)0x18));
-        var pressedBackground = new SolidColorBrush(WithAlpha(accentColor, isDark ? (byte)0x36 : (byte)0x24));
+        // Pointer states stay neutral; the accent remains the icon tint.
+        var hoverBackground = new SolidColorBrush(
+            NeutralInteractionBrush.Fill(button));
+        var pressedBackground = new SolidColorBrush(
+            NeutralInteractionBrush.Fill(button));
         var foreground = new SolidColorBrush(WithAlpha(accentColor, isDark ? (byte)0xF2 : (byte)0xE2));
 
         button.Background = transparent;
@@ -431,16 +431,11 @@ public sealed partial class QuickCaptureWidgetWindow
             return;
         }
 
+        // Hover is a pointer state, so the row and its preview frame use the
+        // neutral hover surface instead of an accent tint.
         bool isDark = (itemRoot as FrameworkElement)?.ActualTheme == ElementTheme.Dark;
-        var accentColor = App.Current.ThemeService?.GetEffectiveAccentColor() ?? AccentColorHelper.DefaultAccentColor;
-        var hoverBackground = WithAlpha(
-            BuildAccentSurfaceColor(
-                isDark,
-                accentColor,
-                isDark ? ColorHelper.FromArgb(0xFF, 0x25, 0x28, 0x2F) : ColorHelper.FromArgb(0xFF, 0xFF, 0xFF, 0xFF),
-                accentMix: isDark ? 0.24 : 0.12,
-                overlayMix: isDark ? 0.04 : 0.02),
-            isDark ? (byte)0x6A : (byte)0x86);
+        var hoverBackground = NeutralInteractionBrush.Fill(
+            itemRoot as FrameworkElement);
 
         if (FindVisualChild<Border>(itemRoot, "ItemHoverBackground") is { } hoverBackgroundBorder)
         {
@@ -451,7 +446,7 @@ public sealed partial class QuickCaptureWidgetWindow
         if (FindVisualChild<Border>(itemRoot, "ImagePreviewBorder") is { } imageBorder)
         {
             imageBorder.BorderBrush = isHovered
-                ? new SolidColorBrush(WithAlpha(accentColor, isDark ? (byte)0xE0 : (byte)0xCC))
+                ? new SolidColorBrush(NeutralInteractionBrush.Line(imageBorder))
                 : GetBrushResourceOrFallback(
                     "CardStrokeColorDefaultBrush",
                     isDark
@@ -571,10 +566,10 @@ public sealed partial class QuickCaptureWidgetWindow
             return;
         }
 
+        // Insertion position is a drag state, so it draws the neutral
+        // interaction line rather than the accent.
         materialBorder.BorderBrush = active
-            ? new SolidColorBrush(
-                App.Current.ThemeService?.GetEffectiveAccentColor() ??
-                AccentColorHelper.DefaultAccentColor)
+            ? new SolidColorBrush(NeutralInteractionBrush.Line(materialBorder))
             : new SolidColorBrush(Colors.Transparent);
         materialBorder.BorderThickness = active
             ? insertAfter

@@ -128,156 +128,6 @@ public sealed partial class QuickCaptureWidgetWindow
             InputTextBox.Focus(FocusState.Programmatic);
         }
     }
-
-    private async Task ConfirmClearDataAsync()
-    {
-        if (_isClearingData || RootGrid.XamlRoot is null)
-        {
-            return;
-        }
-
-        var dialog = new ContentDialog
-        {
-            XamlRoot = RootGrid.XamlRoot,
-            Title = _localizationService.T("QuickCapture.ClearDataTitle"),
-            Content = new TextBlock
-            {
-                Text = _localizationService.Format(
-                    "QuickCapture.ClearDataDescriptionWithCount",
-                    ViewModel.RecordCount,
-                    ViewModel.RecentCount),
-                TextWrapping = TextWrapping.Wrap
-            },
-            PrimaryButtonText = _localizationService.T("QuickCapture.ClearData"),
-            CloseButtonText = _localizationService.T("Common.Cancel"),
-            DefaultButton = ContentDialogButton.Close
-        };
-        ApplyQuickCaptureDialogSizing(dialog);
-
-        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
-        {
-            return;
-        }
-
-        _isClearingData = true;
-        try
-        {
-            await ViewModel.ClearAsync();
-        }
-        finally
-        {
-            _isClearingData = false;
-        }
-    }
-
-    private async Task ClearDataAsync()
-    {
-        if (_isClearingData)
-        {
-            return;
-        }
-
-        _isClearingData = true;
-        try
-        {
-            await ViewModel.ClearAsync();
-        }
-        finally
-        {
-            _isClearingData = false;
-        }
-    }
-
-    private async Task ConfirmClearRecentAsync()
-    {
-        if (_isClearingData || RootGrid.XamlRoot is null)
-        {
-            return;
-        }
-
-        var dialog = new ContentDialog
-        {
-            XamlRoot = RootGrid.XamlRoot,
-            Title = _localizationService.T("QuickCapture.ClearRecentTitle"),
-            Content = new TextBlock
-            {
-                Text = _localizationService.Format(
-                    "QuickCapture.ClearRecentDescriptionWithCount",
-                    ViewModel.RecentCount),
-                TextWrapping = TextWrapping.Wrap
-            },
-            PrimaryButtonText = _localizationService.T("QuickCapture.ClearRecent"),
-            CloseButtonText = _localizationService.T("Common.Cancel"),
-            DefaultButton = ContentDialogButton.Close
-        };
-        ApplyQuickCaptureDialogSizing(dialog);
-
-        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
-        {
-            return;
-        }
-
-        _isClearingData = true;
-        try
-        {
-            await ViewModel.ClearRecentAsync();
-        }
-        finally
-        {
-            _isClearingData = false;
-        }
-    }
-
-    private async Task ClearRecentAsync()
-    {
-        if (_isClearingData)
-        {
-            return;
-        }
-
-        _isClearingData = true;
-        try
-        {
-            await ViewModel.ClearRecentAsync();
-        }
-        finally
-        {
-            _isClearingData = false;
-        }
-    }
-
-    private double GetQuickCaptureDialogWidth()
-    {
-        double rootWidth = RootGrid.ActualWidth;
-        if (!double.IsFinite(rootWidth) || rootWidth <= 0)
-        {
-            rootWidth = ViewModel.Config.Width;
-        }
-
-        if (!double.IsFinite(rootWidth) || rootWidth <= 0)
-        {
-            rootWidth = SettingsService.DefaultWidgetWidth;
-        }
-
-        return Math.Clamp(
-            rootWidth - QuickCaptureDialogHorizontalMargin,
-            QuickCaptureDialogMinWidth,
-            QuickCaptureDialogMaxWidth);
-    }
-
-    private void ApplyQuickCaptureDialogSizing(ContentDialog dialog, double? dialogWidth = null)
-    {
-        double compactWidth = dialogWidth ?? GetQuickCaptureDialogWidth();
-        double buttonMinWidth = Math.Clamp(
-            (compactWidth - 24) / 2,
-            QuickCaptureDialogMinButtonWidth,
-            QuickCaptureDialogMaxButtonWidth);
-
-        dialog.Resources["ContentDialogMinWidth"] = compactWidth;
-        dialog.Resources["ContentDialogMaxWidth"] = compactWidth;
-        dialog.Resources["ContentDialogButtonMinWidth"] = buttonMinWidth;
-    }
-
     private MenuFlyoutItem CreateToggleMenuItem(string text, string glyph, bool isChecked, Action<bool> applyValue)
     {
         var item = new ToggleMenuFlyoutItem
@@ -467,7 +317,7 @@ public sealed partial class QuickCaptureWidgetWindow
         ReleaseInteractionLayer(reason);
     }
 
-    private void ShowFlyoutWithElevation(MenuFlyout flyout, FrameworkElement target, Windows.Foundation.Point? position = null)
+    private void ShowFlyoutWithElevation(FlyoutBase flyout, FrameworkElement target, Windows.Foundation.Point? position = null)
     {
         BeginInteractionLayer("quick-flyout-opened");
         flyout.Closed += (_, _) =>
@@ -477,7 +327,9 @@ public sealed partial class QuickCaptureWidgetWindow
 
         if (position is Windows.Foundation.Point point)
         {
-            flyout.ShowAt(target, point);
+            flyout.ShowAt(
+                target,
+                new FlyoutShowOptions { Position = point });
         }
         else
         {

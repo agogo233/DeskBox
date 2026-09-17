@@ -29,7 +29,8 @@ namespace DeskBox.ViewModels;
     nameof(ListViewVisibility),
     nameof(LoadingVisibility),
     nameof(ShowFileItemPathTooltips),
-    nameof(VisibleItems)
+    nameof(VisibleItems),
+    nameof(RenderedItems)
 ], [])]
 public partial class WidgetViewModel
 {

@@ -75,6 +75,38 @@ public sealed class DeskBoxDiagnosticsBundleServiceTests : IDisposable
         Assert.DoesNotContain("S-1-5-18", sanitized, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Theory]
+    [InlineData("False", "True")]
+    [InlineData("True", "False")]
+    public void SanitizeLog_PreservesStartupChecksWhileRedactingActualPaths(
+        string pathCheck,
+        string executionLimitCheck)
+    {
+        string source =
+            "expectedPath='C:\\Private Folder\\DeskBox.exe' " +
+            "actualPath='C:\\Other Private Folder\\DeskBox.exe' " +
+            $"checks=taskName=True path={pathCheck} arguments=True " +
+            $"executionLimit={executionLimitCheck} restart=True";
+
+        string sanitized = DeskBoxDiagnosticsBundleService.SanitizeLog(source);
+
+        Assert.DoesNotContain("Private Folder", sanitized, StringComparison.Ordinal);
+        Assert.Contains("expectedPath=<REDACTED>", sanitized, StringComparison.Ordinal);
+        Assert.Contains("actualPath=<REDACTED>", sanitized, StringComparison.Ordinal);
+        Assert.Contains($"path={pathCheck}", sanitized, StringComparison.Ordinal);
+        Assert.Contains($"executionLimit={executionLimitCheck}", sanitized, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("True\\private.txt")]
+    [InlineData("'False/private.txt'")]
+    public void SanitizeLog_StillRedactsPathsBeginningWithBooleanText(string path)
+    {
+        string sanitized = DeskBoxDiagnosticsBundleService.SanitizeLog($"path={path} ready=True");
+
+        Assert.Equal("path=<REDACTED> ready=True", sanitized);
+    }
+
     private static DeskBoxDiagnosticSnapshot CreateSnapshot()
     {
         return new DeskBoxDiagnosticSnapshot(

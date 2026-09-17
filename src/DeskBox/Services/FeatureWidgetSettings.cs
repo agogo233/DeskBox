@@ -8,15 +8,14 @@ namespace DeskBox.Services;
 /// </summary>
 public static class FeatureWidgetSettings
 {
+    // Derived from the content descriptor table so a widget kind is declared
+    // once. A kind becomes user-enableable by setting IsFeatureWidget on its
+    // descriptor; the ordered list below follows that table's declaration order.
     private static readonly WidgetKind[] s_featureKinds =
-    [
-        WidgetKind.QuickCapture,
-        WidgetKind.Todo,
-        WidgetKind.Music,
-        WidgetKind.Weather,
-        WidgetKind.Search,
-        WidgetKind.Glance
-    ];
+        WidgetContentFactory.DescriptorList
+            .Where(descriptor => descriptor.IsFeatureWidget)
+            .Select(descriptor => descriptor.WidgetKind)
+            .ToArray();
 
     public static IReadOnlyList<WidgetKind> FeatureKinds => s_featureKinds;
 

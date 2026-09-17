@@ -61,7 +61,9 @@
             <Setter Property="MinHeight" Value="24" />
             <Setter Property="Padding" Value="0" />
             <Setter Property="Background" Value="Transparent" />
-            <Setter Property="BorderBrush" Value="{ThemeResource AccentFillColorDefaultBrush}" />
+            <!-- The selected filter is a selection state, so its ring is the
+                 neutral strong stroke, not the accent. -->
+            <Setter Property="BorderBrush" Value="{ThemeResource ControlStrongStrokeColorDefaultBrush}" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="CornerRadius" Value="{StaticResource WidgetCornerRadiusSmall}" />
         </Style>
@@ -328,7 +330,7 @@
                                 <Border
                                     Grid.ColumnSpan="3"
                                     Margin="-8,-6"
-                                    Background="{ThemeResource AccentFillColorDefaultBrush}"
+                                    Background="{ThemeResource SubtleFillColorSecondaryBrush}"
                                     CornerRadius="{StaticResource WidgetCornerRadiusSmall}"
                                     IsHitTestVisible="False"
                                     Opacity="0.10"
@@ -337,7 +339,7 @@
                                 <Border
                                     Grid.ColumnSpan="3"
                                     Margin="-8,-6"
-                                    Background="{ThemeResource AccentFillColorDefaultBrush}"
+                                    Background="{ThemeResource SubtleFillColorTertiaryBrush}"
                                     CornerRadius="{StaticResource WidgetCornerRadiusSmall}"
                                     IsHitTestVisible="False"
                                     Opacity="0.12"
@@ -349,7 +351,7 @@
                                     Width="2"
                                     Margin="-8,-6"
                                     HorizontalAlignment="Left"
-                                    Background="{ThemeResource AccentFillColorDefaultBrush}"
+                                    Background="{ThemeResource ControlStrongStrokeColorDefaultBrush}"
                                     CornerRadius="1"
                                     IsHitTestVisible="False"
                                     Visibility="{Binding DetailSelectionVisibility}" />

@@ -47,6 +47,10 @@ public static class IconHelper
     private static readonly TimeSpan IdleCacheMinimumAge =
         TimeSpan.FromMinutes(5);
     private const int PreferredShellItemIconSize = 256;
+    // Frame sizes of the legacy Shell icons served for file types whose own icon
+    // resource is gone. Requesting one of these returns a canvas the artwork
+    // actually fills, unlike a Jumbo request that pads it.
+    private static readonly int[] s_shellItemIconNativeFrameSizes = { 48, 32 };
     private const string InternetShortcutIconStrategyVersion = "url-shell-v2";
 
     // Icon bytes cache: path → PNG bytes (for shell icons, not image thumbnails)
@@ -1134,8 +1138,7 @@ public static class IconHelper
                 // a pre-scaled 32/48 px bitmap even when the registered file icon
                 // contains a genuine 256 px frame. Keep the in-process image-list
                 // path below as the compatibility fallback.
-                bytes = await TryLoadHighResolutionShellItemIconAsync(
-                    originalSourcePath);
+                bytes = await TryLoadFileShellItemIconAsync(originalSourcePath);
                 if (bytes is { Length: > 0 })
                 {
                     App.LogVerbose(
@@ -1311,6 +1314,62 @@ public static class IconHelper
                 path,
                 requestedSize: PreferredShellItemIconSize,
                 includeOverlays: includeOverlays);
+        }
+        finally
+        {
+            s_shellIconLoadSemaphore.Release();
+        }
+    }
+
+    /// <summary>
+    /// Loads the Shell-item icon of a file or folder and recovers from a canvas
+    /// that only holds a small icon frame. A file type whose registered icon
+    /// resource no longer exists (an uninstalled app that left its file
+    /// association behind) resolves to an icon whose largest frame is 32/48 px;
+    /// asking for Jumbo then returns the requested canvas with that artwork
+    /// centered, which the fixed file tile renders as a tiny glyph. Re-request
+    /// the frame sizes such an icon can fill so it keeps the same framing as
+    /// every other tile. Failing that, fall back to the cropped artwork.
+    /// </summary>
+    private static async Task<byte[]?> TryLoadFileShellItemIconAsync(string path)
+    {
+        byte[]? bytes = await TryLoadRawShellItemIconAsync(
+            path,
+            PreferredShellItemIconSize);
+        if (bytes is not { Length: > 0 } ||
+            !ShellThumbnailProxy.IsLikelyPaddedIconPayload(bytes))
+        {
+            return bytes;
+        }
+
+        foreach (int frameSize in s_shellItemIconNativeFrameSizes)
+        {
+            byte[]? nativeFrame = await TryLoadRawShellItemIconAsync(
+                path,
+                frameSize);
+            if (nativeFrame is { Length: > 0 } &&
+                !ShellThumbnailProxy.IsLikelyPaddedIconPayload(nativeFrame))
+            {
+                App.Log(
+                    $"[IconHelper] Recovered padded Shell item icon at its " +
+                    $"native frame size={frameSize} path={path}");
+                return nativeFrame;
+            }
+        }
+
+        return ShellThumbnailProxy.NormalizeIconPayload(bytes) ?? bytes;
+    }
+
+    private static async Task<byte[]?> TryLoadRawShellItemIconAsync(
+        string path,
+        int requestedSize)
+    {
+        await s_shellIconLoadSemaphore.WaitAsync();
+        try
+        {
+            return await ShellThumbnailProxy.TryLoadIconPayloadAsync(
+                path,
+                requestedSize);
         }
         finally
         {

@@ -106,7 +106,7 @@ public sealed class SearchPopupVisualContractTests
             "src/DeskBox/Views/SearchPopupWindow.xaml.cs"));
 
         Assert.Contains("Tag=\"InteractiveSurface\"", fileSurface, StringComparison.Ordinal);
-        Assert.Contains("CornerRadius=\"4\"", fileSurface, StringComparison.Ordinal);
+        Assert.Contains("CornerRadius=\"2\"", fileSurface, StringComparison.Ordinal);
         Assert.Contains(
             "Padding=\"4,5\" Margin=\"0,1\" CornerRadius=\"4\"",
             resultRow,

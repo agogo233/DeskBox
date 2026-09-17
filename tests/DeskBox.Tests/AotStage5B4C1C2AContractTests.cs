@@ -130,8 +130,11 @@ public sealed class AotStage5B4C1C2AContractTests
         Assert.Contains("TranslationZ >= 64", scenario, StringComparison.Ordinal);
         Assert.Contains("BackgroundIsAcrylicBrush", scenario, StringComparison.Ordinal);
         Assert.Contains("GetAotNativeFolderVisualState(", probe, StringComparison.Ordinal);
-        Assert.Contains("thickness.Left >= 0.5", probe, StringComparison.Ordinal);
-        Assert.Contains("borderBrush.Color.A > 0", probe, StringComparison.Ordinal);
+        // The drop visual is a neutral hover surface with no border, so the
+        // probe reports the recorded drop target instead of drawing state.
+        Assert.Contains("IsActiveChildDropTarget(border)", probe, StringComparison.Ordinal);
+        Assert.Contains("_folderDropTarget", probe, StringComparison.Ordinal);
+        Assert.Contains("_launchDropTarget", probe, StringComparison.Ordinal);
         Assert.Contains("Canvas.GetZIndex(ImportProgressCard)", probe, StringComparison.Ordinal);
         Assert.Contains("background is AcrylicBrush", probe, StringComparison.Ordinal);
         Assert.Contains("Canvas.ZIndex=\"1000\"", xaml, StringComparison.Ordinal);

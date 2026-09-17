@@ -144,7 +144,37 @@ public sealed partial class OnboardingWindow
         {
             try
             {
-                await App.Current.WidgetManager.UpdateDefaultManagedStorageRootAsync(normalizedPath);
+                ManagedStorageMigrationResult result = await App.Current.WidgetManager
+                    .UpdateDefaultManagedStorageRootAsync(normalizedPath);
+                if (result.Residues.Count > 0 && RootGrid.XamlRoot is not null)
+                {
+                    // The migration finished; only the old-root cleanup left
+                    // folders behind. Surface them with an explicit
+                    // recycle-or-keep choice instead of staying silent.
+                    await ManagedStorageMigrationResidueDialog.ShowMigrationResidueAsync(
+                        RootGrid.XamlRoot,
+                        _localizationService,
+                        folders => App.Current.WidgetManager.DeleteMigrationResidueFoldersAsync(folders),
+                        result);
+                }
+            }
+            catch (ManagedStorageDestinationResidueException ex)
+            {
+                if (RootGrid.XamlRoot is not null)
+                {
+                    ContentDialogResult choice = await ManagedStorageMigrationResidueDialog
+                        .ShowStaleDestinationAsync(
+                            RootGrid.XamlRoot,
+                            _localizationService,
+                            ex.StaleDestinationFolders);
+                    if (choice == ContentDialogResult.Primary)
+                    {
+                        await App.Current.WidgetManager.DeleteMigrationResidueFoldersAsync(
+                            ex.StaleDestinationFolders);
+                        return await ChangeStoragePathToAsync(normalizedPath);
+                    }
+                }
+                return false;
             }
             catch (Exception ex)
             {

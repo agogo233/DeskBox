@@ -152,9 +152,9 @@ public sealed partial class WeatherWidgetContent : UserControl
 
     private void ApplySegmentedAccent()
     {
-        AccentResourceScope.Apply(
-            WeatherViewSegmented,
-            App.Current.ThemeService?.GetEffectiveAccentColor() ?? AccentColorHelper.DefaultAccentColor);
+        // Same neutral pointer states every widget tab strip uses; this widget
+        // only needs that part because its style comes from XAML.
+        WidgetSegmentedStyleHelper.ApplyNeutralPointerStates(WeatherViewSegmented);
     }
 
     private void UpdateWeatherPalette()

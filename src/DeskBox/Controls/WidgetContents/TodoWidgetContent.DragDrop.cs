@@ -667,9 +667,10 @@ public sealed partial class TodoWidgetContent
 
         if (active)
         {
+            // Insertion position is a drag state, so it draws the neutral
+            // interaction line rather than the accent.
             border.BorderBrush = new SolidColorBrush(
-                App.Current.ThemeService?.GetEffectiveAccentColor() ??
-                AccentColorHelper.DefaultAccentColor);
+                NeutralInteractionBrush.Line(border));
             border.BorderThickness = insertAfter
                 ? new Thickness(0, 0, 0, 2)
                 : new Thickness(0, 2, 0, 0);

@@ -144,6 +144,15 @@ public class OrganizationHistoryItem
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public DateTime? LastWriteTimeUtc { get; set; }
 
+    /// <summary>
+    /// The destination object's identity recorded when the physical move
+    /// completed. Undo may only move the item back while the object at the
+    /// destination path still carries exactly this identity; legacy entries
+    /// without one keep the pre-identity behavior.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public DesktopOrganizationDestinationIdentity? DestinationIdentity { get; set; }
+
     public string Name { get; set; } = string.Empty;
 
     public string SourcePath { get; set; } = string.Empty;

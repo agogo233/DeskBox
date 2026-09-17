@@ -97,8 +97,10 @@ public sealed partial class QuickCaptureWidgetWindow
             }
             else if (showForegroundColorPickerWhenClosed)
             {
-                DispatcherQueue.TryEnqueue(async () =>
-                    await ShowWidgetForegroundColorPickerAsync());
+                DispatcherQueue.TryEnqueue(() =>
+                    ShowFlyoutWithElevation(
+                        BuildWidgetForegroundColorPickerFlyout(),
+                        QuickCaptureShell));
             }
         };
         flyout.Items.Add(renameItem);

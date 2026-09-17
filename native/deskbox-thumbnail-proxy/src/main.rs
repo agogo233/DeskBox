@@ -7,16 +7,22 @@ fn main() {
 mod windows_proxy {
     use std::{
         cell::RefCell,
-        ffi::{OsString, c_void},
-        io::{self, Write},
+        ffi::{OsStr, OsString, c_void},
+        io::{self, BufRead, Write},
         mem::size_of,
-        os::windows::ffi::OsStrExt,
+        os::windows::ffi::{OsStrExt, OsStringExt},
         path::{Path, PathBuf},
+        sync::{
+            Mutex, OnceLock,
+            atomic::{AtomicBool, AtomicI8, AtomicIsize, AtomicUsize, Ordering},
+            mpsc,
+        },
+        time::{Duration, Instant},
     };
 
     use windows::{
         Win32::{
-            Foundation::{HANDLE, HWND, LPARAM, LRESULT, SIZE, WPARAM},
+            Foundation::{HANDLE, HWND, LPARAM, LRESULT, POINT, SIZE, WPARAM},
             Graphics::Gdi::{
                 BI_RGB, BITMAP, BITMAPINFO, DIB_RGB_COLORS, DeleteObject, GetDC, GetDIBits,
                 GetObjectW, HBITMAP, HGDIOBJ, ReleaseDC,
@@ -24,27 +30,42 @@ mod windows_proxy {
             Storage::FileSystem::FILE_FLAGS_AND_ATTRIBUTES,
             System::{
                 Com::{COINIT_APARTMENTTHREADED, CoInitializeEx, CoUninitialize},
-                LibraryLoader::GetModuleHandleW,
+                LibraryLoader::{
+                    GetModuleHandleW, GetProcAddress, LOAD_LIBRARY_SEARCH_SYSTEM32,
+                    LoadLibraryExW,
+                },
+                Threading::GetCurrentThreadId,
             },
             UI::{
+                Controls::SetWindowTheme,
+                HiDpi::{
+                    DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetProcessDpiAwarenessContext,
+                },
+                Input::KeyboardAndMouse::{GetKeyState, VK_CONTROL, VK_ESCAPE, VK_SHIFT},
                 Shell::{
-                    CMF_EXPLORE, CMF_ITEMMENU, CMF_NORMAL, CMINVOKECOMMANDINFO, Common::ITEMIDLIST,
-                    IContextMenu, IContextMenu2, IContextMenu3, IShellFolder,
+                    CMF_EXPLORE, CMF_ITEMMENU, CMF_NORMAL, CMIC_MASK_CONTROL_DOWN,
+                    CMIC_MASK_PTINVOKE, CMIC_MASK_SHIFT_DOWN, CMINVOKECOMMANDINFOEX,
+                    Common::ITEMIDLIST, IContextMenu, IContextMenu2, IContextMenu3, IShellFolder,
                     IShellItemImageFactory, SHBindToParent, SHCreateItemFromParsingName,
                     SHFILEINFOW, SHGFI_ADDOVERLAYS, SHGFI_ICON, SHGFI_LARGEICON, SHGetFileInfoW,
                     SHParseDisplayName, SIIGBF_BIGGERSIZEOK, SIIGBF_ICONONLY, SIIGBF_SCALEUP,
                     SIIGBF_THUMBNAILONLY,
                 },
                 WindowsAndMessaging::{
-                    CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyIcon, DestroyMenu,
-                    DestroyWindow, GetIconInfo, HICON, ICONINFO, PostMessageW, RegisterClassW,
-                    SW_SHOWNORMAL, SetForegroundWindow, TPM_NONOTIFY, TPM_RETURNCMD,
-                    TrackPopupMenuEx, WINDOW_EX_STYLE, WINDOW_STYLE, WM_DRAWITEM, WM_INITMENUPOPUP,
-                    WM_MEASUREITEM, WM_MENUCHAR, WM_NULL, WNDCLASSW,
+                    CallNextHookEx, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyIcon,
+                    DestroyMenu, DestroyWindow, DispatchMessageW, GetClassNameW, GetIconInfo,
+                    GetMenuItemCount, GetMessageW, HICON, HMENU, ICONINFO, MSG, MSLLHOOKSTRUCT,
+                    PM_REMOVE, PeekMessageW, PostMessageW, PostThreadMessageW, RegisterClassW,
+                    SW_SHOWNORMAL,
+                    SetForegroundWindow, SetWindowsHookExW, TPM_RETURNCMD, TrackPopupMenuEx,
+                    TranslateMessage, UnhookWindowsHookEx, WH_MOUSE_LL, WINDOW_STYLE, WM_DRAWITEM,
+                    WM_INITMENUPOPUP, WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDOWN, WM_MEASUREITEM,
+                    WM_MBUTTONDOWN, WM_MENUCHAR, WM_NULL, WM_QUIT, WM_RBUTTONDOWN,
+                    WM_XBUTTONDOWN, WNDCLASSW, WS_EX_TOPMOST, WindowFromPoint,
                 },
             },
         },
-        core::{Interface, PCSTR, PCWSTR},
+        core::{BOOL, Interface, PCSTR, PCWSTR},
     };
 
     const MIN_THUMBNAIL_SIZE: i32 = 24;
@@ -60,6 +81,21 @@ mod windows_proxy {
     const CONTEXT_MENU_EXIT_FAILED: i32 = 3;
     const CONTEXT_MENU_FIRST_COMMAND_ID: u32 = 1;
     const CONTEXT_MENU_LAST_COMMAND_ID: u32 = 0x7000;
+    const CONTEXT_MENU_INVOKE_GRACE: Duration = Duration::from_millis(2000);
+    // windows-rs does not generate this mask; the value is from shobjidl_core.
+    const CMIC_MASK_UNICODE: u32 = 0x0004_0000;
+    const CONTEXT_MENU_SERVER_MAX_MENUS: u32 = 50;
+    const CONTEXT_MENU_SERVER_MAX_CONSECUTIVE_FAILURES: u32 = 3;
+    const CONTEXT_MENU_SERVER_POLL: Duration = Duration::from_millis(100);
+    const CONTEXT_MENU_WARMUP_PATH: &str = r"C:\";
+    // Batch extraction protocol: the client writes a count-prefixed manifest
+    // to stdin and the proxy streams one length-prefixed result frame per
+    // request to stdout as each worker finishes.
+    const EXTRACT_BATCH_MAGIC: u32 = 0x4458_4231; // "1BXD" as bytes, "DXB1" logical
+    const EXTRACT_BATCH_VERSION: u32 = 1;
+    const EXTRACT_BATCH_MAX_REQUESTS: u32 = 64;
+    const EXTRACT_BATCH_MAX_WORKERS: usize = 8;
+    const EXTRACT_BATCH_MAX_PATH_BYTES: usize = 64 * 1024;
     const TPM_LEFTALIGN: u32 = 0x0000;
     const TPM_RIGHTBUTTON: u32 = 0x0002;
     const TPM_VERTICAL: u32 = 0x0040;
@@ -69,13 +105,56 @@ mod windows_proxy {
             const { RefCell::new(None) };
     }
 
-    #[derive(Clone, Copy)]
+    /// Owner window of the menu that is currently on screen (0 when none).
+    /// The low-level mouse hook reads it to know where to post the cancel key.
+    static ACTIVE_MENU_OWNER: AtomicIsize = AtomicIsize::new(0);
+    /// Set by the mouse hook when it, rather than the user, ended the menu.
+    static MENU_CANCELLED_BY_OUTSIDE_CLICK: AtomicBool = AtomicBool::new(false);
+    /// Whether the last menu reached the foreground and got an input hook.
+    static MENU_FOREGROUND_OK: AtomicBool = AtomicBool::new(false);
+    static MENU_HOOK_INSTALLED: AtomicBool = AtomicBool::new(false);
+
+    /// Window class of every Win32 menu, including the Shell menu we host.
+    const MENU_WINDOW_CLASS: &str = "#32768";
+
+    // Classic Win32 menus can only be themed through uxtheme's undocumented
+    // ordinal exports; Microsoft ships no supported API for this and uses the
+    // same private entry points for File Explorer's own dark menus. DeskBox
+    // targets Windows 10 22621 and later, where these ordinals are stable.
+    const UXTHEME_PREFERRED_APP_MODE_ORDINAL: usize = 135;
+    const UXTHEME_ALLOW_DARK_MODE_FOR_WINDOW_ORDINAL: usize = 133;
+    const UXTHEME_FLUSH_MENU_THEMES_ORDINAL: usize = 136;
+    const UXTHEME_REFRESH_COLOR_POLICY_ORDINAL: usize = 104;
+    const PREFERRED_APP_MODE_FORCE_DARK: i32 = 2;
+    const PREFERRED_APP_MODE_FORCE_LIGHT: i32 = 3;
+    const MENU_THEME_DARK: &str = "DarkMode_Explorer";
+    const MENU_THEME_LIGHT: &str = "Explorer";
+
+    type SetPreferredAppModeFn = unsafe extern "system" fn(i32) -> i32;
+    type AllowDarkModeForWindowFn = unsafe extern "system" fn(HWND, BOOL) -> BOOL;
+    type FlushMenuThemesFn = unsafe extern "system" fn();
+    type RefreshColorPolicyFn = unsafe extern "system" fn();
+
+    struct MenuThemeApi {
+        set_preferred_app_mode: SetPreferredAppModeFn,
+        allow_dark_mode_for_window: Option<AllowDarkModeForWindowFn>,
+        flush_menu_themes: Option<FlushMenuThemesFn>,
+        refresh_color_policy: Option<RefreshColorPolicyFn>,
+    }
+
+    static MENU_THEME_API: OnceLock<Option<MenuThemeApi>> = OnceLock::new();
+    /// Last process-wide menu theme applied: -1 unknown, 0 light, 1 dark.
+    static APPLIED_MENU_THEME: AtomicI8 = AtomicI8::new(-1);
+    static MENU_THEME_UNAVAILABLE_LOGGED: AtomicBool = AtomicBool::new(false);
+
+    #[derive(Clone, Copy, Debug)]
     enum ExtractionMode {
         Thumbnail,
         Icon,
         IconWithOverlays,
     }
 
+    #[derive(Debug)]
     enum ProxyRequest {
         SelfTest,
         Extract {
@@ -83,10 +162,15 @@ mod windows_proxy {
             size: i32,
             mode: ExtractionMode,
         },
+        ExtractBatch,
         ContextMenu {
             path: PathBuf,
             screen_x: i32,
             screen_y: i32,
+            dark: bool,
+        },
+        ContextMenuServer {
+            dark: bool,
         },
     }
 
@@ -138,8 +222,270 @@ mod windows_proxy {
         }
     }
 
-    struct WindowGuard(HWND);
+    /// Owns the menu mouse hook from a dedicated thread. Low-level hook
+    /// callbacks are serviced by the installing thread's message pump, so that
+    /// thread must never block: while it does, the system stops delivering
+    /// mouse input to the hook and the whole desktop input pipeline stutters
+    /// (measured: injected events stop reaching the callback and the first
+    /// pending call waits for the entire blocked span).
+    struct MouseHookGuard {
+        thread_id: u32,
+        done: mpsc::Receiver<()>,
+    }
 
+    impl Drop for MouseHookGuard {
+        fn drop(&mut self) {
+            // SAFETY: Posting WM_QUIT to the hook thread ends its pump; the
+            // thread unhooks itself before acknowledging.
+            unsafe {
+                let _ =
+                    PostThreadMessageW(self.thread_id, WM_QUIT, WPARAM(0), LPARAM(0));
+            }
+            let _ = self.done.recv_timeout(Duration::from_secs(2));
+        }
+    }
+
+    /// Ends the hosted menu on any mouse press outside it. The Shell menu only
+    /// dismisses itself through the activation and capture machinery, which
+    /// DesktopBox's deliberately topmost, non-activating widget windows do not
+    /// trigger, so the proxy watches input directly while a menu is up.
+    unsafe extern "system" fn menu_mouse_hook_proc(
+        code: i32,
+        w_param: WPARAM,
+        l_param: LPARAM,
+    ) -> LRESULT {
+        if code >= 0 {
+            let message = w_param.0 as u32;
+            let is_button_down = matches!(
+                message,
+                WM_LBUTTONDOWN | WM_RBUTTONDOWN | WM_MBUTTONDOWN | WM_XBUTTONDOWN
+            );
+            let owner = ACTIVE_MENU_OWNER.load(Ordering::Relaxed);
+            if is_button_down && owner != 0 {
+                // SAFETY: The hook delivers a fully populated MSLLHOOKSTRUCT.
+                let info = unsafe { &*(l_param.0 as *const MSLLHOOKSTRUCT) };
+                if !is_point_inside_hosted_menu(info.pt) {
+                    MENU_CANCELLED_BY_OUTSIDE_CLICK.store(true, Ordering::Relaxed);
+                    dismiss_open_menu(owner);
+                }
+            }
+        }
+
+        // SAFETY: Unhandled input must always continue down the hook chain.
+        unsafe { CallNextHookEx(None, code, w_param, l_param) }
+    }
+
+    fn is_point_inside_hosted_menu(point: POINT) -> bool {
+        let mut class_name = [0u16; 32];
+        // SAFETY: WindowFromPoint returns the window under the point, or null.
+        let window = unsafe { WindowFromPoint(point) };
+        if window.0.is_null() {
+            return false;
+        }
+
+        // SAFETY: The buffer is sized for the class name of a Win32 menu.
+        let length = unsafe { GetClassNameW(window, &mut class_name) };
+        if length <= 0 {
+            return false;
+        }
+
+        let name = String::from_utf16_lossy(&class_name[..length as usize]);
+        name == MENU_WINDOW_CLASS
+    }
+
+    fn install_menu_mouse_hook() -> Option<MouseHookGuard> {
+        let (ready_sender, ready_receiver) = mpsc::channel::<Option<u32>>();
+        let (done_sender, done_receiver) = mpsc::channel::<()>();
+        std::thread::Builder::new()
+            .name("menu-mouse-hook".to_string())
+            .spawn(move || {
+                let thread_id = unsafe { GetCurrentThreadId() };
+                let hook = (|| {
+                    // SAFETY: The module handle stays valid for the process
+                    // lifetime and the hook procedure lives in it.
+                    let module = unsafe { GetModuleHandleW(None) }.ok()?;
+                    unsafe {
+                        SetWindowsHookExW(
+                            WH_MOUSE_LL,
+                            Some(menu_mouse_hook_proc),
+                            Some(module.into()),
+                            0,
+                        )
+                        .ok()
+                    }
+                })();
+                let _ = ready_sender.send(match hook {
+                    Some(_) => Some(thread_id),
+                    None => None,
+                });
+
+                if let Some(hook) = hook {
+                    let mut message = MSG::default();
+                    // SAFETY: A blocking GetMessage wait is what services
+                    // low-level hook callbacks on this thread; it returns
+                    // false only for WM_QUIT, after which the hook is removed.
+                    while unsafe { GetMessageW(&mut message, None, 0, 0) }.as_bool() {
+                        unsafe { DispatchMessageW(&message) };
+                    }
+                    // SAFETY: The hook was installed by this thread.
+                    unsafe {
+                        let _ = UnhookWindowsHookEx(hook);
+                    }
+                }
+
+                let _ = done_sender.send(());
+            })
+            .ok()?;
+
+        match ready_receiver.recv_timeout(Duration::from_secs(2)) {
+            Ok(Some(thread_id)) => Some(MouseHookGuard {
+                thread_id,
+                done: done_receiver,
+            }),
+            _ => None,
+        }
+    }
+
+    fn menu_theme_api() -> Option<&'static MenuThemeApi> {
+        MENU_THEME_API.get_or_init(resolve_menu_theme_api).as_ref()
+    }
+
+    fn resolve_menu_theme_api() -> Option<MenuThemeApi> {
+        let library: Vec<u16> = "uxtheme.dll"
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect();
+        // SAFETY: The library name is a valid wide string that lives for the
+        // call; the returned module stays loaded for the process lifetime.
+        let module = unsafe {
+            LoadLibraryExW(
+                PCWSTR(library.as_ptr()),
+                None,
+                LOAD_LIBRARY_SEARCH_SYSTEM32,
+            )
+        }
+        .ok()?;
+
+        // SAFETY: Each ordinal is resolved to the documented-by-community
+        // signature; a missing ordinal simply disables that step.
+        unsafe {
+            let set_preferred_app_mode = GetProcAddress(
+                module,
+                PCSTR(UXTHEME_PREFERRED_APP_MODE_ORDINAL as *const u8),
+            )?;
+            Some(MenuThemeApi {
+                set_preferred_app_mode: std::mem::transmute::<
+                    unsafe extern "system" fn() -> isize,
+                    SetPreferredAppModeFn,
+                >(set_preferred_app_mode),
+                allow_dark_mode_for_window: GetProcAddress(
+                    module,
+                    PCSTR(UXTHEME_ALLOW_DARK_MODE_FOR_WINDOW_ORDINAL as *const u8),
+                )
+                .map(|function| {
+                    std::mem::transmute::<
+                        unsafe extern "system" fn() -> isize,
+                        AllowDarkModeForWindowFn,
+                    >(function)
+                }),
+                flush_menu_themes: GetProcAddress(
+                    module,
+                    PCSTR(UXTHEME_FLUSH_MENU_THEMES_ORDINAL as *const u8),
+                )
+                .map(|function| {
+                    std::mem::transmute::<unsafe extern "system" fn() -> isize, FlushMenuThemesFn>(
+                        function,
+                    )
+                }),
+                refresh_color_policy: GetProcAddress(
+                    module,
+                    PCSTR(UXTHEME_REFRESH_COLOR_POLICY_ORDINAL as *const u8),
+                )
+                .map(|function| {
+                    std::mem::transmute::<unsafe extern "system" fn() -> isize, RefreshColorPolicyFn>(
+                        function,
+                    )
+                }),
+            })
+        }
+    }
+
+    /// Switches the whole process into (or out of) dark menus.
+    fn set_process_menu_theme(dark: bool) {
+        let Some(api) = menu_theme_api() else {
+            if !MENU_THEME_UNAVAILABLE_LOGGED.swap(true, Ordering::Relaxed) {
+                eprintln!("menu theme unsupported: uxtheme ordinals unavailable");
+            }
+            return;
+        };
+        let desired: i8 = if dark { 1 } else { 0 };
+        if APPLIED_MENU_THEME.load(Ordering::Relaxed) == desired {
+            return;
+        }
+
+        // SAFETY: The ordinals were resolved from uxtheme and are called with
+        // the argument shapes they are documented to take by their use in
+        // Windows itself. A live change needs the color policy refresh before
+        // the flush, otherwise the cached menu theme survives.
+        let desired_mode = if dark {
+            PREFERRED_APP_MODE_FORCE_DARK
+        } else {
+            PREFERRED_APP_MODE_FORCE_LIGHT
+        };
+        let previous = unsafe {
+            if let Some(refresh) = api.refresh_color_policy {
+                refresh();
+            }
+            let previous = (api.set_preferred_app_mode)(desired_mode);
+            if let Some(flush) = api.flush_menu_themes {
+                flush();
+            }
+            previous
+        };
+        // `previous` is the mode that was in force; logging it proves the
+        // ordinal still resolves to the real SetPreferredAppMode.
+        eprintln!(
+            "menu theme applied dark={dark} mode={desired_mode} previous={previous} \
+             extras={}{}{}",
+            if api.refresh_color_policy.is_some() { "R" } else { "-" },
+            if api.flush_menu_themes.is_some() { "F" } else { "-" },
+            if api.allow_dark_mode_for_window.is_some() { "W" } else { "-" },
+        );
+
+        APPLIED_MENU_THEME.store(desired, Ordering::Relaxed);
+    }
+
+    /// Applies the requested theme to the menu owner window and, indirectly, to
+    /// the menu popup that window owns.
+    fn apply_menu_theme(owner: HWND, dark: bool) {
+        set_process_menu_theme(dark);
+        let Some(api) = menu_theme_api() else {
+            return;
+        };
+
+        // SAFETY: The owner window belongs to this process and outlives the
+        // menu; both calls accept any window handle.
+        unsafe {
+            if let Some(allow) = api.allow_dark_mode_for_window {
+                let _ = allow(owner, BOOL::from(dark));
+            }
+            let theme: Vec<u16> = (if dark {
+                MENU_THEME_DARK
+            } else {
+                MENU_THEME_LIGHT
+            })
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect();
+            let _ = SetWindowTheme(owner, PCWSTR(theme.as_ptr()), PCWSTR::null());
+        }
+    }
+
+    fn menu_dark_from_token(token: &str) -> bool {
+        matches!(token, "dark" | "1" | "true")
+    }
+
+    struct WindowGuard(HWND);
     impl Drop for WindowGuard {
         fn drop(&mut self) {
             // SAFETY: CreateWindowExW returned this private, thread-affine
@@ -217,23 +563,27 @@ mod windows_proxy {
                     0xFF, 0xFF, 0xFF,
                 ];
                 write_stdout(&encode_bgra_as_bitmap_v5(2, 2, pixels)?)?;
+                self_test_batch_manifest()?;
                 Ok(0)
             }
             ProxyRequest::Extract { path, size, mode } => {
                 extract_shell_image(&path, size, mode)?;
                 Ok(0)
             }
+            ProxyRequest::ExtractBatch => run_extract_batch(),
             ProxyRequest::ContextMenu {
                 path,
                 screen_x,
                 screen_y,
-            } => match show_context_menu(&path, screen_x, screen_y) {
+                dark,
+            } => match show_context_menu(&path, screen_x, screen_y, dark) {
                 Ok(exit_code) => Ok(exit_code),
                 Err(error) => {
                     eprintln!("{error}");
                     Ok(CONTEXT_MENU_EXIT_FAILED)
                 }
             },
+            ProxyRequest::ContextMenuServer { dark } => run_context_menu_server(dark),
         }
     }
 
@@ -253,12 +603,34 @@ mod windows_proxy {
             }
             return Ok(ProxyRequest::SelfTest);
         }
+        if first == "--context-menu-server" {
+            // The optional theme token selects the menu theme before any
+            // window exists; later rounds may switch it.
+            let dark = arguments
+                .next()
+                .map(|value| menu_dark_from_token(&value.to_string_lossy()))
+                .unwrap_or(false);
+            if arguments.next().is_some() {
+                return Err("unexpected extra arguments".to_string());
+            }
+            return Ok(ProxyRequest::ContextMenuServer { dark });
+        }
+        if first == "--extract-batch" {
+            if arguments.next().is_some() {
+                return Err("unexpected extra arguments".to_string());
+            }
+            return Ok(ProxyRequest::ExtractBatch);
+        }
         if first == "--context-menu" {
             let path = arguments
                 .next()
                 .ok_or_else(|| "missing context menu path argument".to_string())?;
             let screen_x = parse_coordinate(arguments.next(), "x")?;
             let screen_y = parse_coordinate(arguments.next(), "y")?;
+            let dark = arguments
+                .next()
+                .map(|value| menu_dark_from_token(&value.to_string_lossy()))
+                .unwrap_or(false);
             if arguments.next().is_some() {
                 return Err("unexpected extra arguments".to_string());
             }
@@ -266,6 +638,7 @@ mod windows_proxy {
                 path: PathBuf::from(path),
                 screen_x,
                 screen_y,
+                dark,
             });
         }
 
@@ -310,6 +683,17 @@ mod windows_proxy {
     }
 
     fn extract_shell_image(path: &Path, size: i32, mode: ExtractionMode) -> Result<(), String> {
+        write_stdout(&extract_shell_image_payload(path, size, mode)?)
+    }
+
+    /// Extracts one Shell image and returns its BMPv5 payload. COM is
+    /// initialized per call, which stays balanced when a batch worker thread
+    /// serves several requests (a repeated STA init returns S_FALSE).
+    fn extract_shell_image_payload(
+        path: &Path,
+        size: i32,
+        mode: ExtractionMode,
+    ) -> Result<Vec<u8>, String> {
         // IShellItemImageFactory supports both files and folders. Reject only
         // missing paths so directory icons (including desktop.ini overrides)
         // use the same high-resolution path as associated file-type icons.
@@ -327,7 +711,7 @@ mod windows_proxy {
         if matches!(mode, ExtractionMode::IconWithOverlays)
             && let Ok(bytes) = load_shell_icon_with_overlays(&parsing_name)
         {
-            return write_stdout(&bytes);
+            return Ok(bytes);
         }
 
         // SAFETY: The parsing name remains alive for the call and the generic
@@ -359,7 +743,7 @@ mod windows_proxy {
             .map_err(|error| format!("Shell image extraction failed: {error}"))?;
         let bitmap_guard = BitmapGuard(bitmap);
         let bytes = bitmap_to_bmp_bytes(bitmap_guard.0)?;
-        write_stdout(&bytes)
+        Ok(bytes)
     }
 
     fn load_shell_icon_with_overlays(parsing_name: &[u16]) -> Result<Vec<u8>, String> {
@@ -405,50 +789,233 @@ mod windows_proxy {
         Ok(ComGuard)
     }
 
-    fn show_context_menu(path: &Path, screen_x: i32, screen_y: i32) -> Result<i32, String> {
+    struct BatchExtractRequest {
+        path: PathBuf,
+        size: i32,
+        mode: ExtractionMode,
+    }
+
+    /// Serves the `--extract-batch` mode: reads a count-prefixed request
+    /// manifest from stdin, then extracts every request on up to
+    /// EXTRACT_BATCH_MAX_WORKERS STA threads and streams one
+    /// length-prefixed result frame per request to stdout as each worker
+    /// finishes. One process therefore pays process creation, COM
+    /// apartment setup, and Shell handler DLL loads for a whole batch
+    /// instead of a single icon. Frame layout (little-endian):
+    /// index u32 | status u32 (0 ok / 1 failed) | payload u32 len | payload.
+    fn run_extract_batch() -> Result<i32, String> {
+        let requests = read_batch_manifest(&mut io::stdin().lock())?;
+        if requests.is_empty() {
+            return Ok(0);
+        }
+
+        // Two measured concurrency hazards in this one process (2026-09-14):
+        // 1. The Shell binds its per-process namespace state lazily; folder
+        //    requests issued while that first binding is still settling fail
+        //    with E_PENDING (0x8000000A) - in every batch process the first
+        //    folders failed while later folders and all file requests
+        //    succeeded. Prime one directory binding serially before any
+        //    worker starts.
+        let _ = extract_shell_image_payload(
+            Path::new(CONTEXT_MENU_WARMUP_PATH),
+            48,
+            ExtractionMode::Icon,
+        );
+        // 2. Folder requests still collide with each other when issued
+        //    concurrently (they failed even two at a time), so directory
+        //    requests additionally serialize on this lock. File requests
+        //    stay fully parallel; they never collided in any measurement.
+        let directory_gate = Mutex::new(());
+        let next_request = AtomicUsize::new(0);
+        std::thread::scope(|scope| {
+            let worker_count = requests.len().min(EXTRACT_BATCH_MAX_WORKERS);
+            for _ in 0..worker_count {
+                scope.spawn(|| loop {
+                    let index = next_request.fetch_add(1, Ordering::Relaxed);
+                    if index >= requests.len() {
+                        break;
+                    }
+
+                    let request = &requests[index];
+                    let directory_guard = if request.path.is_dir() {
+                        Some(
+                            directory_gate
+                                .lock()
+                                .unwrap_or_else(|poisoned| poisoned.into_inner()),
+                        )
+                    } else {
+                        None
+                    };
+                    let payload =
+                        extract_shell_image_payload(&request.path, request.size, request.mode);
+                    drop(directory_guard);
+                    let frame = match payload {
+                        Ok(bytes) => encode_batch_frame(index as u32, 0, &bytes),
+                        Err(error) => {
+                            eprintln!("batch extract {index} failed: {error}");
+                            encode_batch_frame(index as u32, 1, &[])
+                        }
+                    };
+                    if write_batch_frame(&frame).is_err() {
+                        // The client is gone; remaining frames are moot.
+                        return;
+                    }
+                });
+            }
+        });
+
+        Ok(0)
+    }
+
+    fn read_batch_manifest(input: &mut impl BufRead) -> Result<Vec<BatchExtractRequest>, String> {
+        let mut header = [0u8; 12];
+        input
+            .read_exact(&mut header)
+            .map_err(|error| format!("manifest header: {error}"))?;
+        let magic = u32::from_le_bytes(header[0..4].try_into().unwrap());
+        let version = u32::from_le_bytes(header[4..8].try_into().unwrap());
+        let count = u32::from_le_bytes(header[8..12].try_into().unwrap());
+        if magic != EXTRACT_BATCH_MAGIC {
+            return Err("unsupported batch protocol magic".to_string());
+        }
+        if version != EXTRACT_BATCH_VERSION {
+            return Err("unsupported batch protocol version".to_string());
+        }
+        if count == 0 || count > EXTRACT_BATCH_MAX_REQUESTS {
+            return Err("batch request count out of range".to_string());
+        }
+
+        let mut requests = Vec::with_capacity(count as usize);
+        for _ in 0..count {
+            let mut entry = [0u8; 12];
+            input
+                .read_exact(&mut entry)
+                .map_err(|error| format!("manifest entry: {error}"))?;
+            let mode_value = u32::from_le_bytes(entry[0..4].try_into().unwrap());
+            let size = u32::from_le_bytes(entry[4..8].try_into().unwrap()) as i32;
+            let path_len = u32::from_le_bytes(entry[8..12].try_into().unwrap()) as usize;
+            if path_len == 0 || path_len % 2 != 0 || path_len > EXTRACT_BATCH_MAX_PATH_BYTES {
+                return Err("batch path length out of range".to_string());
+            }
+
+            let mut path_bytes = vec![0u8; path_len];
+            input
+                .read_exact(&mut path_bytes)
+                .map_err(|error| format!("manifest path: {error}"))?;
+            let wide: Vec<u16> = path_bytes
+                .chunks_exact(2)
+                .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+                .collect();
+            let mode = match mode_value {
+                0 => ExtractionMode::Thumbnail,
+                1 => ExtractionMode::Icon,
+                2 => ExtractionMode::IconWithOverlays,
+                _ => return Err("unknown batch extraction mode".to_string()),
+            };
+
+            requests.push(BatchExtractRequest {
+                path: PathBuf::from(OsString::from_wide(&wide)),
+                size: size.clamp(MIN_THUMBNAIL_SIZE, MAX_THUMBNAIL_SIZE),
+                mode,
+            });
+        }
+
+        Ok(requests)
+    }
+
+    fn encode_batch_frame(index: u32, status: u32, payload: &[u8]) -> Vec<u8> {
+        let mut frame = Vec::with_capacity(12 + payload.len());
+        frame.extend_from_slice(&index.to_le_bytes());
+        frame.extend_from_slice(&status.to_le_bytes());
+        frame.extend_from_slice(&(payload.len() as u32).to_le_bytes());
+        frame.extend_from_slice(payload);
+        frame
+    }
+
+    fn write_batch_frame(frame: &[u8]) -> Result<(), String> {
+        let stdout = io::stdout();
+        let mut lock = stdout.lock();
+        lock.write_all(frame)
+            .and_then(|()| lock.flush())
+            .map_err(|error| format!("batch stdout: {error}"))
+    }
+
+    /// Validates the batch manifest parser against a handcrafted two-request
+    /// manifest. Runs as part of `--self-test`; uses explicit error returns
+    /// instead of assert so a regression surfaces as exit code 4, not a
+    /// panic in the shipped binary.
+    fn self_test_batch_manifest() -> Result<(), String> {
+        let mut manifest: Vec<u8> = Vec::new();
+        manifest.extend_from_slice(&EXTRACT_BATCH_MAGIC.to_le_bytes());
+        manifest.extend_from_slice(&EXTRACT_BATCH_VERSION.to_le_bytes());
+        manifest.extend_from_slice(&2u32.to_le_bytes());
+
+        let first_path: Vec<u16> = OsStr::new(r"C:\a.png").encode_wide().collect();
+        manifest.extend_from_slice(&1u32.to_le_bytes()); // Icon
+        manifest.extend_from_slice(&48u32.to_le_bytes());
+        manifest.extend_from_slice(&((first_path.len() * 2) as u32).to_le_bytes());
+        for unit in &first_path {
+            manifest.extend_from_slice(&unit.to_le_bytes());
+        }
+
+        let second_path: Vec<u16> = OsStr::new(r"C:\b.jpg").encode_wide().collect();
+        manifest.extend_from_slice(&0u32.to_le_bytes()); // Thumbnail
+        manifest.extend_from_slice(&4096u32.to_le_bytes()); // clamps to MAX
+        manifest.extend_from_slice(&((second_path.len() * 2) as u32).to_le_bytes());
+        for unit in &second_path {
+            manifest.extend_from_slice(&unit.to_le_bytes());
+        }
+
+        let requests = read_batch_manifest(&mut manifest.as_slice())?;
+        if requests.len() != 2 {
+            return Err("self-test batch manifest parsed wrong count".to_string());
+        }
+        if !matches!(requests[0].mode, ExtractionMode::Icon) || requests[0].size != 48 {
+            return Err("self-test batch manifest parsed wrong icon request".to_string());
+        }
+        if !matches!(requests[1].mode, ExtractionMode::Thumbnail) ||
+            requests[1].size != MAX_THUMBNAIL_SIZE
+        {
+            return Err("self-test batch manifest parsed wrong thumbnail request".to_string());
+        }
+        if requests[0].path != Path::new(r"C:\a.png") {
+            return Err("self-test batch manifest parsed wrong path".to_string());
+        }
+
+        Ok(())
+    }
+
+    fn show_context_menu(
+        path: &Path,
+        screen_x: i32,
+        screen_y: i32,
+        dark: bool,
+    ) -> Result<i32, String> {
+        apply_per_monitor_dpi_awareness();
+        set_process_menu_theme(dark);
+        let _com_guard = initialize_com()?;
+        let owner = create_context_menu_window()?;
+        run_menu_on_owner(owner.0, path, screen_x, screen_y, dark, b"ready\n")
+    }
+
+    /// Builds, shows, and invokes the Shell context menu for one item on an
+    /// already-created owner window. `announce` is written to stdout right
+    /// before the menu opens (the one-shot mode handshakes with "ready", the
+    /// server mode reports "shown"); every earlier failure returns Err.
+    fn run_menu_on_owner(
+        owner: HWND,
+        path: &Path,
+        screen_x: i32,
+        screen_y: i32,
+        dark: bool,
+        announce: &[u8],
+    ) -> Result<i32, String> {
         if !path.exists() {
             return Err("Shell context menu source does not exist".to_string());
         }
 
-        let _com_guard = initialize_com()?;
-        let owner = create_context_menu_window()?;
-        let parsing_name: Vec<u16> = path
-            .as_os_str()
-            .encode_wide()
-            .chain(std::iter::once(0))
-            .collect();
-        let mut absolute_pidl: *mut ITEMIDLIST = std::ptr::null_mut();
-        // SAFETY: The zero-terminated parsing name and output storage remain
-        // valid for the call.
-        unsafe {
-            SHParseDisplayName(
-                PCWSTR(parsing_name.as_ptr()),
-                None,
-                &mut absolute_pidl,
-                0,
-                None,
-            )
-        }
-        .map_err(|error| format!("Shell item parsing failed: {error}"))?;
-        if absolute_pidl.is_null() {
-            return Err("Shell item parsing returned no item ID list".to_string());
-        }
-        let _pidl_guard = ItemIdListGuard(absolute_pidl);
-
-        let mut child_pidl: *mut ITEMIDLIST = std::ptr::null_mut();
-        // SAFETY: absolute_pidl remains alive through _pidl_guard. The returned
-        // child pointer is borrowed from that allocation.
-        let shell_folder: IShellFolder =
-            unsafe { SHBindToParent(absolute_pidl, Some(&mut child_pidl)) }
-                .map_err(|error| format!("Shell parent binding failed: {error}"))?;
-        if child_pidl.is_null() {
-            return Err("Shell parent binding returned no child item".to_string());
-        }
-        // SAFETY: child_pidl belongs to absolute_pidl and stays valid until the
-        // menu and its interfaces have been released.
-        let context_menu: IContextMenu =
-            unsafe { shell_folder.GetUIObjectOf(owner.0, &[child_pidl], None) }
-                .map_err(|error| format!("Shell context menu creation failed: {error}"))?;
+        apply_menu_theme(owner, dark);
+        let context_menu = create_shell_context_menu(owner, path)?;
         let context_menu3 = context_menu.cast::<IContextMenu3>().ok();
         let context_menu2 = if context_menu3.is_none() {
             context_menu.cast::<IContextMenu2>().ok()
@@ -497,21 +1064,38 @@ mod windows_proxy {
         }
         let _active_menu_reset = ActiveMenuReset;
 
-        write_stdout(b"ready\n")?;
+        write_stdout(announce)?;
         // TrackPopupMenuEx requires its owner to be the foreground window so an
-        // outside click reliably dismisses the menu. The proxy was launched by
-        // the user's menu click and owns this hidden HWND in the same process.
-        let _ = unsafe { SetForegroundWindow(owner.0) };
+        // outside click reliably dismisses the menu. The proxy owns this hidden
+        // HWND in-process; DeskBox grants it the foreground right explicitly.
+        let foreground_ok = unsafe { SetForegroundWindow(owner) }.as_bool();
+        MENU_CANCELLED_BY_OUTSIDE_CLICK.store(false, Ordering::Relaxed);
+        MENU_FOREGROUND_OK.store(foreground_ok, Ordering::Relaxed);
+        ACTIVE_MENU_OWNER.store(owner.0 as isize, Ordering::Relaxed);
+        // The hook covers what activation cannot: clicks on DeskBox's own
+        // topmost, non-activating widget windows.
+        let _mouse_hook = install_menu_mouse_hook();
+        MENU_HOOK_INSTALLED.store(_mouse_hook.is_some(), Ordering::Relaxed);
+        // TPM_NONOTIFY must NOT be set: it suppresses WM_INITMENUPOPUP, which
+        // is what fills the Shell's delay-generated submenus ("Send to",
+        // "Open with", archiver menus) - they would open empty. TPM_RETURNCMD
+        // already routes the selection through the return value.
         let track_flags =
-            TPM_RETURNCMD.0 | TPM_NONOTIFY.0 | TPM_LEFTALIGN | TPM_RIGHTBUTTON | TPM_VERTICAL;
+            TPM_RETURNCMD.0 | TPM_LEFTALIGN | TPM_RIGHTBUTTON | TPM_VERTICAL;
         // SAFETY: The proxy-owned hidden HWND is the in-process owner and its
         // window procedure forwards owner-drawn menu messages to the active
         // Shell interface.
         let selected =
-            unsafe { TrackPopupMenuEx(menu.0, track_flags, screen_x, screen_y, owner.0, None) }.0
+            unsafe { TrackPopupMenuEx(menu.0, track_flags, screen_x, screen_y, owner, None) }.0
                 as u32;
+        ACTIVE_MENU_OWNER.store(0, Ordering::Relaxed);
+        // The menu is closed, so the input hook has no job left. It MUST be
+        // gone before InvokeCommand: a low-level hook whose owning thread is
+        // blocked stops receiving mouse input and stalls the desktop input
+        // pipeline for the whole blocked span.
+        drop(_mouse_hook);
         // SAFETY: WM_NULL completes the documented Shell menu teardown pattern.
-        let _ = unsafe { PostMessageW(Some(owner.0), WM_NULL, WPARAM(0), LPARAM(0)) };
+        let _ = unsafe { PostMessageW(Some(owner), WM_NULL, WPARAM(0), LPARAM(0)) };
         if selected == 0 {
             return Ok(CONTEXT_MENU_EXIT_CANCELLED);
         }
@@ -520,22 +1104,351 @@ mod windows_proxy {
         }
 
         let command_offset = (selected - CONTEXT_MENU_FIRST_COMMAND_ID) as usize;
-        let invoke_info = CMINVOKECOMMANDINFO {
-            cbSize: size_of::<CMINVOKECOMMANDINFO>() as u32,
-            fMask: 0,
-            hwnd: owner.0,
+        // Handlers such as "Git Bash Here" read the working directory; pass the
+        // item's parent in both ANSI and Unicode form because the Shell asks
+        // hosts to keep valid strings of each kind alongside CMIC_MASK_UNICODE.
+        let parent_path = path
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty());
+        let parent_wide: Vec<u16> = parent_path.map(encode_wide_path).unwrap_or_default();
+        let mut parent_ansi: Vec<u8> = parent_path
+            .map(|parent| parent.to_string_lossy().into_owned().into_bytes())
+            .unwrap_or_default();
+        parent_ansi.push(0);
+        // Capture the modifier state at invocation time; Shift+Delete and
+        // friends must be reported to the handler, not polled later. The
+        // high-order bit of GetKeyState means the key is down.
+        let shift_down = unsafe { GetKeyState(VK_SHIFT.0.into()) < 0 };
+        let control_down = unsafe { GetKeyState(VK_CONTROL.0.into()) < 0 };
+        let mut invoke_mask = CMIC_MASK_UNICODE | CMIC_MASK_PTINVOKE;
+        if shift_down {
+            invoke_mask |= CMIC_MASK_SHIFT_DOWN;
+        }
+        if control_down {
+            invoke_mask |= CMIC_MASK_CONTROL_DOWN;
+        }
+        let invoke_info = CMINVOKECOMMANDINFOEX {
+            cbSize: size_of::<CMINVOKECOMMANDINFOEX>() as u32,
+            fMask: invoke_mask,
+            hwnd: owner,
             lpVerb: PCSTR(command_offset as *const u8),
             lpParameters: PCSTR::null(),
-            lpDirectory: PCSTR::null(),
+            lpDirectory: if parent_ansi.len() > 1 {
+                PCSTR(parent_ansi.as_ptr())
+            } else {
+                PCSTR::null()
+            },
             nShow: SW_SHOWNORMAL.0,
             dwHotKey: 0,
             hIcon: HANDLE::default(),
+            lpTitle: PCSTR::null(),
+            lpVerbW: PCWSTR(command_offset as *const u16),
+            lpParametersW: PCWSTR::null(),
+            lpDirectoryW: if parent_wide.is_empty() {
+                PCWSTR::null()
+            } else {
+                PCWSTR(parent_wide.as_ptr())
+            },
+            lpTitleW: PCWSTR::null(),
+            ptInvoke: POINT {
+                x: screen_x,
+                y: screen_y,
+            },
         };
-        // SAFETY: Numeric lpVerb offsets are the documented IContextMenu ABI;
-        // the structure is complete and lives through the call.
-        unsafe { context_menu.InvokeCommand(&invoke_info) }
-            .map_err(|error| format!("Shell command invocation failed: {error}"))?;
+        // SAFETY: CMINVOKECOMMANDINFOEX is ABI-compatible with the
+        // CMINVOKECOMMANDINFO prefix the interface expects; numeric lpVerb
+        // offsets are the documented IContextMenu ABI and the structure lives
+        // through the call.
+        unsafe {
+            context_menu.InvokeCommand(
+                (&invoke_info as *const CMINVOKECOMMANDINFOEX).cast(),
+            )
+        }
+        .map_err(|error| format!("Shell command invocation failed: {error}"))?;
+
+        // Verbs that return before finishing (posted-message completion, STA
+        // callbacks, dialogs parented to the owner) need a pumping thread; the
+        // grace window lets that work drain instead of dying with the round.
+        pump_messages(CONTEXT_MENU_INVOKE_GRACE);
         Ok(CONTEXT_MENU_EXIT_INVOKED)
+    }
+
+    /// Long-lived context-menu server: one STA apartment and owner window are
+    /// reused across right-clicks so third-party handler DLLs load once. The
+    /// process exits by itself when DeskBox closes its stdin pipe, retires
+    /// after CONTEXT_MENU_SERVER_MAX_MENUS menus, or after repeated failures
+    /// that suggest a poisoned apartment.
+    fn run_context_menu_server(initial_dark: bool) -> Result<i32, String> {
+        apply_per_monitor_dpi_awareness();
+        // The process-wide theme should be in place before the first window or
+        // menu exists; later rounds re-apply it when DeskBox's theme changes.
+        set_process_menu_theme(initial_dark);
+        let _com_guard = initialize_com()?;
+        let owner = create_context_menu_window()?;
+        write_stdout(b"ready\n")?;
+
+        let (command_sender, command_receiver) = mpsc::channel::<String>();
+        // The reader thread owns stdin so the STA thread below stays free to
+        // dispatch messages between commands; EOF (DeskBox exited) surfaces as
+        // a disconnected channel. Cancellation is handled here rather than in
+        // the loop because the main thread is blocked inside TrackPopupMenuEx
+        // while the menu is open, and only a posted key ends its modal loop.
+        let owner_raw = owner.0.0 as isize;
+        std::thread::spawn(move || {
+            let stdin = io::stdin();
+            let mut lines = stdin.lock();
+            loop {
+                let mut line = String::new();
+                match lines.read_line(&mut line) {
+                    Ok(0) | Err(_) => break,
+                    Ok(_) => {
+                        let command = normalize_command_line(&line);
+                        if command == "cancel" {
+                            dismiss_open_menu(owner_raw);
+                            continue;
+                        }
+                        if command_sender.send(command.to_string()).is_err() {
+                            break;
+                        }
+                    }
+                }
+            }
+        });
+
+        let mut menus_served: u32 = 0;
+        let mut consecutive_failures: u32 = 0;
+        loop {
+            let line = match command_receiver.recv_timeout(CONTEXT_MENU_SERVER_POLL) {
+                Ok(line) => line,
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    pump_messages_once();
+                    continue;
+                }
+                Err(mpsc::RecvTimeoutError::Disconnected) => break,
+            };
+            let command = line;
+            if command == "warmup" {
+                match warm_context_menu_handlers(owner.0) {
+                    Ok(()) => write_stdout(b"warm ok\n")?,
+                    Err(error) => {
+                        eprintln!("{error}");
+                        write_stdout(b"warm err\n")?;
+                    }
+                }
+                continue;
+            }
+            let Some(payload) = command.strip_prefix("menu\t") else {
+                // Third-party handlers may printf into the shared stdout, so
+                // unknown input is not fatal. Report it anyway: a dropped
+                // protocol line used to fail silently for 15s per attempt.
+                if !command.is_empty() {
+                    eprintln!("ignored unexpected command line: {command}");
+                }
+                continue;
+            };
+            let result_code = match parse_menu_command(payload) {
+                Ok((path, screen_x, screen_y, dark)) => {
+                    match run_menu_on_owner(
+                        owner.0,
+                        &path,
+                        screen_x,
+                        screen_y,
+                        dark,
+                        b"shown\n",
+                    ) {
+                        Ok(code) => code,
+                        Err(error) => {
+                            eprintln!("{error}");
+                            CONTEXT_MENU_EXIT_FAILED
+                        }
+                    }
+                }
+                Err(error) => {
+                    eprintln!("{error}");
+                    CONTEXT_MENU_EXIT_FAILED
+                }
+            };
+            write_stdout(
+                format!(
+                    "result {result_code} src={} fg={} hook={}\n",
+                    if MENU_CANCELLED_BY_OUTSIDE_CLICK.load(Ordering::Relaxed) {
+                        "outside-click"
+                    } else {
+                        "menu"
+                    },
+                    if MENU_FOREGROUND_OK.load(Ordering::Relaxed) {
+                        1
+                    } else {
+                        0
+                    },
+                    if MENU_HOOK_INSTALLED.load(Ordering::Relaxed) {
+                        1
+                    } else {
+                        0
+                    },
+                )
+                .as_bytes(),
+            )?;
+            menus_served += 1;
+            if result_code == CONTEXT_MENU_EXIT_FAILED {
+                consecutive_failures += 1;
+            } else {
+                consecutive_failures = 0;
+            }
+            if menus_served >= CONTEXT_MENU_SERVER_MAX_MENUS
+                || consecutive_failures >= CONTEXT_MENU_SERVER_MAX_CONSECUTIVE_FAILURES
+            {
+                write_stdout(b"bye\n")?;
+                return Ok(0);
+            }
+        }
+        Ok(0)
+    }
+
+    /// Loads and populates one throwaway menu so the shared handler DLLs are
+    /// warm before the first real right-click.
+    fn warm_context_menu_handlers(owner: HWND) -> Result<(), String> {
+        let warm_path = Path::new(CONTEXT_MENU_WARMUP_PATH);
+        let context_menu = create_shell_context_menu(owner, warm_path)?;
+        let menu = MenuGuard(
+            unsafe { CreatePopupMenu() }
+                .map_err(|error| format!("Popup menu creation failed: {error}"))?,
+        );
+        // SAFETY: Same population call as the interactive path; the menu is
+        // destroyed immediately instead of being displayed.
+        unsafe {
+            context_menu.QueryContextMenu(
+                menu.0,
+                0,
+                CONTEXT_MENU_FIRST_COMMAND_ID,
+                CONTEXT_MENU_LAST_COMMAND_ID,
+                CMF_NORMAL | CMF_EXPLORE | CMF_ITEMMENU,
+            )
+        }
+        .ok()
+        .map_err(|error| format!("Shell menu population failed: {error}"))
+    }
+
+    fn create_shell_context_menu(owner: HWND, path: &Path) -> Result<IContextMenu, String> {
+        let parsing_name: Vec<u16> = encode_wide_path(path);
+        let mut absolute_pidl: *mut ITEMIDLIST = std::ptr::null_mut();
+        // SAFETY: The zero-terminated parsing name and output storage remain
+        // valid for the call.
+        unsafe {
+            SHParseDisplayName(
+                PCWSTR(parsing_name.as_ptr()),
+                None,
+                &mut absolute_pidl,
+                0,
+                None,
+            )
+        }
+        .map_err(|error| format!("Shell item parsing failed: {error}"))?;
+        if absolute_pidl.is_null() {
+            return Err("Shell item parsing returned no item ID list".to_string());
+        }
+        let _pidl_guard = ItemIdListGuard(absolute_pidl);
+
+        let mut child_pidl: *mut ITEMIDLIST = std::ptr::null_mut();
+        // SAFETY: absolute_pidl remains alive through _pidl_guard. The returned
+        // child pointer is borrowed from that allocation.
+        let shell_folder: IShellFolder =
+            unsafe { SHBindToParent(absolute_pidl, Some(&mut child_pidl)) }
+                .map_err(|error| format!("Shell parent binding failed: {error}"))?;
+        if child_pidl.is_null() {
+            return Err("Shell parent binding returned no child item".to_string());
+        }
+        // SAFETY: child_pidl belongs to absolute_pidl and stays valid until the
+        // menu and its interfaces have been released.
+        unsafe { shell_folder.GetUIObjectOf(owner, &[child_pidl], None) }
+            .map_err(|error| format!("Shell context menu creation failed: {error}"))
+    }
+
+    /// Strips transport noise from one protocol line. A leading byte order
+    /// mark arrives when a managed writer uses the BOM-emitting UTF-8 encoder;
+    /// without this the command is silently discarded as handler noise.
+    fn normalize_command_line(line: &str) -> &str {
+        line.trim_end_matches(['\r', '\n'])
+            .trim_start_matches('\u{feff}')
+    }
+
+    /// Ends an open Shell menu from the stdin reader thread. TrackPopupMenuEx
+    /// only ends its modal loop when its owner receives input, and DeskBox's
+    /// widget windows are non-activating, so an outside click on them never
+    /// produces the WM_ACTIVATE(WA_INACTIVE) that would otherwise dismiss the
+    /// menu. Posting Escape to the owner is that input.
+    fn dismiss_open_menu(owner_raw: isize) {
+        let owner = HWND(owner_raw as *mut std::ffi::c_void);
+        // SAFETY: The handle belongs to this process and outlives the reader
+        // thread; posting a key to a window without an open menu is a no-op.
+        unsafe {
+            let _ = PostMessageW(Some(owner), WM_KEYDOWN, WPARAM(VK_ESCAPE.0 as usize), LPARAM(0));
+            let _ = PostMessageW(Some(owner), WM_KEYUP, WPARAM(VK_ESCAPE.0 as usize), LPARAM(0));
+        }
+    }
+
+    fn parse_menu_command(payload: &str) -> Result<(PathBuf, i32, i32, bool), String> {
+        let mut fields = payload.splitn(4, '\t');
+        let screen_x = fields
+            .next()
+            .and_then(|value| value.parse::<i32>().ok())
+            .ok_or("invalid context menu x coordinate")?;
+        let screen_y = fields
+            .next()
+            .and_then(|value| value.parse::<i32>().ok())
+            .ok_or("invalid context menu y coordinate")?;
+        let dark = fields
+            .next()
+            .map(menu_dark_from_token)
+            .ok_or("missing context menu theme")?;
+        let path = fields
+            .next()
+            .filter(|value| !value.is_empty())
+            .ok_or("missing context menu path")?;
+        Ok((PathBuf::from(path), screen_x, screen_y, dark))
+    }
+
+    fn encode_wide_path(path: &Path) -> Vec<u16> {
+        path.as_os_str()
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect()
+    }
+
+    fn apply_per_monitor_dpi_awareness() {
+        // SAFETY: Called before any window exists in this process. The value
+        // matches DeskBox's PerMonitorV2 host so screen coordinates and
+        // owner-drawn menu content use the same physical pixels. A failure
+        // keeps the system default and only degrades scaled displays.
+        unsafe {
+            let _ =
+                SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+        }
+    }
+
+    /// Dispatches pending messages for the STA thread once without blocking.
+    fn pump_messages_once() {
+        // SAFETY: The message and its windows belong to this STA thread; only
+        // messages addressed to the proxy's own windows are dispatched.
+        unsafe {
+            let mut message = MSG::default();
+            while PeekMessageW(&mut message, None, 0, 0, PM_REMOVE).as_bool() {
+                let _ = TranslateMessage(&message);
+                DispatchMessageW(&message);
+            }
+        }
+    }
+
+    /// Keeps the STA thread dispatching for `duration` so verbs that complete
+    /// through posted messages or callbacks after InvokeCommand returns are
+    /// not terminated mid-flight.
+    fn pump_messages(duration: Duration) {
+        let deadline = Instant::now() + duration;
+        pump_messages_once();
+        while Instant::now() < deadline {
+            std::thread::sleep(CONTEXT_MENU_SERVER_POLL);
+            pump_messages_once();
+        }
     }
 
     fn create_context_menu_window() -> Result<WindowGuard, String> {
@@ -559,9 +1472,12 @@ mod windows_proxy {
         unsafe { RegisterClassW(&window_class) };
         // SAFETY: Class data stays alive for the call. A zero-sized, invisible
         // top-level HWND is sufficient as an in-process context-menu owner.
+        // WS_EX_TOPMOST puts the owned menu popup into the TOPMOST band so it
+        // renders above DeskBox's deliberately topmost widget surfaces (the
+        // stack popover host is permanently topmost).
         let window = unsafe {
             CreateWindowExW(
-                WINDOW_EX_STYLE::default(),
+                WS_EX_TOPMOST,
                 PCWSTR(class_name.as_ptr()),
                 PCWSTR::null(),
                 WINDOW_STYLE::default(),
@@ -593,6 +1509,16 @@ mod windows_proxy {
         });
         if let Some(result) = handled {
             return result;
+        }
+
+        // Delay-generated Shell submenus ("Send to", "Open with", archiver
+        // menus) are filled during WM_INITMENUPOPUP. Report the resulting item
+        // count: an empty flyout with count 0 means the message never reached a
+        // populating handler, which is a different bug from a drawing problem.
+        if message == WM_INITMENUPOPUP {
+            // SAFETY: w_param of WM_INITMENUPOPUP is the submenu handle.
+            let count = unsafe { GetMenuItemCount(Some(HMENU(w_param.0 as *mut c_void))) };
+            eprintln!("initmenupopup items={count}");
         }
 
         // SAFETY: Unhandled messages are delegated to the system default window
@@ -758,7 +1684,7 @@ mod windows_proxy {
         #[test]
         fn context_menu_request_accepts_folder_and_signed_coordinates() {
             let request = parse_request_from(
-                ["--context-menu", r"C:\Desk Box", "-120", "845"]
+                ["--context-menu", r"C:\Desk Box", "-120", "845", "dark"]
                     .into_iter()
                     .map(OsString::from),
             )
@@ -769,11 +1695,28 @@ mod windows_proxy {
                     path,
                     screen_x,
                     screen_y,
+                    dark,
                 } => {
                     assert_eq!(path, PathBuf::from(r"C:\Desk Box"));
                     assert_eq!(screen_x, -120);
                     assert_eq!(screen_y, 845);
+                    assert!(dark);
                 }
+                _ => panic!("unexpected proxy request"),
+            }
+        }
+
+        #[test]
+        fn context_menu_request_defaults_to_light_theme() {
+            let request = parse_request_from(
+                ["--context-menu", r"C:\Desk Box", "1", "2"]
+                    .into_iter()
+                    .map(OsString::from),
+            )
+            .expect("context menu request");
+
+            match request {
+                ProxyRequest::ContextMenu { dark, .. } => assert!(!dark),
                 _ => panic!("unexpected proxy request"),
             }
         }
@@ -790,6 +1733,67 @@ mod windows_proxy {
             };
 
             assert!(error.contains("missing context menu y coordinate"));
+        }
+
+        #[test]
+        fn context_menu_server_request_parses_without_extra_arguments() {
+            let request = parse_request_from(
+                ["--context-menu-server", "dark"]
+                    .into_iter()
+                    .map(OsString::from),
+            )
+            .expect("context menu server request");
+
+            match request {
+                ProxyRequest::ContextMenuServer { dark } => assert!(dark),
+                _ => panic!("unexpected proxy request"),
+            }
+
+            let light =
+                parse_request_from(["--context-menu-server"].into_iter().map(OsString::from))
+                    .expect("default theme");
+            match light {
+                ProxyRequest::ContextMenuServer { dark } => assert!(!dark),
+                _ => panic!("unexpected proxy request"),
+            }
+
+            let error = parse_request_from(
+                ["--context-menu-server", "dark", "extra"]
+                    .into_iter()
+                    .map(OsString::from),
+            )
+            .expect_err("extra arguments must be rejected");
+            assert!(error.contains("unexpected extra arguments"));
+        }
+
+        #[test]
+        fn command_line_normalization_strips_crlf_and_byte_order_mark() {
+            assert_eq!(normalize_command_line("warmup\r\n"), "warmup");
+            assert_eq!(normalize_command_line("\u{feff}warmup\n"), "warmup");
+            assert_eq!(
+                normalize_command_line("\u{feff}menu\t1\t2\tdark\tC:/file\n"),
+                "menu\t1\t2\tdark\tC:/file"
+            );
+            assert_eq!(normalize_command_line(""), "");
+        }
+
+        #[test]
+        fn menu_command_payload_accepts_signed_coordinates_and_spaced_paths() {
+            let (path, screen_x, screen_y, dark) =
+                parse_menu_command("120\t-845\tdark\tC:\\Desk Box\\my file.txt")
+                    .expect("menu command payload");
+
+            assert_eq!(path, PathBuf::from(r"C:\Desk Box\my file.txt"));
+            assert_eq!(screen_x, 120);
+            assert_eq!(screen_y, -845);
+            assert!(dark);
+        }
+
+        #[test]
+        fn menu_command_payload_rejects_missing_path_and_bad_coordinates() {
+            assert!(parse_menu_command("120\t845").is_err());
+            assert!(parse_menu_command("x\t845\tlight\tC:\\file").is_err());
+            assert!(parse_menu_command("120\t845\tlight\t").is_err());
         }
 
         #[test]

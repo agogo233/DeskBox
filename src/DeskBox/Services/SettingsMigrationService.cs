@@ -1,4 +1,5 @@
 using DeskBox.Models;
+using System.Text.Json;
 
 namespace DeskBox.Services;
 
@@ -20,31 +21,27 @@ public interface ISettingsMigration
 public sealed class SettingsMigrationPipeline
 {
     /// <summary>The current schema version that the application expects.</summary>
-    public const int CurrentSchemaVersion = 10;
+    public const int CurrentSchemaVersion = 9;
 
     private readonly List<ISettingsMigration> _migrations = [];
 
     public SettingsMigrationPipeline()
-        : this(
-        [
-            new Migration_0_To_1(),
-            new Migration_1_To_2(),
-            new Migration_2_To_3(),
-            new Migration_3_To_4(),
-            new Migration_4_To_5(),
-            new Migration_5_To_6(),
-            new Migration_6_To_7(),
-            new Migration_7_To_8(),
-            new Migration_8_To_9(),
-            new Migration_9_To_10()
-        ])
     {
+        // Register migrations in order
+        _migrations.Add(new Migration_0_To_1());
+        _migrations.Add(new Migration_1_To_2());
+        _migrations.Add(new Migration_2_To_3());
+        _migrations.Add(new Migration_3_To_4());
+        _migrations.Add(new Migration_4_To_5());
+        _migrations.Add(new Migration_5_To_6());
+        _migrations.Add(new Migration_6_To_7());
+        _migrations.Add(new Migration_7_To_8());
+        _migrations.Add(new Migration_8_To_9());
     }
 
     /// <summary>
-    /// Test seam: runs an explicit migration list against isolated state so
-    /// pipeline semantics (stop-on-failure, version bookkeeping) can be
-    /// verified without touching the production data root.
+    /// Test seam for fault-injection: the chain behavior (step failures,
+    /// checkpoints, ordering) is what the tests pin, not the real steps.
     /// </summary>
     internal SettingsMigrationPipeline(IEnumerable<ISettingsMigration> migrations)
     {
@@ -53,89 +50,134 @@ public sealed class SettingsMigrationPipeline
 
     /// <summary>
     /// Runs all necessary migrations to bring the settings from their current
-    /// schema version up to <see cref="CurrentSchemaVersion"/>. Migrations
-    /// advance one exact step at a time; a migration that throws OR a gap in
-    /// the registered steps (a step removed/never added) stops the pipeline:
-    /// the schema version stays at the last successful step (never stamped
-    /// past a failed or missing step) so the failed migration is retried on
-    /// the next launch and the registry gap is visible in the log instead of
-    /// silently skipping a step. Migrations that write external stores
-    /// (Migration_9_To_10 creating data/music/settings.json) depend on this.
-    /// Returns true if any migration was applied.
+    /// schema version up to <see cref="CurrentSchemaVersion"/>. Runs
+    /// copy-on-write: every step executes on a deserialized copy of the last
+    /// committed state and a failed step is discarded wholesale, so the
+    /// returned graph is either fully migrated through its recorded
+    /// checkpoint or byte-for-byte the input. A gap in the registered steps
+    /// (a step removed/never added) stops the pipeline the same way a failing
+    /// step does: the schema version stays at the last successful step so the
+    /// misconfigured registry is visible in the log instead of silently
+    /// skipping a step. The caller replaces its settings reference with the
+    /// returned one.
     /// </summary>
-    public bool RunMigrations(AppSettings settings)
+    public (AppSettings Settings, bool AnyApplied) RunMigrationsOnCopy(AppSettings settings)
     {
         if (settings.SchemaVersion >= CurrentSchemaVersion)
         {
-            return false;
+            return (settings, false);
         }
 
-        bool anyApplied = false;
+        AppSettings working = settings;
         int version = settings.SchemaVersion;
+        bool anyApplied = false;
 
         foreach (var migration in _migrations.OrderBy(m => m.FromVersion))
         {
-            if (version >= CurrentSchemaVersion)
-            {
-                break;
-            }
-
             if (migration.FromVersion < version)
             {
-                // Applied on an earlier launch; skip.
                 continue;
             }
 
             if (migration.FromVersion > version)
             {
-                // Registry gap: a step is missing (removed or never added).
-                // The old >= comparison would have run later steps here,
-                // silently skipping the missing one. Stop exactly like a
-                // failing migration - the version stays put and the
-                // misconfigured registry becomes visible in the log.
                 App.Log(
                     $"[SettingsMigration] Migration registry GAP at version {version}: " +
                     $"the next registered step starts at {migration.FromVersion}. " +
                     "Stopping so no migration is silently skipped.");
-                settings.SchemaVersion = version;
-                return anyApplied;
+                working.SchemaVersion = version;
+                return (working, anyApplied);
+            }
+
+            if (migration.FromVersion >= CurrentSchemaVersion)
+            {
+                break;
+            }
+
+            byte[]? snapshot = TrySerializeSettings(working);
+            if (snapshot is null)
+            {
+                App.Log(
+                    $"[SettingsMigration] Migration from version {migration.FromVersion} skipped: " +
+                    "the pre-step settings snapshot could not be taken.");
+                break;
+            }
+
+            if (TryDeserializeSettings(snapshot) is not { } stepCopy)
+            {
+                App.Log(
+                    $"[SettingsMigration] Migration from version {migration.FromVersion} skipped: " +
+                    "the pre-step settings snapshot could not be read back.");
+                break;
             }
 
             try
             {
-                migration.Migrate(settings);
+                migration.Migrate(stepCopy);
             }
             catch (Exception ex)
             {
+                // A failed step must stop the chain and leave the graph
+                // untouched: every later migration assumes the schema the
+                // failed step was supposed to produce, and the discarded copy
+                // carries no half-applied mutations.
                 App.Log(
-                    $"[SettingsMigration] Migration from version {migration.FromVersion} FAILED " +
-                    $"and will retry on next launch: {ex.Message}");
-                settings.SchemaVersion = version;
-                return anyApplied;
+                    $"[SettingsMigration] Migration from version {migration.FromVersion} failed: {ex.Message}; " +
+                    $"state untouched, stopping at schema version {version} (will retry on next launch)");
+                break;
             }
 
+            working = stepCopy;
             version = migration.FromVersion + 1;
             anyApplied = true;
             App.Log($"[SettingsMigration] Applied migration from version {migration.FromVersion} to {version}");
         }
 
-        // Tail gap: the registry ran out of steps before reaching Current.
-        // Stamping the current version anyway would mark migrations that
-        // were never registered as applied (the mirror image of the mid-
-        // registry gap caught above). Keep the version at the last
-        // successful step so the misconfiguration is visible in the log.
+        // Record the checkpoint the chain actually reached. A partial run
+        // keeps the last successful version so the failed step retries next
+        // launch; only a full pass reaches CurrentSchemaVersion.
         if (version != CurrentSchemaVersion)
         {
             App.Log(
                 $"[SettingsMigration] Migration registry TAIL GAP: reached version {version} " +
                 $"but the current schema version is {CurrentSchemaVersion}. " +
                 "Stopping so unregistered steps are never marked as applied.");
-            settings.SchemaVersion = version;
-            return anyApplied;
+            working.SchemaVersion = version;
+            return (working, anyApplied);
         }
 
-        settings.SchemaVersion = CurrentSchemaVersion;
-        return anyApplied;
+        working.SchemaVersion = CurrentSchemaVersion;
+        return (working, anyApplied);
+    }
+
+    private static byte[]? TrySerializeSettings(AppSettings settings)
+    {
+        try
+        {
+            return JsonSerializer.SerializeToUtf8Bytes(
+                settings,
+                SettingsJsonContext.Default.AppSettings);
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[SettingsMigration] Settings snapshot failed: {ex.Message}");
+            return null;
+        }
+    }
+
+    private static AppSettings? TryDeserializeSettings(byte[] snapshot)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize(
+                snapshot,
+                SettingsJsonContext.Default.AppSettings);
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[SettingsMigration] Settings snapshot read-back failed: {ex.Message}");
+            return null;
+        }
     }
 }
 
@@ -365,43 +407,3 @@ internal sealed class Migration_7_To_8 : ISettingsMigration
                 settings.TransientWindowReleaseDelaySeconds);
     }
 }
-
-/// <summary>
-/// Copies the three Music feature fields out of the global AppSettings into
-/// the per-kind MusicSettingsStore (pluginization roadmap stage 2, the
-/// per-kind store pilot). Copy-style: the AppSettings fields are left in
-/// place as an inert compatibility source until the N+2 cleanup release
-/// removes them, so a downgrade within the window keeps working. The store
-/// is created only when it does not exist yet - re-running the migration
-/// never overwrites user changes made after the first cutover.
-/// </summary>
-internal sealed class Migration_9_To_10 : ISettingsMigration
-{
-    public int FromVersion => 9;
-
-    public void Migrate(AppSettings settings) =>
-        Migrate(settings, DeskBoxDataPathService.Current.DataDirectory);
-
-    internal static void Migrate(AppSettings settings, string dataDirectory)
-    {
-        string musicDataDirectory = Path.Combine(dataDirectory, "music");
-        string storePath = Path.Combine(musicDataDirectory, "settings.json");
-        if (File.Exists(storePath))
-        {
-            return;
-        }
-
-        var store = new MusicSettingsStore(musicDataDirectory);
-        var migrated = store.Load();
-        migrated.UseArtworkBackdrop = settings.MusicUseArtworkBackdrop;
-        migrated.EnableCoverHoverMotion = settings.MusicEnableCoverHoverMotion;
-        migrated.DisplayMode = SettingsService.NormalizeMusicDisplayMode(settings.MusicDisplayMode);
-        // Synchronous write that THROWS on failure: a swallowed write error
-        // here would let the pipeline stamp SchemaVersion=10 while the store
-        // was never created, permanently stranding the legacy values. It
-        // must also never block on an async continuation (UI-thread startup
-        // deadlock), hence the synchronous save path.
-        store.SaveSynchronously(migrated);
-    }
-}
-

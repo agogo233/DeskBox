@@ -122,6 +122,16 @@ internal static unsafe class NativeComStreamReader
 
     public static void CopyTo(nint streamPointer, Stream destination)
     {
+        CopyTo(streamPointer, destination, long.MaxValue);
+    }
+
+    /// <summary>
+    /// Copies with a hard byte budget. A drag source controls the stream
+    /// length, so materialization must stop at a sane cap instead of letting
+    /// one crafted "file" exhaust memory or disk.
+    /// </summary>
+    public static void CopyTo(nint streamPointer, Stream destination, long maxBytes)
+    {
         if (streamPointer == 0)
         {
             throw new ArgumentException("The COM stream pointer is null.", nameof(streamPointer));
@@ -143,6 +153,7 @@ internal static unsafe class NativeComStreamReader
         var read = (delegate* unmanaged[Stdcall]<nint, byte*, uint, uint*, int>)
             vtable[ReadVtableSlot];
         var buffer = new byte[BufferSize];
+        long totalBytes = 0;
 
         fixed (byte* bufferPointer = buffer)
         {
@@ -167,6 +178,13 @@ internal static unsafe class NativeComStreamReader
 
                 if (bytesRead > 0)
                 {
+                    totalBytes += bytesRead;
+                    if (totalBytes > maxBytes)
+                    {
+                        throw new IOException(
+                            $"The dropped stream exceeds the {maxBytes}-byte materialization budget.");
+                    }
+
                     destination.Write(buffer, 0, (int)bytesRead);
                 }
 

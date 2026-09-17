@@ -228,6 +228,13 @@ public sealed partial class SettingsWindow : Window
         }
 
         _appWindow.Show();
+        // Route through the manager so a quick-reveal raised session (widget
+        // group held topmost) lifts this window above the widgets instead of
+        // leaving it in the normal band below them. Outside a session this is
+        // the ordinary bring-to-front pulse, matching the other popups.
+        App.Current.WidgetManager?.BringAuxiliaryWindowToFront(
+            _hWnd,
+            "settings-shown");
         Activate();
         if (_hasShownOnce)
         {
@@ -304,6 +311,9 @@ public sealed partial class SettingsWindow : Window
         {
             args.Handled = true;
             _appWindow.Hide();
+            App.Current.WidgetManager?.ReleaseRaisedBandGuest(
+                _hWnd,
+                "settings-hidden");
             return;
         }
 
@@ -520,7 +530,6 @@ public sealed partial class SettingsWindow : Window
             AboutInfoActionsPanel.Orientation = isNarrow ? Orientation.Vertical : Orientation.Horizontal;
             AboutMeButton.HorizontalAlignment = isNarrow ? HorizontalAlignment.Stretch : HorizontalAlignment.Left;
             AboutWebsiteButton.HorizontalAlignment = isNarrow ? HorizontalAlignment.Stretch : HorizontalAlignment.Left;
-            FeedbackEmailButton.HorizontalAlignment = isNarrow ? HorizontalAlignment.Stretch : HorizontalAlignment.Left;
             StoreSupportButton.HorizontalAlignment = isNarrow ? HorizontalAlignment.Stretch : HorizontalAlignment.Left;
             UpdateActionsPanel.HorizontalAlignment = isNarrow ? HorizontalAlignment.Stretch : HorizontalAlignment.Right;
             UpdateActionsPanel.Orientation = isNarrow ? Orientation.Vertical : Orientation.Horizontal;

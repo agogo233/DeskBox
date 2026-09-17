@@ -29,7 +29,18 @@
                     <SolidColorBrush x:Key="WidgetTitleStateHoverBrush" Color="#0F000000" />
                     <SolidColorBrush x:Key="WidgetTitleStatePressedBrush" Color="#18000000" />
                     <SolidColorBrush x:Key="WidgetTitleStateOpenBrush" Color="#14000000" />
-                    <SolidColorBrush x:Key="WidgetAccentWashBrush" Color="#160067C0" />
+                    <!-- Code-resolved neutral interaction tones. WinUI's themed
+                         tokens cannot be resolved by element theme from code
+                         (an application-scope lookup follows the system theme,
+                         not the window's override), so the palette is mirrored
+                         here and resolved by element ActualTheme. Values mirror
+                         SubtleFillColorSecondary/Tertiary,
+                         ControlStrongStrokeColorDefault and
+                         TextFillColorPrimary. -->
+                    <SolidColorBrush x:Key="DeskBoxNeutralFillSecondaryBrush" Color="#09000000" />
+                    <SolidColorBrush x:Key="DeskBoxNeutralFillTertiaryBrush" Color="#06000000" />
+                    <SolidColorBrush x:Key="DeskBoxNeutralLineBrush" Color="#72000000" />
+                    <SolidColorBrush x:Key="DeskBoxNeutralTextPrimaryBrush" Color="#E4000000" />
                     <CornerRadius x:Key="OverlayCornerRadius">8</CornerRadius>
                     <CornerRadius x:Key="ComboBoxItemCornerRadius">6</CornerRadius>
                     <CornerRadius x:Key="ComboBoxHiglightBorderCornerRadius">8</CornerRadius>
@@ -54,7 +65,10 @@
                     <SolidColorBrush x:Key="WidgetTitleStateHoverBrush" Color="#12FFFFFF" />
                     <SolidColorBrush x:Key="WidgetTitleStatePressedBrush" Color="#20FFFFFF" />
                     <SolidColorBrush x:Key="WidgetTitleStateOpenBrush" Color="#18FFFFFF" />
-                    <SolidColorBrush x:Key="WidgetAccentWashBrush" Color="#260078D4" />
+                    <SolidColorBrush x:Key="DeskBoxNeutralFillSecondaryBrush" Color="#0FFFFFFF" />
+                    <SolidColorBrush x:Key="DeskBoxNeutralFillTertiaryBrush" Color="#0AFFFFFF" />
+                    <SolidColorBrush x:Key="DeskBoxNeutralLineBrush" Color="#8BFFFFFF" />
+                    <SolidColorBrush x:Key="DeskBoxNeutralTextPrimaryBrush" Color="#FFFFFFFF" />
                     <CornerRadius x:Key="OverlayCornerRadius">8</CornerRadius>
                     <CornerRadius x:Key="ComboBoxItemCornerRadius">6</CornerRadius>
                     <CornerRadius x:Key="ComboBoxHiglightBorderCornerRadius">8</CornerRadius>
@@ -279,7 +293,9 @@
                 <Setter Property="Padding" Value="2,0" />
                 <Setter Property="TextWrapping" Value="NoWrap" />
                 <Setter Property="BorderThickness" Value="1" />
-                <Setter Property="BorderBrush" Value="{ThemeResource AccentFillColorDefaultBrush}" />
+                <!-- The inline rename box is an active edit surface, so its
+                     border is the neutral strong stroke rather than the accent. -->
+                <Setter Property="BorderBrush" Value="{ThemeResource ControlStrongStrokeColorDefaultBrush}" />
                 <Setter Property="Background" Value="Transparent" />
                 <Setter Property="CornerRadius" Value="2" />
             </Style>

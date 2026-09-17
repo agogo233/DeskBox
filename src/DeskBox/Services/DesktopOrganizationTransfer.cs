@@ -37,3 +37,14 @@ public sealed class DesktopOrganizationIncompleteUndoException(int restoredCount
     public int RestoredCount { get; } = restoredCount;
     public int RemainingCount { get; } = remainingCount;
 }
+
+/// <summary>Surfaced verbatim in the UI; the generic failure text would hide the cause.</summary>
+public sealed class DesktopOrganizationPendingRecoveryException()
+    : InvalidOperationException("A pending desktop operation must be recovered first.");
+
+/// <summary>Surfaced verbatim in the UI; the generic failure text would hide the cause.</summary>
+public sealed class DesktopOrganizationInsufficientSpaceException(string driveName)
+    : IOException($"There is not enough free space on {driveName}.")
+{
+    public string DriveName { get; } = driveName;
+}

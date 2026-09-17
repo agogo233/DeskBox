@@ -176,8 +176,16 @@ internal sealed unsafe partial class ShortcutNativeModule
 
     private static string BuildExplorerShellFailureDetail(NativeExplorerShellLaunchResult result)
     {
+        // Per-phase HRESULTs pinpoint where the Explorer delegation died: the
+        // aggregate OperationHResult is often 0 while the failing phase carries
+        // the real code (feedback #9: phases=0xF, aggregate 0x00000000, but the
+        // desktop phase was the one that could not find the shell window).
         return $"Native Explorer-shell launch failed: status={result.Status}, " +
-               $"HRESULT=0x{result.OperationHResult:X8}, phases=0x{result.AttemptedPhases:X}.";
+               $"HRESULT=0x{result.OperationHResult:X8}, phases=0x{result.AttemptedPhases:X}, " +
+               $"phaseHr com=0x{result.ComHResult:X8} create=0x{result.CreateHResult:X8} " +
+               $"windows=0x{result.WindowsHResult:X8} desktop=0x{result.DesktopHResult:X8} " +
+               $"document=0x{result.DocumentHResult:X8} application=0x{result.ApplicationHResult:X8} " +
+               $"execute=0x{result.ExecuteHResult:X8}.";
     }
 
     private static ExplorerShellLaunchNativeCallResult ExplorerShellLaunchCallFailure(

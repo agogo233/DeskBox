@@ -59,6 +59,7 @@ public sealed partial class DesktopOrganizationTaskView
         TargetSelectionHost.IsEnabled = false;
         RetryPublicButton.IsEnabled = false;
         UndoButton.IsEnabled = false;
+        AbandonUndoButton.IsEnabled = false;
         DoneButton.IsEnabled = false;
         ExcludedItemsButton.IsEnabled = false;
         RefreshButton.IsEnabled = false;
@@ -131,6 +132,24 @@ public sealed partial class DesktopOrganizationTaskView
                 ExecuteButton.IsEnabled = true;
             }
         }
+        catch (DesktopOrganizationInsufficientSpaceException ex)
+        {
+            App.Log($"[DesktopOrganization] Execution failed: {ex}");
+            ResultInfo.Severity = InfoBarSeverity.Error;
+            ResultInfo.Title = T("DesktopOrganization.Result.FailedTitle");
+            ResultInfo.Message = Format("DesktopOrganization.Error.NoSpace", ex.DriveName);
+            ResultInfo.IsOpen = true;
+            ExecuteButton.IsEnabled = true;
+        }
+        catch (DesktopOrganizationPendingRecoveryException ex)
+        {
+            App.Log($"[DesktopOrganization] Execution failed: {ex}");
+            ResultInfo.Severity = InfoBarSeverity.Error;
+            ResultInfo.Title = T("DesktopOrganization.Result.FailedTitle");
+            ResultInfo.Message = T("DesktopOrganization.Error.PendingRecovery");
+            ResultInfo.IsOpen = true;
+            ExecuteButton.IsEnabled = true;
+        }
         catch (Exception ex)
         {
             App.Log($"[DesktopOrganization] Execution failed: {ex}");
@@ -152,6 +171,7 @@ public sealed partial class DesktopOrganizationTaskView
             TargetSelectionHost.IsEnabled = !_hasCompletedExecution;
             RetryPublicButton.IsEnabled = true;
             UndoButton.IsEnabled = true;
+            AbandonUndoButton.IsEnabled = true;
             DoneButton.IsEnabled = true;
             ExcludedItemsButton.IsEnabled = true;
             CancelButton.IsEnabled = true;
@@ -174,6 +194,7 @@ public sealed partial class DesktopOrganizationTaskView
 
         _isExecuting = true;
         UndoButton.IsEnabled = false;
+        AbandonUndoButton.IsEnabled = false;
         SourceSelectionHost.IsEnabled = false;
         TargetSelectionHost.IsEnabled = false;
         ExecuteButton.IsEnabled = false;
@@ -206,6 +227,7 @@ public sealed partial class DesktopOrganizationTaskView
             // items can be continued, using their persisted receipts.
             RetryPublicButton.Visibility = Visibility.Collapsed;
             UndoButton.Content = T("DesktopOrganization.Public.ContinueUndo");
+            AbandonUndoButton.Visibility = Visibility.Visible;
             var history = App.Current.SettingsService.Settings.RecentOrganizationHistory
                 .FirstOrDefault(entry => entry.Id == _lastHistoryId);
             if (_hasCompletedExecution && history is not null) RenderExecutionResult(history);
@@ -222,6 +244,7 @@ public sealed partial class DesktopOrganizationTaskView
         {
             _isExecuting = false;
             UndoButton.IsEnabled = true;
+            AbandonUndoButton.IsEnabled = true;
             DoneButton.IsEnabled = true;
             RetryPublicButton.IsEnabled = true;
             RefreshButton.IsEnabled = true;
@@ -230,6 +253,111 @@ public sealed partial class DesktopOrganizationTaskView
             ChangePathButton.IsEnabled = !_hasCompletedExecution;
             // An interrupted undo can leave a recovery journal behind; refresh
             // the cached hint so the banner and execute button reflect it.
+            UpdateRecoveryState();
+            UpdateSummary(_plan);
+        }
+    }
+
+    private async void AbandonUndoButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_isExecuting || string.IsNullOrWhiteSpace(_lastHistoryId))
+        {
+            return;
+        }
+
+        var history = App.Current.SettingsService.Settings.RecentOrganizationHistory
+            .FirstOrDefault(entry => entry.Id == _lastHistoryId);
+        if (history is null || !history.CanUndo)
+        {
+            // The entry was resolved elsewhere; resync the banner state.
+            await ScanAsync();
+            return;
+        }
+
+        if (!await DesktopOrganizationAbandonDialog.ConfirmAsync(
+                XamlRoot,
+                App.Current.LocalizationService,
+                DesktopOrganizationAbandonDialog.BuildItemDetails(App.Current.LocalizationService, history)))
+        {
+            return;
+        }
+
+        _isExecuting = true;
+        UndoButton.IsEnabled = false;
+        AbandonUndoButton.IsEnabled = false;
+        try
+        {
+            await Coordinator.AbandonUndoAsync(history.Id);
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[DesktopOrganization] Abandoning restore failed: {ex}");
+            ResultInfo.Severity = InfoBarSeverity.Error;
+            ResultInfo.Title = T("DesktopOrganization.Result.FailedTitle");
+            ResultInfo.Message = T("DesktopOrganization.Result.FailedBody");
+            ResultInfo.IsOpen = true;
+            return;
+        }
+        finally
+        {
+            _isExecuting = false;
+            UndoButton.IsEnabled = true;
+            AbandonUndoButton.IsEnabled = true;
+        }
+
+        UndoButton.Visibility = Visibility.Collapsed;
+        UndoButton.Content = T("DesktopOrganization.Layout.Undo");
+        AbandonUndoButton.Visibility = Visibility.Collapsed;
+        _lastHistoryId = null;
+        ResultInfo.Severity = InfoBarSeverity.Success;
+        ResultInfo.Title = T("DesktopOrganization.Public.AbandonDone");
+        ResultInfo.Message = string.Empty;
+        ResultInfo.IsOpen = true;
+        // The desktop itself did not change; refresh the gates without a
+        // rescan, which would wipe this confirmation message.
+        UpdateRecoveryState();
+        UpdateSummary(_plan);
+    }
+
+    private async void AbandonRecoveryButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_isExecuting || !HasPendingRecovery)
+        {
+            return;
+        }
+
+        if (!await DesktopOrganizationAbandonDialog.ConfirmAsync(
+                XamlRoot,
+                App.Current.LocalizationService,
+                itemDetails: null))
+        {
+            return;
+        }
+
+        _isExecuting = true;
+        RecoverButton.IsEnabled = false;
+        AbandonRecoveryButton.IsEnabled = false;
+        try
+        {
+            await Coordinator.AbandonPendingRecoveryAsync();
+            ResultInfo.Severity = InfoBarSeverity.Success;
+            ResultInfo.Title = T("DesktopOrganization.Public.AbandonDone");
+            ResultInfo.Message = string.Empty;
+            ResultInfo.IsOpen = true;
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[DesktopOrganization] Abandoning pending recovery failed: {ex}");
+            ResultInfo.Severity = InfoBarSeverity.Error;
+            ResultInfo.Title = T("DesktopOrganization.Result.FailedTitle");
+            ResultInfo.Message = T("DesktopOrganization.Result.FailedBody");
+            ResultInfo.IsOpen = true;
+        }
+        finally
+        {
+            _isExecuting = false;
+            RecoverButton.IsEnabled = true;
+            AbandonRecoveryButton.IsEnabled = true;
             UpdateRecoveryState();
             UpdateSummary(_plan);
         }

@@ -467,6 +467,7 @@ public partial class WidgetViewModel
         }
 
         _currentFolderPath = normalized;
+        ResetRenderWindow();
         UpdateFolderNavigationPresentation();
     }
 

@@ -57,7 +57,7 @@ public abstract partial class WidgetWindowBase
             0, 0, 0, 0,
             Win32Helper.SWP_NOMOVE | Win32Helper.SWP_NOSIZE | Win32Helper.SWP_NOACTIVATE | Win32Helper.SWP_FRAMECHANGED);
 
-        AppWindow.IsShownInSwitchers = false;
+        WindowShellState.TryHideFromSwitchers(AppWindow);
         ExtendsContentIntoTitleBar = false;
 
         var config = Config;
@@ -70,13 +70,18 @@ public abstract partial class WidgetWindowBase
         var initCenter = new PointInt32(
             initBounds.X + Math.Max(1, initBounds.Width) / 2,
             initBounds.Y + Math.Max(1, initBounds.Height) / 2);
+        // The display-area lookup can come back empty while the topology is in
+        // flux; falling back to the configured bounds keeps the widget instead
+        // of failing its construction.
         var workArea = DisplayArea.GetFromPoint(
             initCenter,
-            DisplayAreaFallback.Nearest).WorkArea;
-        var bounds = WidgetPositioningService.ResolveBounds(
-            config,
-            workArea,
-            WidgetPositioningService.GetAvailableWorkAreas());
+            DisplayAreaFallback.Nearest)?.WorkArea;
+        var bounds = workArea is { } resolvedWorkArea
+            ? WidgetPositioningService.ResolveBounds(
+                config,
+                resolvedWorkArea,
+                WidgetPositioningService.GetAvailableWorkAreas())
+            : initBounds;
         bounds = ExpandContentBoundsToHost(bounds);
         ApplyWindowBounds(bounds.X, bounds.Y, bounds.Width, bounds.Height, persist: false);
 

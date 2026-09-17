@@ -22,8 +22,6 @@ public partial class SettingsViewModel
     public string OfficialWebsiteLink => OfficialWebsiteUrl;
     public string MicrosoftStoreLink => MicrosoftStoreUrl;
     public string MicrosoftStoreAppLink => MicrosoftStoreAppUrl;
-    public string FeedbackEmailAddress => FeedbackEmail;
-    public string FeedbackEmailLink => $"mailto:{FeedbackEmail}";
     public string DomesticMirrorDownloadUrl => AppUpdateService.DefaultManualDownloadUrl;
     public Visibility StoreSupportCardVisibility => IsDirectInstallerUpdateDelivery ? Visibility.Visible : Visibility.Collapsed;
 

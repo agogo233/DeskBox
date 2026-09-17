@@ -563,14 +563,18 @@ public sealed partial class QuickCaptureWidgetWindow
             return;
         }
 
+        // A query match is an input-driven highlight, so it follows the
+        // inline-rename precedent and washes with a neutral tone instead of
+        // the accent.
+        bool isDark = textBlock.ActualTheme == ElementTheme.Dark;
         var highlighter = new TextHighlighter
         {
             Background = new SolidColorBrush(WithAlpha(
-                App.Current.ThemeService?.GetEffectiveAccentColor() ?? AccentColorHelper.DefaultAccentColor,
-                0x44)),
+                isDark ? Colors.White : Colors.Black,
+                isDark ? (byte)0x33 : (byte)0x1E)),
             Foreground = GetBrushResourceOrFallback(
                 "TextFillColorPrimaryBrush",
-                textBlock.ActualTheme == ElementTheme.Dark ? Colors.White : Colors.Black)
+                isDark ? Colors.White : Colors.Black)
         };
         highlighter.Ranges.Add(new TextRange
         {

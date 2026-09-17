@@ -1,4 +1,4 @@
-namespace DeskBox.Tests;
+﻿namespace DeskBox.Tests;
 
 public sealed class WidgetForegroundContractTests
 {
@@ -12,6 +12,9 @@ public sealed class WidgetForegroundContractTests
         Assert.Contains("AvailableWidgetForegroundModeOptions", xaml, StringComparison.Ordinal);
         Assert.Contains("SelectedWidgetForegroundColor", xaml, StringComparison.Ordinal);
         Assert.Contains("nameof(SelectedWidgetForegroundColor)", bindable, StringComparison.Ordinal);
+        // The text edge experiment was removed in 1.5.1 (too many platform
+        // traps for the value it added); nothing may quietly reintroduce a
+        // shadow surface, host or setting.
         Assert.DoesNotContain("WidgetTextEdge", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("WidgetTextEdge", bindable, StringComparison.Ordinal);
     }
@@ -29,23 +32,33 @@ public sealed class WidgetForegroundContractTests
     }
 
     [Fact]
-    public void TextEdgeFeature_StaysPopoverScopedWithNoWidgetMenuOrSurface()
+    public void TextEdgeFeature_LeavesNoManagerHostOrSettingBehind()
     {
-        // The stack popover owns the only text-edge runtime surface: the
-        // WidgetTextShadowManager it instantiates in code plus the shared
-        // normalization helpers. Widget-level menus and window foreground
-        // code must keep staying edge-free.
+        // The text edge (composition shadow behind widget text) was dropped in
+        // 1.5.1: GetAlphaMask snapshots, per-surface budgets and host lifetime
+        // kept producing widget freezes, so the whole feature goes — manager,
+        // window and capsule mounts, the popover mount, and the setting.
         string foreground = Read(
             "src/DeskBox/Views/WidgetWindowBase.Foreground.cs");
-        string menu = Read("src/DeskBox/Services/WidgetForegroundMenuBuilder.cs");
         string shell = Read("src/DeskBox/Controls/WidgetShell.xaml.cs");
+        string popover = Read(
+            "src/DeskBox/Controls/WidgetContents/FileSurfaceContent.StackPopover.cs");
+        string settings = Read("src/DeskBox/Models/AppSettings.cs");
+        string foregroundSettings = Read(
+            "src/DeskBox/Services/WidgetForegroundSettings.cs");
+        string menu = Read("src/DeskBox/Services/WidgetForegroundMenuBuilder.cs");
 
-        Assert.Contains("highContrast", foreground, StringComparison.Ordinal);
+        Assert.Contains("CleanupWidgetForegroundAppearance", foreground, StringComparison.Ordinal);
         Assert.DoesNotContain("TextEdge", foreground, StringComparison.Ordinal);
-        Assert.DoesNotContain("TextEdge", menu, StringComparison.Ordinal);
         Assert.DoesNotContain("TextEdge", shell, StringComparison.Ordinal);
-        Assert.True(File.Exists(TestPaths.FromRepository(
+        Assert.DoesNotContain("TextShadow", popover, StringComparison.Ordinal);
+        Assert.DoesNotContain("WidgetTextEdgeMode", settings, StringComparison.Ordinal);
+        Assert.DoesNotContain("EdgeMode", foregroundSettings, StringComparison.Ordinal);
+        Assert.DoesNotContain("TextEdge", menu, StringComparison.Ordinal);
+        Assert.False(File.Exists(TestPaths.FromRepository(
             "src/DeskBox/Views/WidgetTextShadowManager.cs")));
+        Assert.False(File.Exists(TestPaths.FromRepository(
+            "src/DeskBox/Views/WidgetWindowBase.TextEdge.cs")));
     }
 
     [Fact]

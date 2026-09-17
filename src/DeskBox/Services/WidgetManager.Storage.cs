@@ -222,7 +222,11 @@ public sealed partial class WidgetManager
         {
             _settingsService.Settings.DefaultManagedStorageRootPath = normalizedNewRootPath;
             await _settingsService.SaveAsync();
-            return new ManagedStorageMigrationResult(0, oldRootPath, normalizedNewRootPath);
+            return new ManagedStorageMigrationResult(
+                0,
+                oldRootPath,
+                normalizedNewRootPath,
+                Array.Empty<ManagedStorageMigrationResidue>());
         }
 
         var affectedWidgets = _settingsService.Settings.Widgets
@@ -263,11 +267,30 @@ public sealed partial class WidgetManager
 
         Directory.CreateDirectory(normalizedNewRootPath);
 
-        var completedMoves = new List<(string SourceFolder, string DestinationFolder)>(affectedWidgets.Count);
+        // A non-empty destination folder is almost always the complete copy a
+        // previous failed migration kept. Moving into it forks the trees into
+        // "(2)" renamed duplicates, so the caller must recycle the stale copy
+        // first and retry.
+        List<string> staleDestinationFolders = affectedWidgets
+            .Where(widgetPlan => Directory.Exists(widgetPlan.DestinationFolder) &&
+                                 Directory.EnumerateFileSystemEntries(widgetPlan.DestinationFolder).Any())
+            .Select(widgetPlan => widgetPlan.DestinationFolder)
+            .ToList();
+        if (staleDestinationFolders.Count > 0)
+        {
+            throw new ManagedStorageDestinationResidueException(staleDestinationFolders);
+        }
+
+        var completedMoves = new List<(string WidgetId, string SourceFolder, string DestinationFolder)>(affectedWidgets.Count);
+        var residueReports = new List<ManagedStorageMigrationResidue>();
+        var residueWidgetIds = new HashSet<string>(StringComparer.Ordinal);
         var originalWidgetStorage = affectedWidgets.ToDictionary(
             widget => widget.Widget.Id,
             widget => (widget.Widget.ManagedFolderName, widget.Widget.MappedFolderPath),
             StringComparer.Ordinal);
+
+        Func<string, string, Task> relocateDirectory = RelocateDirectoryForMigrationOverride ??
+            _fileService.RelocateDirectoryAsync;
 
         SetManagedStorageMigrationBusy(affectedWidgets.Select(widget => widget.Widget.Id), isBusy: true);
         try
@@ -279,8 +302,34 @@ public sealed partial class WidgetManager
 
             foreach (var widgetPlan in affectedWidgets)
             {
-                await _fileService.RelocateDirectoryAsync(widgetPlan.SourceFolder, widgetPlan.DestinationFolder);
-                completedMoves.Add((widgetPlan.SourceFolder, widgetPlan.DestinationFolder));
+                try
+                {
+                    await relocateDirectory(widgetPlan.SourceFolder, widgetPlan.DestinationFolder);
+                }
+                catch (Exception ex) when (
+                    ex is FileService.FileTransferSourceCleanupException or
+                        FileService.FileTransferSourceChangedException)
+                {
+                    // The destination tree already holds a complete copy (of
+                    // an earlier snapshot for the changed variant). Failing
+                    // the whole migration here would roll this widget back
+                    // onto a partially deleted source folder; keep the copy,
+                    // finish the migration, and report the leftover source.
+                    App.Log(
+                        $"[ManagedStorageMigration] Widget '{widgetPlan.Widget.Id}' " +
+                        $"migrated with source residue '{widgetPlan.SourceFolder}': {ex.Message}");
+                    residueReports.Add(new ManagedStorageMigrationResidue(
+                        widgetPlan.Widget.Id,
+                        widgetPlan.Widget.Name,
+                        widgetPlan.SourceFolder,
+                        ex.Message));
+                    residueWidgetIds.Add(widgetPlan.Widget.Id);
+                }
+
+                completedMoves.Add((
+                    widgetPlan.Widget.Id,
+                    widgetPlan.SourceFolder,
+                    widgetPlan.DestinationFolder));
             }
 
             _settingsService.Settings.DefaultManagedStorageRootPath = normalizedNewRootPath;
@@ -290,11 +339,43 @@ public sealed partial class WidgetManager
                 widgetPlan.Widget.MappedFolderPath = widgetPlan.DestinationFolder;
             }
 
-            await _settingsService.SaveAsync();
-            SyncStorageFolderEntries(oldRootPath);
-            if (App.Current?.ManagedStorageDesktopShortcutService is { } shortcutService)
+            if (!await _settingsService.SaveCheckedAsync())
             {
-                await shortcutService.SyncAsync(oldRootPath);
+                // The disk still holds the old root. Throwing here rolls the
+                // directories and in-memory settings back while the persisted
+                // settings never moved, so all three stay consistent.
+                throw new InvalidOperationException(
+                    $"Failed to persist the managed storage root change to '{normalizedNewRootPath}'.");
+            }
+
+            try
+            {
+                // Past the commit point: a failure while cleaning up the old
+                // root's shortcut entries must not roll the physical migration
+                // back. The startup storage sync repairs what it can.
+                SyncStorageFolderEntries(oldRootPath);
+            }
+            catch (Exception ex)
+            {
+                App.Log(
+                    $"[ManagedStorageMigration] Old-root shortcut cleanup skipped " +
+                    $"for '{oldRootPath}': {ex.Message}");
+            }
+
+            try
+            {
+                // The migration is already committed at this point; a
+                // desktop-shortcut sync failure (or a WinUI activation
+                // failure in a non-app test host, where Application.Current
+                // throws REGDB_E_CLASSNOTREG) must not roll it back.
+                if (App.Current?.ManagedStorageDesktopShortcutService is { } shortcutService)
+                {
+                    await shortcutService.SyncAsync(oldRootPath);
+                }
+            }
+            catch (Exception ex)
+            {
+                App.Log($"[ManagedStorageMigration] Desktop shortcut sync skipped: {ex.Message}");
             }
 
             foreach (var widgetPlan in affectedWidgets)
@@ -327,7 +408,20 @@ public sealed partial class WidgetManager
             {
                 try
                 {
-                    await _fileService.RelocateDirectoryAsync(move.DestinationFolder, move.SourceFolder);
+                    if (residueWidgetIds.Contains(move.WidgetId))
+                    {
+                        // The source still holds the files the failed cleanup
+                        // could not delete (possibly newer than the copy).
+                        // Restore without overwriting them; a plain move-back
+                        // would rename every shared child to "(2)".
+                        await FileService.RestoreMigratedDirectoryPreservingExistingAsync(
+                            move.DestinationFolder,
+                            move.SourceFolder);
+                    }
+                    else
+                    {
+                        await _fileService.RelocateDirectoryAsync(move.DestinationFolder, move.SourceFolder);
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -339,10 +433,58 @@ public sealed partial class WidgetManager
         }
         finally
         {
-            SetManagedStorageMigrationBusy(affectedWidgets.Select(widget => widget.Widget.Id), isBusy: false);
+            try
+            {
+                SetManagedStorageMigrationBusy(affectedWidgets.Select(widget => widget.Widget.Id), isBusy: false);
+            }
+            catch (Exception ex)
+            {
+                // Throwing out of the finally would surface an already-committed
+                // migration as a failure to its caller.
+                App.Log($"[ManagedStorageMigration] Failed to clear the busy state: {ex.Message}");
+            }
         }
 
-        return new ManagedStorageMigrationResult(affectedWidgets.Count, oldRootPath, normalizedNewRootPath);
+        return new ManagedStorageMigrationResult(
+            affectedWidgets.Count,
+            oldRootPath,
+            normalizedNewRootPath,
+            residueReports);
+    }
+
+    /// <summary>
+    /// Test seam for the per-widget directory relocation during a storage
+    /// migration. Production code always uses the shared FileService; tests
+    /// use it to inject deterministic copy/cleanup failures.
+    /// </summary>
+    internal Func<string, string, Task>? RelocateDirectoryForMigrationOverride { get; set; }
+
+    /// <summary>
+    /// Moves migration residue folders (old-root leftovers whose destination
+    /// copy is complete) to the recycle bin. Only ever called after an
+    /// explicit user confirmation.
+    /// </summary>
+    public async Task<int> DeleteMigrationResidueFoldersAsync(IEnumerable<string> folderPaths)
+    {
+        int recycledCount = 0;
+        foreach (string folderPath in folderPaths.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            try
+            {
+                if (await _fileService.DeleteEntryAsync(folderPath, recycle: true))
+                {
+                    recycledCount++;
+                }
+            }
+            catch (Exception ex)
+            {
+                App.Log(
+                    $"[ManagedStorageMigration] Failed to recycle residue " +
+                    $"folder '{folderPath}': {ex.Message}");
+            }
+        }
+
+        return recycledCount;
     }
 
     private void SetManagedStorageMigrationBusy(IEnumerable<string> widgetIds, bool isBusy)

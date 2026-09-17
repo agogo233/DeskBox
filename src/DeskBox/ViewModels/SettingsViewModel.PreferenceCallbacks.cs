@@ -29,6 +29,15 @@ public partial class SettingsViewModel
         ApplyAutoStartState(StartupService.GetState());
     }
 
+    partial void OnSelectedAutoStartModeChanged(string value)
+    {
+        if (_isRestoringDefaults || _isApplyingSettingsSnapshot ||
+            StartupService.Current is not DirectStartupService directStartup ||
+            !Enum.TryParse(value, out StartupMode mode))
+            return;
+        ApplyAutoStartOperationResult(directStartup.SetMode(mode));
+    }
+
     private void ApplyAutoStartOperationResult(StartupOperationResult result)
     {
         if (!string.IsNullOrWhiteSpace(result.ErrorMessage))
@@ -37,7 +46,13 @@ public partial class SettingsViewModel
                 $"[Settings] Startup state={result.State}: {result.ErrorMessage}");
         }
 
-        ApplyAutoStartState(result.State);
+        _autoStartUsedFallback = result.UsedFallback;
+        _autoStartOperationFailed = !result.UsedFallback &&
+            (result.State is StartupRegistrationState.BlockedOrFailed or StartupRegistrationState.PathMismatch ||
+                !string.IsNullOrWhiteSpace(result.ErrorMessage));
+        // A failed mode switch may have preserved the old working entry.
+        // Keep the toggle truthful while showing the operation warning separately.
+        ApplyAutoStartState(_autoStartOperationFailed ? StartupService.GetState() : result.State);
     }
 
     private void ApplyAutoStartState(StartupRegistrationState state)
@@ -51,6 +66,8 @@ public partial class SettingsViewModel
         try
         {
             AutoStart = effectiveValue;
+            if (StartupService.Current is DirectStartupService directStartup)
+                SelectedAutoStartMode = directStartup.Mode.ToString();
         }
         finally
         {
@@ -60,6 +77,7 @@ public partial class SettingsViewModel
         OnPropertyChanged(nameof(AutoStartStatusText));
         OnPropertyChanged(nameof(AutoStartStatusVisibility));
         OnPropertyChanged(nameof(AutoStartSystemSettingsVisibility));
+        OnPropertyChanged(nameof(AutoStartModeVisibility));
 
         if (_settingsService.Settings.AutoStart == effectiveValue)
         {
@@ -102,6 +120,12 @@ public partial class SettingsViewModel
 
         _settingsService.Settings.FileItemSystemContextMenuEnabled = value;
         _settingsService.SaveDebounced();
+        if (value)
+        {
+            // Warm the native context-menu server so the first right-click in
+            // a widget does not pay the cold handler-loading cost.
+            ShellContextMenuProxy.Prewarm();
+        }
     }
 
     partial void OnResizeSnapEnabledChanged(bool value)

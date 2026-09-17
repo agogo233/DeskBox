@@ -109,6 +109,14 @@ public sealed partial class WidgetGroupTitleSwitcher : UserControl
         RegisterTabPointerHandlers();
         RegisterKeyboardAccelerators();
         ApplyWheelFeedbackAccent();
+        // The wheel feedback and the position rail copy neutral colors at
+        // paint time, so a light/dark flip must re-resolve both.
+        ActualThemeChanged += (_, _) =>
+        {
+            ApplyWheelFeedbackAccent();
+            SetPositionRail(CurrentPositionRailLayer, _displayedIdentity);
+            SetPositionRail(OutgoingPositionRailLayer, null);
+        };
         CurrentTitle.RegisterPropertyChangedCallback(
             TextBlock.FontSizeProperty,
             (_, _) =>
@@ -127,6 +135,7 @@ public sealed partial class WidgetGroupTitleSwitcher : UserControl
             CancelDetachLongPress();
             CancelTabInteraction();
             CancelAllHoverSwitches();
+            CancelDragHoverSwitch();
         };
         Visibility = Visibility.Collapsed;
     }
@@ -414,11 +423,14 @@ public sealed partial class WidgetGroupTitleSwitcher : UserControl
 
     private void ApplyWheelFeedbackAccent()
     {
-        Color accent = TitleIconAccentColor;
-        UpWheelFeedbackAccentStart.Color = accent;
-        UpWheelFeedbackAccentEnd.Color = accent;
-        DownWheelFeedbackAccentStart.Color = accent;
-        DownWheelFeedbackAccentEnd.Color = accent;
+        // The wheel feedback flashes while the pointer scrolls the title, which
+        // is a transient interaction state, so it uses the neutral tone rather
+        // than the widget's accent.
+        Color tone = NeutralInteractionBrush.Line(this);
+        UpWheelFeedbackAccentStart.Color = tone;
+        UpWheelFeedbackAccentEnd.Color = tone;
+        DownWheelFeedbackAccentStart.Color = tone;
+        DownWheelFeedbackAccentEnd.Color = tone;
     }
 
     private void ApplyNavigationStyle()
@@ -566,12 +578,15 @@ public sealed partial class WidgetGroupTitleSwitcher : UserControl
         foreach (WidgetGroupPositionRailSlot slot in slots)
         {
             bool active = slot.IsActive;
+            // The pager dots are a selected-position indicator, so they draw
+            // the neutral interaction tone rather than the identity accent.
             host.Children.Add(new Border
             {
                 Width = 3,
                 Height = active ? 7 : 3,
                 HorizontalAlignment = HorizontalAlignment.Center,
-                Background = CreateAccentBrush(),
+                Background = SharedBrushCache.GetOrCreate(
+                    NeutralInteractionBrush.Line(this)),
                 CornerRadius = new CornerRadius(1.5),
                 IsHitTestVisible = false,
                 Opacity = active ? 0.94 : 0.3
@@ -983,9 +998,6 @@ public sealed partial class WidgetGroupTitleSwitcher : UserControl
         DetachScaleTransform.ScaleX = 1;
         DetachScaleTransform.ScaleY = 1;
     }
-
-    private Brush CreateAccentBrush() =>
-        SharedBrushCache.GetOrCreate(TitleIconAccentColor);
 
     private static Brush ResolveThemeBrush(
         string resourceKey,

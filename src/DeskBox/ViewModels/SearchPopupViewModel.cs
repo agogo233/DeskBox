@@ -393,6 +393,7 @@ public sealed partial class SearchPopupViewModel : ObservableObject, IDisposable
             generation == Volatile.Read(ref _recommendationGeneration))
         {
             _lastRecommendationLoadUtc = DateTime.UtcNow;
+            RecommendationIconsResolved?.Invoke();
         }
     }
 
@@ -1142,7 +1143,9 @@ public sealed partial class SearchPopupViewModel : ObservableObject, IDisposable
             case SearchResultKind.File:
                 if (!string.IsNullOrWhiteSpace(item.DetailPath))
                 {
-                    if (DeskBox.Helpers.Win32Helper.OpenFileOrChooseApp(OwnerWindowHandle, item.DetailPath))
+                    if (DeskBox.Helpers.Win32Helper.OpenFileOrChooseApp(
+                            OwnerWindowHandle,
+                            item.DetailPath))
                     {
                         CommitExecution(item);
                         HidePopupCallback?.Invoke();
@@ -1484,6 +1487,13 @@ public sealed partial class SearchPopupViewModel : ObservableObject, IDisposable
     /// Raised when a history/favorite query is applied and the search box should update.
     /// </summary>
     public event EventHandler<string>? QueryApplied;
+
+    /// <summary>
+    /// Raised when a recommendation set published before its shell icons
+    /// resolved finishes enrichment. Cards realized early keep their one-time
+    /// null icon binding, so the view must patch them itself.
+    /// </summary>
+    public event Action? RecommendationIconsResolved;
 
     public void Dispose()
     {

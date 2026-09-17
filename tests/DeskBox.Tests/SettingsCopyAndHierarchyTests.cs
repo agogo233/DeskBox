@@ -699,7 +699,7 @@ public sealed class SettingsCopyAndHierarchyTests
     }
 
     [Fact]
-    public void ManagedStorageDesktopShortcutUsesActualStatusAndExplicitActions()
+    public void ManagedStorageDesktopShortcutToggleMirrorsFileSystemState()
     {
         string root = FindRepositoryRoot();
         string windowXaml = File.ReadAllText(Path.Combine(
@@ -710,18 +710,19 @@ public sealed class SettingsCopyAndHierarchyTests
             "src/DeskBox/Views/SettingsWindow.StorageAndUpdates.cs"));
 
         Assert.Contains(
-            "x:Name=\"ManagedStorageDesktopShortcutStatusText\"",
+            "x:Name=\"ManagedStorageDesktopShortcutToggle\"",
             windowXaml,
             StringComparison.Ordinal);
         Assert.Contains(
-            "Click=\"ManagedStorageDesktopShortcutActionButton_Click\"",
+            "Toggled=\"ManagedStorageDesktopShortcutToggle_Toggled\"",
             windowXaml,
             StringComparison.Ordinal);
         Assert.DoesNotContain(
             "IsOn=\"{Binding ManagedStorageDesktopShortcutEnabled",
             windowXaml,
             StringComparison.Ordinal);
-        Assert.Contains("shortcutService.HasShortcut()", storageCode, StringComparison.Ordinal);
+        Assert.Contains("_isSynchronizingManagedStorageDesktopShortcutToggle", storageCode, StringComparison.Ordinal);
+        Assert.Contains("ManagedStorageDesktopShortcutService.HasShortcut()", storageCode, StringComparison.Ordinal);
         Assert.Contains("shortcutService.CreateAsync()", storageCode, StringComparison.Ordinal);
         Assert.Contains("shortcutService.RemoveAsync()", storageCode, StringComparison.Ordinal);
     }

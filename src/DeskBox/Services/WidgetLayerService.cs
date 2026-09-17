@@ -319,6 +319,49 @@ public static class WidgetLayerService
     }
 
     /// <summary>
+    /// Holds a DeskBox-owned auxiliary window (search popup, settings, desktop
+    /// organization) in the topmost band above a raised quick-reveal widget
+    /// group. The caller owns the release; see <see cref="ReleaseRaisedBandWindow"/>.
+    /// </summary>
+    internal static void HoldWindowAboveRaisedWidgets(IntPtr windowHandle)
+    {
+        Win32Helper.SetWindowTopMost(windowHandle);
+    }
+
+    /// <summary>
+    /// Returns a raised-band guest to the normal Z-order band. When the session
+    /// ended because the user activated a foreign application, the guest is
+    /// placed directly below that window in a single transaction so it never
+    /// covers the app the user just switched to; otherwise it lands at the top
+    /// of the normal band as the still-active surface.
+    /// </summary>
+    internal static void ReleaseRaisedBandWindow(
+        IntPtr windowHandle,
+        RaisedBandReleasePlacement placement,
+        IntPtr foreignForegroundRoot)
+    {
+        if (placement == RaisedBandReleasePlacement.BelowForeignForeground &&
+            foreignForegroundRoot != IntPtr.Zero &&
+            Win32Helper.IsWindow(foreignForegroundRoot))
+        {
+            Win32Helper.SetWindowPos(
+                windowHandle,
+                foreignForegroundRoot,
+                0,
+                0,
+                0,
+                0,
+                Win32Helper.SWP_NOMOVE |
+                    Win32Helper.SWP_NOSIZE |
+                    Win32Helper.SWP_NOACTIVATE |
+                    Win32Helper.SWP_NOOWNERZORDER);
+            return;
+        }
+
+        Win32Helper.ClearWindowTopMost(windowHandle);
+    }
+
+    /// <summary>
     /// Raises one widget above its peers without activating it. In desktop-pinned
     /// mode the window remains attached to the desktop icon layer and only its
     /// sibling order changes.
@@ -521,7 +564,7 @@ public static class WidgetLayerService
         return attachedToDesktop;
     }
 
-    private static IntPtr GetForegroundRoot(IntPtr foreground)
+    internal static IntPtr GetForegroundRoot(IntPtr foreground)
     {
         IntPtr foregroundRoot = Win32Helper.GetAncestor(
             foreground,

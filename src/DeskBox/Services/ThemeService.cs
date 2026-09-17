@@ -53,6 +53,23 @@ public sealed class ThemeService
         _ => ElementTheme.Default
     };
 
+    /// <summary>
+    /// The theme applied to window roots: the explicit override, or the
+    /// resolved system theme when following it. Themed lookups without an
+    /// element scope (for example a window that owns no tree yet) resolve
+    /// against this instead of the application theme, which tracks the system.
+    /// </summary>
+    public ElementTheme EffectiveTheme
+    {
+        get
+        {
+            var theme = CurrentTheme;
+            return theme == ElementTheme.Default
+                ? (Win32Helper.IsSystemDarkMode() ? ElementTheme.Dark : ElementTheme.Light)
+                : theme;
+        }
+    }
+
     public bool UsesSystemAccentColor =>
         !string.Equals(_settingsService.Settings.AccentColorMode, AccentModeCustom, StringComparison.OrdinalIgnoreCase);
 
@@ -167,11 +184,7 @@ public sealed class ThemeService
             return;
         }
 
-        var theme = CurrentTheme;
-        if (theme == ElementTheme.Default)
-        {
-            theme = Win32Helper.IsSystemDarkMode() ? ElementTheme.Dark : ElementTheme.Light;
-        }
+        var theme = EffectiveTheme;
 
         rootElement.RequestedTheme = theme;
         AccentResourceScope.Apply(rootElement, GetEffectiveAccentColor());
@@ -182,14 +195,7 @@ public sealed class ThemeService
             return;
         }
 
-        bool isDark = theme switch
-        {
-            ElementTheme.Dark => true,
-            ElementTheme.Light => false,
-            _ => Win32Helper.IsSystemDarkMode()
-        };
-
-        Win32Helper.SetWindowTheme(hWnd, isDark);
+        Win32Helper.SetWindowTheme(hWnd, theme == ElementTheme.Dark);
     }
 
     /// <summary>

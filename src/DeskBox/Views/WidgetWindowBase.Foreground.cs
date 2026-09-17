@@ -1,5 +1,6 @@
 using DeskBox.Helpers;
 using DeskBox.Services;
+using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
@@ -40,50 +41,79 @@ public abstract partial class WidgetWindowBase
         ApplyWidgetForegroundAppearance();
     }
 
-    protected async Task ShowWidgetForegroundColorPickerAsync()
+    /// <summary>
+    /// Builds the custom-foreground-color picker as an anchored flyout. The
+    /// window decides where to show it; a ContentDialog inside a small widget
+    /// window gets clipped by the window bounds, while a flyout follows the
+    /// same escape-the-window placement the widget context menus use.
+    /// </summary>
+    protected Flyout BuildWidgetForegroundColorPickerFlyout()
     {
-        if (RootElement.XamlRoot is null)
-        {
-            return;
-        }
-
         var picker = new ColorPicker
         {
             Color = WidgetForegroundSettings.ResolveCustomColor(
                 Config,
                 SettingsService.Settings),
             IsAlphaEnabled = false,
-            MinWidth = 340
+            MinWidth = 256
         };
         var localization = App.Current.LocalizationService;
-        var dialog = new ContentDialog
+        var saveButton = new Button
         {
-            XamlRoot = RootElement.XamlRoot,
-            Title = localization.T("Widget.Foreground.CustomColor"),
-            Content = picker,
-            PrimaryButtonText = localization.T("Common.Save"),
-            CloseButtonText = localization.T("Common.Cancel"),
-            DefaultButton = ContentDialogButton.Primary
+            Content = localization.T("Common.Save"),
+            MinWidth = 96
         };
-
-        try
+        var cancelButton = new Button
         {
-            if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+            Content = localization.T("Common.Cancel"),
+            MinWidth = 96
+        };
+        var flyout = new Flyout
+        {
+            ShouldConstrainToRootBounds = false,
+            Content = new StackPanel
             {
-                return;
+                Spacing = 12,
+                Children =
+                {
+                    new TextBlock
+                    {
+                        Text = localization.T("Widget.Foreground.CustomColor"),
+                        FontWeight = FontWeights.SemiBold
+                    },
+                    picker,
+                    new StackPanel
+                    {
+                        Orientation = Orientation.Horizontal,
+                        HorizontalAlignment = HorizontalAlignment.Right,
+                        Spacing = 8,
+                        Children = { cancelButton, saveButton }
+                    }
+                }
             }
-
-            WidgetForegroundSettings.SetCustomColorOverride(Config, picker.Color);
-            WidgetForegroundSettings.SetModeOverride(
-                Config,
-                WidgetForegroundSettings.ModeCustom);
-            SettingsService.UpdateWidget(Config);
-            ApplyWidgetForegroundAppearance();
-        }
-        catch (Exception ex)
+        };
+        cancelButton.Click += (_, _) => flyout.Hide();
+        saveButton.Click += (_, _) =>
         {
-            App.Log($"[WidgetForeground] Color picker failed: {ex.Message}");
-        }
+            try
+            {
+                WidgetForegroundSettings.SetCustomColorOverride(Config, picker.Color);
+                WidgetForegroundSettings.SetModeOverride(
+                    Config,
+                    WidgetForegroundSettings.ModeCustom);
+                SettingsService.UpdateWidget(Config);
+                ApplyWidgetForegroundAppearance();
+            }
+            catch (Exception ex)
+            {
+                App.Log($"[WidgetForeground] Color picker failed: {ex.Message}");
+            }
+            finally
+            {
+                flyout.Hide();
+            }
+        };
+        return flyout;
     }
 
     private void EnsureForegroundAccessibilityWatcher()

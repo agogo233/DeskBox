@@ -173,7 +173,7 @@ public sealed partial class DeskBoxDiagnosticsBundleService
         """;
 
     [GeneratedRegex(
-        "(?imx)\\b([a-z0-9_]*(?:path|folder|root|directory|dir|file|exe|commandline)[a-z0-9_]*)\\s*=\\s*(?:'[^'\\r\\n]*'|\"[^\"\\r\\n]*\"|[^\\r\\n]*?)(?=\\s+[a-z0-9_]+\\s*=|\\r?$)")]
+        "(?imx)\\b([a-z0-9_]*(?:path|folder|root|directory|dir|file|exe|commandline)[a-z0-9_]*)\\s*=\\s*(?<value>'[^'\\r\\n]*'|\"[^\"\\r\\n]*\"|[^\\r\\n]*?)(?=\\s+[a-z0-9_]+\\s*=|\\r?$)")]
     private static partial Regex SensitiveAssignmentRegex();
 
     [GeneratedRegex("(?i)(?<quote>['\"])(?:[a-z]:[\\\\/]|\\\\\\\\)[^\\r\\n]*?\\k<quote>")]
@@ -242,7 +242,9 @@ public sealed partial class DeskBoxDiagnosticsBundleService
 
         string sanitized = SensitiveAssignmentRegex().Replace(
             value,
-            match => $"{match.Groups[1].Value}=<REDACTED>");
+            match => bool.TryParse(match.Groups["value"].Value, out _)
+                ? match.Value
+                : $"{match.Groups[1].Value}=<REDACTED>");
         sanitized = QuotedWindowsPathRegex().Replace(sanitized, "'<PATH>'");
         sanitized = UnquotedWindowsPathRegex().Replace(sanitized, "<PATH>");
         sanitized = EmailRegex().Replace(sanitized, "<EMAIL>");

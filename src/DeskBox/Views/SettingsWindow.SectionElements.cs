@@ -59,12 +59,8 @@ public sealed partial class SettingsWindow
         (global::Microsoft.UI.Xaml.Controls.Button)FindCreatedSectionElement("FileStorageSettings", "ChangePathButton")!;
     private global::Microsoft.UI.Xaml.Controls.Button CleanupStorageButton =>
         (global::Microsoft.UI.Xaml.Controls.Button)FindCreatedSectionElement("FileStorageSettings", "CleanupStorageButton")!;
-    private global::Microsoft.UI.Xaml.Controls.TextBlock ManagedStorageDesktopShortcutStatusText =>
-        (global::Microsoft.UI.Xaml.Controls.TextBlock)FindCreatedSectionElement("FileStorageSettings", "ManagedStorageDesktopShortcutStatusText")!;
-    private global::Microsoft.UI.Xaml.Controls.Button ManagedStorageDesktopShortcutActionButton =>
-        (global::Microsoft.UI.Xaml.Controls.Button)FindCreatedSectionElement("FileStorageSettings", "ManagedStorageDesktopShortcutActionButton")!;
-    private global::Microsoft.UI.Xaml.Controls.TextBlock ManagedStorageDesktopShortcutActionText =>
-        (global::Microsoft.UI.Xaml.Controls.TextBlock)FindCreatedSectionElement("FileStorageSettings", "ManagedStorageDesktopShortcutActionText")!;
+    private global::Microsoft.UI.Xaml.Controls.ToggleSwitch ManagedStorageDesktopShortcutToggle =>
+        (global::Microsoft.UI.Xaml.Controls.ToggleSwitch)FindCreatedSectionElement("FileStorageSettings", "ManagedStorageDesktopShortcutToggle")!;
     private global::Microsoft.UI.Xaml.Controls.StackPanel FileStackSettingsSection =>
         (global::Microsoft.UI.Xaml.Controls.StackPanel)FindCreatedSectionElement("FileStackSettings", "FileStackSettingsSection")!;
     private global::Microsoft.UI.Xaml.Controls.ListView FileStackRulesListView =>
@@ -85,6 +81,8 @@ public sealed partial class SettingsWindow
         (global::Microsoft.UI.Xaml.Controls.Primitives.ToggleButton)FindCreatedSectionElement("InteractionWindowSettings", "GlobalHotkeyPresetWinSpaceButton")!;
     private global::Microsoft.UI.Xaml.Controls.Primitives.ToggleButton GlobalHotkeyPresetWindowsTapButton =>
         (global::Microsoft.UI.Xaml.Controls.Primitives.ToggleButton)FindCreatedSectionElement("InteractionWindowSettings", "GlobalHotkeyPresetWindowsTapButton")!;
+    private global::Microsoft.UI.Xaml.Controls.Primitives.ToggleButton GlobalHotkeyPresetCopilotKeyButton =>
+        (global::Microsoft.UI.Xaml.Controls.Primitives.ToggleButton)FindCreatedSectionElement("InteractionWindowSettings", "GlobalHotkeyPresetCopilotKeyButton")!;
     private global::Microsoft.UI.Xaml.Controls.Grid GlobalHotkeyCustomRow =>
         (global::Microsoft.UI.Xaml.Controls.Grid)FindCreatedSectionElement("InteractionWindowSettings", "GlobalHotkeyCustomRow")!;
     private global::Microsoft.UI.Xaml.Controls.Grid GlobalHotkeyActionsPanel =>
@@ -179,8 +177,6 @@ public sealed partial class SettingsWindow
         (global::Microsoft.UI.Xaml.Controls.StackPanel)FindCreatedSectionElement("About", "UpdateActionsPanel")!;
     private global::Microsoft.UI.Xaml.Controls.Button OpenManualUpdateDownloadButton =>
         (global::Microsoft.UI.Xaml.Controls.Button)FindCreatedSectionElement("About", "OpenManualUpdateDownloadButton")!;
-    private global::Microsoft.UI.Xaml.Controls.Button FeedbackEmailButton =>
-        (global::Microsoft.UI.Xaml.Controls.Button)FindCreatedSectionElement("About", "FeedbackEmailButton")!;
     private global::Microsoft.UI.Xaml.Controls.Button StoreSupportButton =>
         (global::Microsoft.UI.Xaml.Controls.Button)FindCreatedSectionElement("About", "StoreSupportButton")!;
 }

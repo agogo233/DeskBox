@@ -35,22 +35,24 @@ internal sealed class WidgetDetachPlacementPreviewWindow : IDisposable
 
     public WidgetDetachPlacementPreviewWindow(string caption, double cornerRadius)
     {
-        Color accent = ResolveAccentColor();
+        // The placement silhouette reports where the widget would land, which
+        // is a drag state, so its outline stays neutral instead of the accent.
+        Color tone = ResolveNeutralTone();
         double surfaceRadius = Math.Clamp(cornerRadius, 0, 32);
         var root = new Grid();
         _surfaceBorder = new Border
         {
             Background = new SolidColorBrush(Color.FromArgb(
                 0x18,
-                accent.R,
-                accent.G,
-                accent.B)),
+                tone.R,
+                tone.G,
+                tone.B)),
             BorderBrush = new SolidColorBrush(Color.FromArgb(
                 0xD8,
-                accent.R,
-                accent.G,
-                accent.B)),
-            // Keep a quiet landing surface and one bottom accent only. The
+                tone.R,
+                tone.G,
+                tone.B)),
+            // Keep a quiet landing surface and one bottom edge only. The
             // previous full 2px outline made the detached preview read like a
             // warning/error state and competed with the corner badge.
             BorderThickness = new Thickness(0, 0, 0, 2),
@@ -76,9 +78,9 @@ internal sealed class WidgetDetachPlacementPreviewWindow : IDisposable
             Background = new SolidColorBrush(Color.FromArgb(0xE8, 28, 28, 30)),
             BorderBrush = new SolidColorBrush(Color.FromArgb(
                 0xE8,
-                accent.R,
-                accent.G,
-                accent.B)),
+                tone.R,
+                tone.G,
+                tone.B)),
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(Math.Clamp(surfaceRadius * 0.45, 2, 4)),
             Child = _captionTextBlock
@@ -94,15 +96,8 @@ internal sealed class WidgetDetachPlacementPreviewWindow : IDisposable
         Microsoft.UI.WindowId windowId =
             Win32Interop.GetWindowIdFromWindow(_hWnd);
         _appWindow = AppWindow.GetFromWindowId(windowId);
-        _appWindow.IsShownInSwitchers = false;
-        _appWindow.SetPresenter(AppWindowPresenterKind.Overlapped);
-        if (_appWindow.Presenter is OverlappedPresenter presenter)
-        {
-            presenter.IsResizable = false;
-            presenter.IsMaximizable = false;
-            presenter.IsMinimizable = false;
-            presenter.SetBorderAndTitleBar(false, false);
-        }
+        WindowShellState.TryHideFromSwitchers(_appWindow);
+        WindowShellState.TryApplyBorderlessOverlappedPresenter(_appWindow);
 
         int extendedStyle = Win32Helper.GetWindowLong(
             _hWnd,
@@ -330,25 +325,25 @@ internal sealed class WidgetDetachPlacementPreviewWindow : IDisposable
 
     private void ApplyAppearanceNoLock(string caption, double cornerRadius)
     {
-        Color accent = ResolveAccentColor();
+        Color tone = ResolveNeutralTone();
         double surfaceRadius = Math.Clamp(cornerRadius, 0, 32);
         _captionTextBlock.Text = caption;
         _surfaceBorder.Background = new SolidColorBrush(Color.FromArgb(
             0x18,
-            accent.R,
-            accent.G,
-            accent.B));
+            tone.R,
+            tone.G,
+            tone.B));
         _surfaceBorder.BorderBrush = new SolidColorBrush(Color.FromArgb(
             0xD8,
-            accent.R,
-            accent.G,
-            accent.B));
+            tone.R,
+            tone.G,
+            tone.B));
         _surfaceBorder.CornerRadius = new CornerRadius(surfaceRadius);
         _badgeBorder.BorderBrush = new SolidColorBrush(Color.FromArgb(
             0xE8,
-            accent.R,
-            accent.G,
-            accent.B));
+            tone.R,
+            tone.G,
+            tone.B));
         _badgeBorder.CornerRadius = new CornerRadius(
             Math.Clamp(surfaceRadius * 0.45, 2, 4));
     }
@@ -370,9 +365,11 @@ internal sealed class WidgetDetachPlacementPreviewWindow : IDisposable
                left.Height == right.Height;
     }
 
-    private static Color ResolveAccentColor()
-    {
-        return App.Current.ThemeService?.GetEffectiveAccentColor()
-            ?? AccentColorHelper.DefaultAccentColor;
-    }
+    /// <summary>
+    /// The neutral interaction tone this window draws its drag silhouette with.
+    /// The window owns no visual tree yet when the constructor builds one, so it
+    /// reads the application theme resources directly.
+    /// </summary>
+    private static Color ResolveNeutralTone() =>
+        NeutralInteractionBrush.Line(null);
 }

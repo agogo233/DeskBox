@@ -287,6 +287,85 @@ public sealed class NativeDropComDataReaderTests
     [UnmanagedFunctionPointer(CallingConvention.StdCall)]
     private delegate int QueryGetDataCallback(nint self, ref NativeFormatEtc format);
 
+    [Fact]
+    public void VirtualDescriptorReader_ClampsMaliciousCountToBufferSize()
+    {
+        // A drag source controls both the declared count and the HGLOBAL
+        // size. A small allocation with a huge count used to read past the
+        // buffer; the reader must clamp instead of trusting the header.
+        nint memory = GlobalAlloc(0x0042 /* GMEM_MOVEABLE | GMEM_ZEROINIT */, 8);
+        Assert.NotEqual(0, memory);
+        try
+        {
+            nint pointer = GlobalLock(memory);
+            Assert.NotEqual(0, pointer);
+            try
+            {
+                Marshal.WriteInt32(pointer, 4096);
+            }
+            finally
+            {
+                _ = GlobalUnlock(memory);
+            }
+
+            var descriptors = NativeDropTarget.ReadVirtualFileDescriptors(memory);
+            Assert.Empty(descriptors);
+        }
+        finally
+        {
+            Assert.Equal(0, GlobalFree(memory));
+        }
+    }
+
+    [Fact]
+    public void VirtualDescriptorReader_ClampsToPartialDescriptorCapacity()
+    {
+        int descriptorSize = Marshal.SizeOf<NativeDropTarget.FILEDESCRIPTORW>();
+        nint memory = GlobalAlloc(
+            0x0042,
+            (nuint)(sizeof(uint) + descriptorSize + (descriptorSize / 2)));
+        Assert.NotEqual(0, memory);
+        try
+        {
+            nint pointer = GlobalLock(memory);
+            Assert.NotEqual(0, pointer);
+            try
+            {
+                Marshal.WriteInt32(pointer, 2);
+                Marshal.WriteInt32(pointer + sizeof(uint), 0);
+                Marshal.WriteInt32(
+                    pointer + sizeof(uint) + descriptorSize,
+                    0);
+            }
+            finally
+            {
+                _ = GlobalUnlock(memory);
+            }
+
+            var descriptors = NativeDropTarget.ReadVirtualFileDescriptors(memory);
+            // Capacity is one full descriptor; the second declared entry is
+            // beyond the buffer and must be dropped rather than read.
+            Assert.Single(descriptors);
+        }
+        finally
+        {
+            Assert.Equal(0, GlobalFree(memory));
+        }
+    }
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern nint GlobalAlloc(uint flags, nuint bytes);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern nint GlobalLock(nint memory);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GlobalUnlock(nint memory);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern nint GlobalFree(nint memory);
+
     [UnmanagedFunctionPointer(CallingConvention.StdCall)]
     private delegate int SetDataCallback(
         nint self,

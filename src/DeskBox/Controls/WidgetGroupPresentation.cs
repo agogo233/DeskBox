@@ -25,7 +25,8 @@ public enum WidgetGroupSwitchOrigin
     Programmatic,
     Picker,
     Wheel,
-    Keyboard
+    Keyboard,
+    DragHover
 }
 
 public sealed class WidgetGroupMemberEventArgs(

@@ -69,6 +69,8 @@ public partial class WidgetViewModel
         using var perfScope = PerformanceLogger.Measure(
             "WidgetViewModel.LoadFolderContents",
             $"id={Config.Id} path={folderPath}");
+        var loadStopwatch = System.Diagnostics.Stopwatch.StartNew();
+        long enumerateMs = -1;
 
         IReadOnlyList<WidgetItem> items;
         var (userDesktop, publicDesktop) = FileService.GetDesktopPaths();
@@ -114,6 +116,7 @@ public partial class WidgetViewModel
         }
         else
         {
+            var enumerateStopwatch = System.Diagnostics.Stopwatch.StartNew();
             FolderEnumerationResult result = await Task.Run(
                 () => _fileService.EnumerateDirectoryForRefreshAsync(
                     folderPath,
@@ -124,6 +127,8 @@ public partial class WidgetViewModel
                     loadIcons: false,
                     loadFolderItemCounts: false),
                 cancellationToken).WaitAsync(cancellationToken);
+            enumerateStopwatch.Stop();
+            enumerateMs = enumerateStopwatch.ElapsedMilliseconds;
             if (!FolderSnapshotStatusPolicy.IsSuccessful(result.Status))
             {
                 App.Log(
@@ -135,17 +140,58 @@ public partial class WidgetViewModel
         }
 
         cancellationToken.ThrowIfCancellationRequested();
+        if (_itemMutationBatchDepth > 0)
+        {
+            // Commit-point race guard. This reload may have started before an
+            // import batch opened, and the enumeration above awaited seconds
+            // on the thread pool while the Shell transfer finished and the
+            // batch began. The snapshot is stale relative to files the
+            // in-flight batch has already upserted; applying it mid-batch
+            // would delete live items (files stay on disk, the UI just loses
+            // them until the next refresh). Drop the snapshot and defer one
+            // authoritative refresh to the batch finalization. No await may
+            // appear between this check and the Items mutation below.
+            _pendingFolderRefreshAfterBatch = true;
+            MarkItemMutationBatchDirty();
+            App.Log(
+                "[FolderRefresh] Snapshot deferred to batch finalization " +
+                $"'{folderPath}'");
+            return false;
+        }
+
+        long afterEnumerateMs = loadStopwatch.ElapsedMilliseconds;
         ApplyPersistedAddedTimes(items);
         cancellationToken.ThrowIfCancellationRequested();
         beforeItemsReplaced?.Invoke();
+        long afterAddedMs = loadStopwatch.ElapsedMilliseconds;
         SyncFolderItems(items);
+        long afterSyncMs = loadStopwatch.ElapsedMilliseconds;
         SortItems();
+        long afterSortMs = loadStopwatch.ElapsedMilliseconds;
         if (clearIconCacheBeforeHydration)
         {
             ClearCurrentItemIconCache();
         }
 
         StartItemHydration();
+        if (loadStopwatch.ElapsedMilliseconds > 300)
+        {
+            // Folder entry is the one interaction users expect to be instant;
+            // log slow loads by default so big-folder regressions surface
+            // without opting into performance logging. enumMs includes
+            // thread-pool queueing, addedMs covers persisted-time merge and
+            // the pre-replace callback, syncMs the Items collection sync,
+            // sortMs the final sort pass.
+            App.Log(
+                $"[FolderLoad] Slow load items={items.Count} " +
+                $"totalMs={loadStopwatch.ElapsedMilliseconds} " +
+                $"enumMs={(enumerateMs < 0 ? afterEnumerateMs : enumerateMs)} " +
+                $"addedMs={afterAddedMs - afterEnumerateMs} " +
+                $"syncMs={afterSyncMs - afterAddedMs} " +
+                $"sortMs={afterSortMs - afterSyncMs} " +
+                $"path='{folderPath}'");
+        }
+
         return true;
     }
 
@@ -262,8 +308,18 @@ public partial class WidgetViewModel
             Interlocked.Exchange(
                 ref _itemHydrationCancellation,
                 cancellation));
+        Interlocked.Increment(ref _itemHydrationActiveCount);
         _ = RunItemHydrationAsync(generation, cancellation);
     }
+
+    /// <summary>
+    /// True while an item-hydration pass (icons, folder counts, shortcut
+    /// targets, shell kinds) is still running for the current items.
+    /// Callers that treat "no icon loaded yet" as a failure must wait for
+    /// this to turn false first: on a cold cache the pass legitimately runs
+    /// for seconds before the first batch resolves.
+    /// </summary>
+    internal bool IsItemHydrationActive => Volatile.Read(ref _itemHydrationActiveCount) > 0;
 
     private static void CancelItemHydration(
         CancellationTokenSource? cancellation)
@@ -307,6 +363,7 @@ public partial class WidgetViewModel
         }
         finally
         {
+            Interlocked.Decrement(ref _itemHydrationActiveCount);
             Interlocked.CompareExchange(
                 ref _itemHydrationCancellation,
                 null,
@@ -367,7 +424,7 @@ public partial class WidgetViewModel
         bool clearCacheBeforeLoad,
         CancellationToken cancellationToken)
     {
-        var items = Items
+        var items = HydrationUniverseItems
             .Where(item => item.Icon is null)
             .OrderByDescending(item => item.IsShortcut)
             .ThenBy(item => item.SortOrder)
@@ -392,6 +449,7 @@ public partial class WidgetViewModel
                     cancellationToken))
                 .ToArray();
             var results = await Task.WhenAll(batch);
+            await WaitForCompactTransitionHydrationPauseAsync(generation, cancellationToken);
 
             foreach (var (item, icon) in results)
             {
@@ -412,6 +470,40 @@ public partial class WidgetViewModel
             await Task.Yield();
             cancellationToken.ThrowIfCancellationRequested();
         }
+    }
+
+    /// <summary>
+    /// A compact bounds-transition animation owns the UI thread's frame
+    /// budget. Holding a resolved batch here also holds the next batch's
+    /// bitmap decode, which the icon pipeline dispatches onto the UI thread.
+    /// </summary>
+    private async Task WaitForCompactTransitionHydrationPauseAsync(
+        int generation,
+        CancellationToken cancellationToken)
+    {
+        while (!_isDisposed &&
+            Volatile.Read(ref _compactTransitionHydrationPauseCount) > 0)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (generation != Volatile.Read(ref _itemHydrationGeneration))
+            {
+                return;
+            }
+
+            await Task.Delay(
+                CompactTransitionHydrationPausePollMilliseconds,
+                cancellationToken);
+        }
+    }
+
+    internal void PauseIconHydrationForCompactTransition()
+    {
+        Interlocked.Increment(ref _compactTransitionHydrationPauseCount);
+    }
+
+    internal void ResumeIconHydrationAfterCompactTransition()
+    {
+        Interlocked.Decrement(ref _compactTransitionHydrationPauseCount);
     }
 
     private async Task<(WidgetItem? Item, Microsoft.UI.Xaml.Media.Imaging.BitmapImage? Icon)> HydrateIconAsync(
@@ -461,7 +553,7 @@ public partial class WidgetViewModel
         int generation,
         CancellationToken cancellationToken)
     {
-        var folders = Items
+        var folders = HydrationUniverseItems
             .Where(item => item.IsFolder && !item.IsFolderItemCountLoaded)
             .ToList();
         int processed = 0;
@@ -518,7 +610,7 @@ public partial class WidgetViewModel
         int generation,
         CancellationToken cancellationToken)
     {
-        var shortcuts = Items
+        var shortcuts = HydrationUniverseItems
             .Where(item => item.IsShortcut)
             .OrderBy(item => item.SortOrder)
             .ToList();
@@ -564,7 +656,7 @@ public partial class WidgetViewModel
         int generation,
         CancellationToken cancellationToken)
     {
-        var items = Items
+        var items = HydrationUniverseItems
             .Where(item => !item.IsShellKindLoaded)
             .OrderBy(item => item.SortOrder)
             .ToList();

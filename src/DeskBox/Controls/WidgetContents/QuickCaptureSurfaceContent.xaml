@@ -301,8 +301,8 @@
                                             </Button>
                                         </StackPanel>
                                     </Border>
-                                    <Border Grid.ColumnSpan="2" Margin="-8,-6" Background="{ThemeResource AccentFillColorDefaultBrush}" CornerRadius="{StaticResource WidgetCornerRadiusSmall}" Opacity="0.10" IsHitTestVisible="False" Visibility="{Binding DetailSelectionVisibility}" />
-                                    <Border Grid.ColumnSpan="2" Width="2" Margin="-8,-6" HorizontalAlignment="Left" Background="{ThemeResource AccentFillColorDefaultBrush}" CornerRadius="1" IsHitTestVisible="False" Visibility="{Binding DetailSelectionVisibility}" />
+                                    <Border Grid.ColumnSpan="2" Margin="-8,-6" Background="{ThemeResource SubtleFillColorSecondaryBrush}" CornerRadius="{StaticResource WidgetCornerRadiusSmall}" Opacity="0.10" IsHitTestVisible="False" Visibility="{Binding DetailSelectionVisibility}" />
+                                    <Border Grid.ColumnSpan="2" Width="2" Margin="-8,-6" HorizontalAlignment="Left" Background="{ThemeResource ControlStrongStrokeColorDefaultBrush}" CornerRadius="1" IsHitTestVisible="False" Visibility="{Binding DetailSelectionVisibility}" />
                                 </Grid>
                             </Border>
                         </DataTemplate>

@@ -17,6 +17,12 @@ public sealed class GlobalHotkeyService : IDisposable
     private const uint ModNoRepeat = 0x4000;
     private static readonly UIntPtr SubclassId = new(0x4442);
 
+    // Hardware Copilot keys deliver Left Shift + Win + F23 on most keyboards,
+    // so the preset registers that chord instead of adding a new activation kind.
+    public static GlobalHotkeyGesture CopilotKeyGesture { get; } = new(
+        HotkeyModifierKeys.Windows | HotkeyModifierKeys.Shift,
+        (int)VirtualKey.F23);
+
     private readonly SettingsService _settingsService;
     private readonly LocalizationService _localizationService;
     private readonly Func<Task> _invokeAsync;
@@ -209,6 +215,14 @@ public sealed class GlobalHotkeyService : IDisposable
             return false;
         }
 
+        if (activation.Kind == HotkeyActivationKind.Chord &&
+            IsReservedSystemGesture(activation.Gesture) &&
+            IsGestureOwnedBySearchHotkey(activation.Gesture))
+        {
+            error = _localizationService.T("Settings.GlobalHotkey.Status.SearchHotkeyConflict");
+            return false;
+        }
+
         var settings = _settingsService.Settings;
         HotkeyActivationKind previousKind = settings.GlobalHotkeyActivationKind;
         int previousModifiers = settings.GlobalHotkeyModifiers;
@@ -331,6 +345,11 @@ public sealed class GlobalHotkeyService : IDisposable
                    HotkeyModifierKeys.Alt;
     }
 
+    internal static bool IsGestureOwnedBySearchHotkey(GlobalHotkeyGesture gesture)
+    {
+        return App.Current?.SearchHotkeyService?.CurrentGesture.Equals(gesture) == true;
+    }
+
     public static bool IsValidActivation(GlobalHotkeyActivation activation)
     {
         if (!Enum.IsDefined(activation.Kind))
@@ -395,6 +414,11 @@ public sealed class GlobalHotkeyService : IDisposable
         if (gesture.VirtualKey <= 0)
         {
             return localization.T("Settings.GlobalHotkey.NotSet");
+        }
+
+        if (gesture.Equals(CopilotKeyGesture))
+        {
+            return localization.T("Settings.GlobalHotkey.Preset.CopilotKey");
         }
 
         var parts = new List<string>();

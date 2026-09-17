@@ -42,8 +42,19 @@ public class AppSettings
     /// <summary>Whether DeskBox should launch automatically at Windows startup.</summary>
     public bool AutoStart { get; set; } = true;
 
+    /// <summary>
+    /// Whether the one-time autostart default has already been applied.
+    /// <see cref="AutoStart"/> is only a mirror of the system state, so it
+    /// cannot tell "never decided" from "the user turned startup off"; this
+    /// marker makes the default apply exactly once and never again.
+    /// </summary>
+    public bool AutoStartDefaultApplied { get; set; }
+
+    /// <summary>Null adopts the existing registration on upgrade; new installs use Standard.</summary>
+    public StartupMode? AutoStartMode { get; set; }
+
     /// <summary>Performance state. Selectable presets are <c>Balanced</c> and <c>ResourceSaver</c>; <c>Custom</c> records manual detail changes.</summary>
-    public string PerformanceMode { get; set; } = "Balanced";
+    public string PerformanceMode { get; set; } = "ResourceSaver";
 
     /// <summary>Finite delay before releasing idle caches after every widget is fully hidden.</summary>
     public int HiddenCacheCleanupDelaySeconds { get; set; } = 30;
@@ -52,7 +63,7 @@ public class AppSettings
     public string HiddenCacheCleanupScope { get; set; } = "AllRecreatable";
 
     /// <summary>Finite delay before shrinking recreatable caches while visible widgets are inactive.</summary>
-    public int VisibleIdleCacheCleanupDelaySeconds { get; set; } = 10 * 60;
+    public int VisibleIdleCacheCleanupDelaySeconds { get; set; } = 5 * 60;
 
     /// <summary>
     /// Trim the process working set after the fully-hidden idle deep cleanup
@@ -63,13 +74,13 @@ public class AppSettings
     public bool IdleWorkingSetTrimEnabled { get; set; } = true;
 
     /// <summary>Experimental working-set trim once all widget hide animations have completed.</summary>
-    public bool ImmediateHiddenWorkingSetTrimEnabled { get; set; }
+    public bool ImmediateHiddenWorkingSetTrimEnabled { get; set; } = true;
 
     /// <summary>Finite delay before closing a hidden transient window such as Search.</summary>
-    public int TransientWindowReleaseDelaySeconds { get; set; } = 10 * 60;
+    public int TransientWindowReleaseDelaySeconds { get; set; } = 2 * 60;
 
     /// <summary>Budget for recreatable icon, thumbnail, and decoded-image caches. Valid values: <c>Small</c>, <c>Balanced</c>, <c>Large</c>.</summary>
-    public string PerformanceCacheBudget { get; set; } = "Balanced";
+    public string PerformanceCacheBudget { get; set; } = "Small";
 
     /// <summary>Legacy compatibility mirror for the former all-or-nothing decorative-effects switch.</summary>
     public bool EnableContinuousDecorativeAnimations { get; set; } = true;
@@ -286,11 +297,6 @@ public class AppSettings
 
     /// <summary>Custom widget foreground color in <c>#RRGGBB</c> form.</summary>
     public string WidgetForegroundColor { get; set; } = "#F5F5F5";
-
-    /// <summary>
-    /// Widget text edge mode: <c>"Off"</c>, <c>"Soft"</c>, <c>"Strong"</c>.
-    /// </summary>
-    public string WidgetTextEdgeMode { get; set; } = "Off";
 
     /// <summary>
     /// Border color mode for widget windows.

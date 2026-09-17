@@ -12,15 +12,35 @@ namespace DeskBox.Services;
 /// with debouncing, allowing the application to reposition widgets and
 /// invalidate caches when the display topology changes.
 /// </para>
+/// <para>
+/// The native change signal is already delivered through other windows:
+/// <c>WidgetDisplayChangeWatcher</c> subclasses each widget window for
+/// <c>WM_DISPLAYCHANGE</c> / <c>WM_DPICHANGED</c> / <c>WM_SETTINGCHANGE</c>
+/// (work area), and the lifecycle paths call <see cref="RefreshNow"/> on
+/// resume, unlock and shell restart. Polling is therefore a fallback for the
+/// cases those cannot observe (for example no widget window is alive yet),
+/// which is why its interval is deliberately coarse.
+/// </para>
 /// </summary>
 public sealed class DisplayAreaWatcherService : IDisposable
 {
-    private const int PollIntervalMs = 2000;
+    private const int PollIntervalMs = 10000;
+    private const int EventDrivenPollIntervalMs = 30000;
     private const int DebounceDelayMs = 500;
+    private const uint WmDisplayChange = 0x007E;
+    private const uint WmSettingChange = 0x001A;
+    private const uint WmDpiChanged = 0x02E0;
+    private const uint WmNcDestroy = 0x0082;
+    private const ulong SpiSetWorkArea = 0x002F;
+    private static readonly UIntPtr MessageSubclassId = new(0xDDB3);
 
     private readonly DispatcherQueue _dispatcherQueue;
     private readonly DispatcherQueueTimer _pollTimer;
     private readonly DispatcherQueueTimer _debounceTimer;
+    private readonly Win32Helper.SubclassProc _messageSubclassProc;
+    private IntPtr _messageWindow;
+    private bool _isMessageSubclassInstalled;
+    private bool _isEventDriven;
     private bool _isDisposed;
     private int _displayCount;
     private string _displaySignature = string.Empty;
@@ -40,6 +60,7 @@ public sealed class DisplayAreaWatcherService : IDisposable
     public DisplayAreaWatcherService(DispatcherQueue dispatcherQueue)
     {
         _dispatcherQueue = dispatcherQueue;
+        _messageSubclassProc = MessageWindowSubclassProc;
         _pollTimer = dispatcherQueue.CreateTimer();
         _pollTimer.Interval = TimeSpan.FromMilliseconds(PollIntervalMs);
         _pollTimer.IsRepeating = true;
@@ -61,7 +82,83 @@ public sealed class DisplayAreaWatcherService : IDisposable
         _displayCount = CountDisplays();
         _displaySignature = CaptureCurrentSignature();
         App.Log($"[DisplayAreaWatcher] Started, initial display count: {_displayCount}, signature: {_displaySignature}");
+
+        // After AttachToMessageWindow the timer is already running at the slow
+        // safety interval; starting again is a no-op but keeps a future
+        // attach-before-start ordering on the slow poll instead of none.
         _pollTimer.Start();
+    }
+
+    /// <summary>
+    /// Subscribes this watcher to the native topology signals
+    /// (<c>WM_DISPLAYCHANGE</c>, <c>WM_DPICHANGED</c>, and
+    /// <c>WM_SETTINGCHANGE</c> for the work area) on an application-lifetime
+    /// message window, which slows the periodic poll in <see cref="Start"/>
+    /// to a safety net. The window is subclassed rather than created here so
+    /// the service keeps no window of its own; pass <see cref="IntPtr.Zero"/>
+    /// to stay poll-driven.
+    /// </summary>
+    public void AttachToMessageWindow(IntPtr hWnd)
+    {
+        if (_isDisposed || _isEventDriven || hWnd == IntPtr.Zero)
+        {
+            return;
+        }
+
+        try
+        {
+            _isMessageSubclassInstalled = Win32Helper.SetWindowSubclass(
+                hWnd,
+                _messageSubclassProc,
+                MessageSubclassId,
+                UIntPtr.Zero);
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[DisplayAreaWatcher] Message window attach failed: {ex.Message}");
+            _isMessageSubclassInstalled = false;
+        }
+
+        if (!_isMessageSubclassInstalled)
+        {
+            App.Log("[DisplayAreaWatcher] Message window unavailable; keeping the fallback poll.");
+            return;
+        }
+
+        _messageWindow = hWnd;
+        _isEventDriven = true;
+        _pollTimer.Stop();
+        // Pure DPI changes, topology reflows, and RDP sessions do not raise
+        // WM_DISPLAYCHANGE, so the event path keeps a slow signature poll as
+        // the safety net instead of stopping it entirely.
+        _pollTimer.Interval = TimeSpan.FromMilliseconds(EventDrivenPollIntervalMs);
+        _pollTimer.Start();
+        App.Log(
+            $"[DisplayAreaWatcher] Event driven on hwnd=0x{hWnd.ToInt64():X}; " +
+            $"slow safety poll every {EventDrivenPollIntervalMs / 1000}s.");
+    }
+
+    private IntPtr MessageWindowSubclassProc(
+        IntPtr hWnd,
+        uint message,
+        UIntPtr wParam,
+        IntPtr lParam,
+        UIntPtr subclassId,
+        UIntPtr refData)
+    {
+        if (message is WmDisplayChange or WmDpiChanged ||
+            message == WmSettingChange && wParam.ToUInt64() == SpiSetWorkArea)
+        {
+            // Cheap Win32 query plus signature compare; the debounce timer
+            // already coalesces the burst a topology change produces.
+            PollForChanges();
+        }
+        else if (message == WmNcDestroy)
+        {
+            Dispose();
+        }
+
+        return Win32Helper.DefSubclassProc(hWnd, message, wParam, lParam);
     }
 
     private void PollTimer_Tick(DispatcherQueueTimer sender, object args)
@@ -71,7 +168,7 @@ public sealed class DisplayAreaWatcherService : IDisposable
 
     /// <summary>
     /// Forces an immediate topology check after a resume, unlock, or shell
-    /// restart instead of waiting for the next two-second poll tick.
+    /// restart instead of waiting for the next slow poll tick.
     /// </summary>
     public void RefreshNow()
     {
@@ -162,5 +259,11 @@ public sealed class DisplayAreaWatcherService : IDisposable
         _pollTimer.Tick -= PollTimer_Tick;
         _debounceTimer.Stop();
         _debounceTimer.Tick -= DebounceTimer_Tick;
+
+        if (_isMessageSubclassInstalled)
+        {
+            Win32Helper.RemoveWindowSubclass(_messageWindow, _messageSubclassProc, MessageSubclassId);
+            _isMessageSubclassInstalled = false;
+        }
     }
 }

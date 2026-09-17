@@ -32,9 +32,17 @@ public sealed partial class DesktopOrganizationTransaction
                     TargetWidgetId = item.TargetWidgetId,
                     SourceScope = item.SourceScope,
                     Size = item.Size,
-                    LastWriteTimeUtc = item.LastWriteTimeUtc
+                    LastWriteTimeUtc = item.LastWriteTimeUtc,
+                    // The history receipt travels with the undo candidate:
+                    // verification compares the object at the destination
+                    // against the identity recorded at move time. Legacy
+                    // entries without one keep their null identity — no
+                    // automatic undo authority — instead of capturing a
+                    // fresh identity that would hand a replacement a valid id.
+                    DestinationIdentity = item.DestinationIdentity
                 }).ToList()
             };
+
             await _recoveryStore.SaveAsync(journal);
             await RestoreItemsAsync(journal, ownerWindowHandle);
             ApplyUndoReceipts(history, journal);
@@ -59,7 +67,15 @@ public sealed partial class DesktopOrganizationTransaction
             {
                 // Startup only reconciles receipts. Unfinished undo remains in
                 // history and never prompts for elevation in the background.
-                if (history is null) return 0;
+                if (history is null)
+                {
+                    // The entry was pruned or the settings were reset; nothing
+                    // can be reconciled. Discard the stale journal so it cannot
+                    // block organization forever.
+                    _recoveryStore.Clear();
+                    App.Log("[DesktopOrganization] Discarded an undo journal whose history entry no longer exists.");
+                    return 0;
+                }
                 ApplyUndoReceipts(history, journal);
                 await _settingsService.SaveAsync(notifySubscribers: false);
                 _recoveryStore.Clear();
@@ -96,23 +112,100 @@ public sealed partial class DesktopOrganizationTransaction
 
             if (history is { Items.Count: 0 })
                 _settingsService.Settings.RecentOrganizationHistory.Remove(history);
-            var createdIds = journal.CreatedWidgetIds.ToHashSet(StringComparer.Ordinal);
-            // Keep widgets that a committed retry still uses, or that acquired
-            // other files since the interrupted operation.
-            createdIds.ExceptWith(history?.Targets.Select(target => target.WidgetId) ?? []);
-            var removable = _settingsService.Settings.Widgets.Where(widget => createdIds.Contains(widget.Id) &&
-                !string.IsNullOrWhiteSpace(widget.MappedFolderPath) && IsEmptyDirectory(widget.MappedFolderPath)).ToList();
-            foreach (var widget in removable)
-            {
-                _settingsService.Settings.Widgets.Remove(widget);
-                _settingsService.Settings.DesktopOrganizationRules.RemoveAll(rule => rule.TargetWidgetId == widget.Id);
-                RemoveEmptyCreatedDirectories([widget.MappedFolderPath!]);
-            }
+            RemoveUncommittedWidgets(journal, history);
             await _settingsService.SaveAsync(notifySubscribers: false);
             _recoveryStore.Clear();
             return restored;
         }
         finally { OperationGate.Release(); }
+    }
+
+    /// <summary>
+    /// Stops all further restore attempts for an interrupted undo. The
+    /// history entry keeps its receipts but can no longer block new
+    /// organization, and a stale undo journal for it is discarded. Returns
+    /// the entry so callers can clean up widgets it created.
+    /// </summary>
+    public async Task<OrganizationHistoryEntry?> AbandonUndoAsync(string historyId)
+    {
+        await OperationGate.WaitAsync();
+        try
+        {
+            var history = _settingsService.Settings.RecentOrganizationHistory
+                .FirstOrDefault(entry => string.Equals(entry.Id, historyId, StringComparison.Ordinal));
+            if (history is { CanUndo: true, IsUndone: false })
+            {
+                history.CanUndo = false;
+                await _settingsService.SaveAsync(notifySubscribers: false);
+            }
+
+            var journal = await _recoveryStore.LoadAsync();
+            if (journal is null ||
+                (journal.IsUndo && string.Equals(journal.TransactionId, historyId, StringComparison.Ordinal)))
+            {
+                // A forward journal belongs to a different recovery flow and
+                // must survive this abandon.
+                _recoveryStore.Clear();
+            }
+
+            return history;
+        }
+        finally { OperationGate.Release(); }
+    }
+
+    /// <summary>
+    /// Discards a pending recovery journal without restoring anything. Files
+    /// already moved into created widgets stay there; widgets that ended up
+    /// empty are removed together with their rules.
+    /// </summary>
+    public async Task AbandonPendingRecoveryAsync()
+    {
+        await OperationGate.WaitAsync();
+        try
+        {
+            var journal = await _recoveryStore.LoadAsync();
+            if (journal is null) return;
+            var history = _settingsService.Settings.RecentOrganizationHistory
+                .FirstOrDefault(entry => string.Equals(entry.Id, journal.TransactionId, StringComparison.Ordinal));
+            if (journal.IsUndo)
+            {
+                if (history is { CanUndo: true, IsUndone: false })
+                {
+                    history.CanUndo = false;
+                }
+            }
+            else
+            {
+                RemoveUncommittedWidgets(journal, history);
+            }
+
+            await _settingsService.SaveAsync(notifySubscribers: false);
+            _recoveryStore.Clear();
+        }
+        finally { OperationGate.Release(); }
+    }
+
+    private void RemoveUncommittedWidgets(
+        DesktopOrganizationRecoveryJournal journal,
+        OrganizationHistoryEntry? history)
+    {
+        if (history is { Items.Count: 0 })
+        {
+            _settingsService.Settings.RecentOrganizationHistory.Remove(history);
+        }
+
+        var createdIds = journal.CreatedWidgetIds.ToHashSet(StringComparer.Ordinal);
+        // Keep widgets that a committed retry still uses, or that acquired
+        // other files since the interrupted operation.
+        createdIds.ExceptWith(history?.Targets.Select(target => target.WidgetId) ?? []);
+        var removable = _settingsService.Settings.Widgets.Where(widget => createdIds.Contains(widget.Id) &&
+            !string.IsNullOrWhiteSpace(widget.MappedFolderPath) && IsEmptyDirectory(widget.MappedFolderPath)).ToList();
+        foreach (var widget in removable)
+        {
+            _settingsService.Settings.Widgets.Remove(widget);
+            _settingsService.Settings.DesktopOrganizationRules.RemoveAll(rule => rule.TargetWidgetId == widget.Id);
+            RemoveEmptyCreatedDirectories([widget.MappedFolderPath!]);
+        }
     }
 
     private async Task RestoreItemsAsync(DesktopOrganizationRecoveryJournal journal, IntPtr ownerWindowHandle)
@@ -133,6 +226,9 @@ public sealed partial class DesktopOrganizationTransaction
                 var item = batch.First(candidate => string.Equals(candidate.DestinationPath, result.SourcePath, StringComparison.OrdinalIgnoreCase));
                 item.RestorePath = result.DestinationPath;
                 item.Completed = true;
+                // The undo journal's receipts also carry the restored object's
+                // identity so a later reconcile can verify them the same way.
+                RecordDestinationIdentity(item, result.DestinationPath);
                 _recoveryStore.Save(journal);
             }
             try
@@ -173,20 +269,49 @@ public sealed partial class DesktopOrganizationTransaction
         history.CanUndo = !history.IsUndone;
     }
 
+    /// <summary>
+    /// Explains why one history item cannot be restored, so the abandon
+    /// dialog can name the file and the cause instead of a bare count.
+    /// </summary>
+    internal static string GetUndoBlockReasonKey(OrganizationHistoryItem item)
+    {
+        if (!EntryExists(item.DestinationPath))
+        {
+            return "DesktopOrganization.Public.StuckReason.Missing";
+        }
+
+        return MatchesSnapshot(item.DestinationPath, new DesktopOrganizationRecoveryItem
+        {
+            Size = item.Size,
+            LastWriteTimeUtc = item.LastWriteTimeUtc,
+            // Without the recorded receipt every item reads as Changed.
+            DestinationIdentity = item.DestinationIdentity
+        })
+            ? "DesktopOrganization.Public.StuckReason.Busy"
+            : "DesktopOrganization.Public.StuckReason.Changed";
+    }
+
     private static bool MatchesSnapshot(string path, DesktopOrganizationRecoveryItem item)
     {
-        try
+        // Identity-only authority: recovery may only act while the object at
+        // the path still carries the exact identity recorded when the item
+        // physically completed its move. Items without a recorded identity
+        // (legacy journals written before this field existed, captures that
+        // failed, or the rare crash between the physical move and the
+        // receipt write) have NO automatic restore authority — the item
+        // stays where it is and the journal keeps the record for the user.
+        if (item.DestinationIdentity is not { } identity)
         {
-            if (File.Exists(path))
-            {
-                var file = new FileInfo(path);
-                return (!item.Size.HasValue || file.Length == item.Size.Value) &&
-                    (!item.LastWriteTimeUtc.HasValue || file.LastWriteTimeUtc == item.LastWriteTimeUtc.Value);
-            }
-            return Directory.Exists(path) && !item.Size.HasValue &&
-                (!item.LastWriteTimeUtc.HasValue || Directory.GetLastWriteTimeUtc(path) == item.LastWriteTimeUtc.Value);
+            return false;
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return false; }
+
+        return FileService.TryCaptureSourceIdentity(path) is { } current &&
+            current.FileId is { } currentId &&
+            currentId == new FileService.FileId128(identity.FileIdHigh, identity.FileIdLow) &&
+            current.VolumeSerialNumber == identity.VolumeSerialNumber &&
+            (!item.Size.HasValue || current.Length == item.Size.Value) &&
+            (!item.LastWriteTimeUtc.HasValue ||
+                current.LastWriteTimeUtc == item.LastWriteTimeUtc.Value);
     }
 
     private static bool IsEmptyDirectory(string path) => !Directory.Exists(path) || !Directory.EnumerateFileSystemEntries(path).Any();

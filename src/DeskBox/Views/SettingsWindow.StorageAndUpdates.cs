@@ -66,18 +66,45 @@ public sealed partial class SettingsWindow
             }
         }
 
+        await ApplyManagedStoragePathChangeAsync(normalizedPath, allowStaleCleanupRetry: true);
+    }
+
+    private async Task ApplyManagedStoragePathChangeAsync(
+        string normalizedPath,
+        bool allowStaleCleanupRetry)
+    {
+        if (SettingsRoot.XamlRoot is null)
+        {
+            return;
+        }
+
         if (App.Current.WidgetManager is not null)
         {
+            ManagedStorageMigrationResult? result = null;
             try
             {
-                var result = await App.Current.WidgetManager.UpdateDefaultManagedStorageRootAsync(normalizedPath);
-                await ShowInfoDialogAsync(
-                    _localizationService.T("Settings.Dialog.MigrateCompleteTitle"),
-                    _localizationService.Format(
-                        "Settings.Dialog.MigrateCompleteBody",
-                        result.AffectedWidgetCount,
-                        result.OldRootPath,
-                        result.NewRootPath));
+                result = await App.Current.WidgetManager.UpdateDefaultManagedStorageRootAsync(normalizedPath);
+            }
+            catch (ManagedStorageDestinationResidueException ex) when (
+                allowStaleCleanupRetry &&
+                App.Current.WidgetManager is not null)
+            {
+                ContentDialogResult choice = await ManagedStorageMigrationResidueDialog
+                    .ShowStaleDestinationAsync(
+                        SettingsRoot.XamlRoot,
+                        _localizationService,
+                        ex.StaleDestinationFolders);
+                if (choice != ContentDialogResult.Primary)
+                {
+                    return;
+                }
+
+                await App.Current.WidgetManager.DeleteMigrationResidueFoldersAsync(
+                    ex.StaleDestinationFolders);
+                await ApplyManagedStoragePathChangeAsync(
+                    normalizedPath,
+                    allowStaleCleanupRetry: false);
+                return;
             }
             catch (Exception ex)
             {
@@ -96,6 +123,28 @@ public sealed partial class SettingsWindow
 
                 await errorDialog.ShowAsync();
                 return;
+            }
+
+            if (result.Residues.Count > 0)
+            {
+                // The migration itself finished; only the old-root cleanup
+                // left folders behind. Surface them with an explicit
+                // recycle-or-keep choice instead of a failure dialog.
+                await ManagedStorageMigrationResidueDialog.ShowMigrationResidueAsync(
+                    SettingsRoot.XamlRoot,
+                    _localizationService,
+                    folders => App.Current.WidgetManager.DeleteMigrationResidueFoldersAsync(folders),
+                    result);
+            }
+            else
+            {
+                await ShowInfoDialogAsync(
+                    _localizationService.T("Settings.Dialog.MigrateCompleteTitle"),
+                    _localizationService.Format(
+                        "Settings.Dialog.MigrateCompleteBody",
+                        result.AffectedWidgetCount,
+                        result.OldRootPath,
+                        result.NewRootPath));
             }
         }
 
@@ -138,49 +187,65 @@ public sealed partial class SettingsWindow
             : Visibility.Collapsed;
     }
 
+    private bool _isSynchronizingManagedStorageDesktopShortcutToggle;
+
     private void RefreshManagedStorageDesktopShortcutState()
     {
-        if (ManagedStorageDesktopShortcutStatusText is null)
+        if (ManagedStorageDesktopShortcutToggle is not ToggleSwitch toggle)
         {
             return;
         }
 
-        bool hasShortcut =
-            App.Current.ManagedStorageDesktopShortcutService.HasShortcut();
-        ManagedStorageDesktopShortcutStatusText.Text = _localizationService.T(
-            hasShortcut
-                ? "Settings.ManagedPath.DesktopShortcut.StatusCreated"
-                : "Settings.ManagedPath.DesktopShortcut.StatusNotCreated");
-        ManagedStorageDesktopShortcutActionText.Text = _localizationService.T(
-            hasShortcut
-                ? "Settings.ManagedPath.DesktopShortcut.Remove"
-                : "Widget.CreateShortcut");
+        SetManagedStorageDesktopShortcutToggleState(
+            toggle,
+            App.Current.ManagedStorageDesktopShortcutService.HasShortcut());
     }
 
-    private async void ManagedStorageDesktopShortcutActionButton_Click(
+    private async void ManagedStorageDesktopShortcutToggle_Toggled(
         object sender,
         RoutedEventArgs e)
     {
-        ManagedStorageDesktopShortcutActionButton.IsEnabled = false;
+        if (_isSynchronizingManagedStorageDesktopShortcutToggle ||
+            sender is not ToggleSwitch toggle)
+        {
+            return;
+        }
+
+        bool requestedState = toggle.IsOn;
+        toggle.IsEnabled = false;
         try
         {
             ManagedStorageDesktopShortcutService shortcutService =
                 App.Current.ManagedStorageDesktopShortcutService;
-            bool succeeded = shortcutService.HasShortcut()
-                ? await shortcutService.RemoveAsync()
-                : await shortcutService.CreateAsync();
-            RefreshManagedStorageDesktopShortcutState();
-            if (!succeeded)
+            bool succeeded = requestedState
+                ? await shortcutService.CreateAsync()
+                : await shortcutService.RemoveAsync();
+            if (succeeded)
             {
-                await ShowInfoDialogAsync(
-                    _localizationService.T(
-                        "Settings.ManagedPath.DesktopShortcut.Title"),
-                    _localizationService.T("Common.OperationFailedRetry"));
+                return;
             }
+
+            SetManagedStorageDesktopShortcutToggleState(toggle, !requestedState);
+            await ShowInfoDialogAsync(
+                _localizationService.T("Settings.ManagedPath.DesktopShortcut.Title"),
+                _localizationService.T("Common.OperationFailedRetry"));
         }
         finally
         {
-            ManagedStorageDesktopShortcutActionButton.IsEnabled = true;
+            toggle.IsEnabled = true;
+        }
+    }
+
+    private void SetManagedStorageDesktopShortcutToggleState(ToggleSwitch toggle, bool isOn)
+    {
+        _isSynchronizingManagedStorageDesktopShortcutToggle = true;
+        try
+        {
+            toggle.IsOn = isOn;
+        }
+        finally
+        {
+            _isSynchronizingManagedStorageDesktopShortcutToggle = false;
         }
     }
 
@@ -313,22 +378,6 @@ public sealed partial class SettingsWindow
         }
 
         Win32Helper.OpenFile(ViewModel.MicrosoftStoreLink);
-    }
-
-    private async void OpenFeedbackEmailButton_Click(object sender, RoutedEventArgs e)
-    {
-        try
-        {
-            bool launched = await Launcher.LaunchUriAsync(new Uri(ViewModel.FeedbackEmailLink));
-            if (!launched)
-            {
-                App.Log($"[SettingsWindow] No email handler accepted '{ViewModel.FeedbackEmailLink}'.");
-            }
-        }
-        catch (Exception ex)
-        {
-            App.Log($"[SettingsWindow] Failed to open feedback email link: {ex.Message}");
-        }
     }
 
     private async void OneClickUpdateButton_Click(object sender, RoutedEventArgs e)

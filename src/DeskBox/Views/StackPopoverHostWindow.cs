@@ -30,22 +30,19 @@ internal sealed class StackPopoverHostWindow : Window
     private KeyEventHandler? _previewKeyDownHandler;
     private bool _closed;
     private readonly IntPtr _ownerWindowHandle;
+    private readonly Win32Helper.SubclassProc _inputSubclassProc;
+    private bool _inputSubclassInstalled;
 
+    private static readonly UIntPtr InputSubclassId = new(0xDDB2);
     public StackPopoverHostWindow(IntPtr ownerWindowHandle)
     {
         _ownerWindowHandle = ownerWindowHandle;
+        _inputSubclassProc = InputSubclassProc;
         WindowHandle = WindowNative.GetWindowHandle(this);
         WindowId windowId = Win32Interop.GetWindowIdFromWindow(WindowHandle);
         _appWindow = AppWindow.GetFromWindowId(windowId);
-        _appWindow.IsShownInSwitchers = false;
-        _appWindow.SetPresenter(AppWindowPresenterKind.Overlapped);
-        if (_appWindow.Presenter is OverlappedPresenter presenter)
-        {
-            presenter.IsResizable = false;
-            presenter.IsMaximizable = false;
-            presenter.IsMinimizable = false;
-            presenter.SetBorderAndTitleBar(false, false);
-        }
+        WindowShellState.TryHideFromSwitchers(_appWindow);
+        WindowShellState.TryApplyBorderlessOverlappedPresenter(_appWindow);
 
         if (ownerWindowHandle != IntPtr.Zero)
         {
@@ -113,6 +110,15 @@ internal sealed class StackPopoverHostWindow : Window
             WindowHandle,
             unchecked((int)0xFFFFFFFE));
         Win32Helper.ApplyFullWindowFrame(WindowHandle);
+
+        // The popover is TOPMOST and can swallow clicks that should dismiss a
+        // native Shell menu opened from inside it (the menu lives in the
+        // context-menu proxy process), so close the menu explicitly on press.
+        _inputSubclassInstalled = Win32Helper.SetWindowSubclass(
+            WindowHandle,
+            _inputSubclassProc,
+            InputSubclassId,
+            UIntPtr.Zero);
 
         // Bring the window into the shown state exactly once, parked off the
         // visible desktop. From this point the window is permanently visible
@@ -286,6 +292,15 @@ internal sealed class StackPopoverHostWindow : Window
         }
 
         _closed = true;
+        if (_inputSubclassInstalled)
+        {
+            _ = Win32Helper.RemoveWindowSubclass(
+                WindowHandle,
+                _inputSubclassProc,
+                InputSubclassId);
+            _inputSubclassInstalled = false;
+        }
+
         if (_content is not null && _previewKeyDownHandler is not null)
         {
             _content.RemoveHandler(
@@ -313,5 +328,25 @@ internal sealed class StackPopoverHostWindow : Window
         EscapeRequested?.Invoke();
     }
 
+    private IntPtr InputSubclassProc(
+        IntPtr hWnd,
+        uint message,
+        UIntPtr wParam,
+        IntPtr lParam,
+        UIntPtr uIdSubclass,
+        UIntPtr dwRefData)
+    {
+        // Every press inside the popover closes an open native context menu:
+        // the menu is hosted by another process, and this window's permanent
+        // TOPMOST placement means the click would otherwise never reach it.
+        if (message is Win32Helper.WM_LBUTTONDOWN
+            or Win32Helper.WM_RBUTTONDOWN
+            or Win32Helper.WM_MBUTTONDOWN
+            or Win32Helper.WM_XBUTTONDOWN)
+        {
+            ShellContextMenuProxy.CancelOpenMenu();
+        }
 
+        return Win32Helper.DefSubclassProc(hWnd, message, wParam, lParam);
+    }
 }

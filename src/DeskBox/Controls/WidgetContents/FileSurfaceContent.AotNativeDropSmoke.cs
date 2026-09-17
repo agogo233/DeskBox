@@ -141,26 +141,25 @@ public sealed partial class FileSurfaceContent
             "No point inside the File Widget but outside the owned folder target was found.");
     }
 
-    private static string GetAotNativeFolderVisualState(Border? border)
+    private string GetAotNativeFolderVisualState(Border? border)
     {
         if (border is null)
         {
             return string.Empty;
         }
 
-        Thickness thickness = border.BorderThickness;
-        bool hasDropBorder =
-            thickness.Left >= 0.5 ||
-            thickness.Top >= 0.5 ||
-            thickness.Right >= 0.5 ||
-            thickness.Bottom >= 0.5;
-        bool hasVisibleBorder =
-            border.BorderBrush is SolidColorBrush borderBrush &&
-            borderBrush.Color.A > 0;
-        return hasDropBorder && hasVisibleBorder
+        // Every drop target now renders as the neutral hover surface, so the
+        // probe reports the recorded target instead of a border the visual no
+        // longer draws.
+        return IsActiveChildDropTarget(border)
             ? "DropTarget"
             : "Normal";
     }
+
+    private bool IsActiveChildDropTarget(Border border) =>
+        ReferenceEquals(border, _folderDropTarget) ||
+        ReferenceEquals(border, _stackMemberDropTarget) ||
+        ReferenceEquals(border, _launchDropTarget);
 }
 
 internal sealed record AotNativeDropScreenBounds(

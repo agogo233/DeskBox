@@ -11,6 +11,8 @@ namespace DeskBox.Controls.WidgetContents;
 
 public sealed partial class FileSurfaceContent
 {
+    private const long OpenedSelectionSuppressionMs = 3000;
+
     private readonly FileOpenRequestGate _openRequestGate = new();
     private long _openStateGeneration;
 
@@ -82,17 +84,77 @@ public sealed partial class FileSurfaceContent
                     WidgetFeedbackSeverity.Warning,
                     "file-open-busy"));
             }
+            else if (result == FileService.OpenItemResult.ShortcutTargetMissing)
+            {
+                // The stored target is gone, so the link went to Windows instead
+                // of being launched. Saying "Windows has accepted the open
+                // request" here would be a false success.
+                ShowFeedback(new WidgetFeedbackRequest(
+                    T("Widget.OpenItemShortcutTargetMissing"),
+                    WidgetFeedbackSeverity.Warning,
+                    "file-open-shortcut-target-missing"));
+            }
+            else if (result == FileService.OpenItemResult.RequiresOpenWithPicker)
+            {
+                // No shell association: show the system application picker
+                // here, because every Shell dispatch path reports a dismissed
+                // picker as a silent success. The launcher reports a real
+                // launch (true) versus a user dismissal (false).
+                bool launched = false;
+                bool pickerFailed = false;
+                try
+                {
+                    Windows.Storage.StorageFile file = await Windows.Storage
+                        .StorageFile
+                        .GetFileFromPathAsync(item.Path);
+                    launched = await Windows.System.Launcher.LaunchFileAsync(
+                        file,
+                        new Windows.System.LauncherOptions
+                        {
+                            DisplayApplicationPicker = true
+                        });
+                }
+                catch (Exception ex)
+                {
+                    pickerFailed = true;
+                    App.Log(
+                        "[FileSurface] Open With picker failed " +
+                        $"widget={WidgetId} kind={kind}: {ex}");
+                }
+
+                if (_isDisposed || generation != _openStateGeneration)
+                {
+                    return;
+                }
+
+                App.Log(
+                    $"[FileSurface] Open With picker launched={launched} " +
+                    $"path='{item.Path}'");
+                if (pickerFailed)
+                {
+                    ShowFeedback(new WidgetFeedbackRequest(
+                        T("Widget.OpenItemFailed"),
+                        WidgetFeedbackSeverity.Error,
+                        "file-open-failed"));
+                }
+
+                // A dismissed picker stays silent: the dialog APIs report a
+                // user dismissal as success, so it is not distinguishable
+                // from a real launch here.
+                ClearOpenedItemSelectionAfterDispatch(
+                    item,
+                    stackPopoverGeneration,
+                    generation);
+            }
             else if (result == FileService.OpenItemResult.OpenedOrHandled)
             {
-                ClearOpenedItemSelection(item, stackPopoverGeneration);
-                // This confirms that Windows accepted the dispatch. It does
-                // not claim that the target application's cold start has
-                // finished, which Shell does not expose reliably for all
-                // associations (DDE, UWP, and single-instance handlers).
-                ShowFeedback(new WidgetFeedbackRequest(
-                    T("Widget.OpenItemDispatched"),
-                    WidgetFeedbackSeverity.Success,
-                    "file-open-dispatched"));
+                // A successful dispatch is silent: the target window (or a
+                // system dialog) is its own feedback, matching Explorer. The
+                // item's opening badge covers the in-flight window.
+                ClearOpenedItemSelectionAfterDispatch(
+                    item,
+                    stackPopoverGeneration,
+                    generation);
             }
         }
         catch (OperationCanceledException)
@@ -124,6 +186,39 @@ public sealed partial class FileSurfaceContent
             EndOpenItem(requestPath, dispatched);
             SetOpeningVisual(item, isOpening: false);
         }
+    }
+
+    private void ClearOpenedItemSelectionAfterDispatch(
+        WidgetItem item,
+        long stackPopoverGeneration,
+        long generation)
+    {
+        ClearOpenedItemSelection(item, stackPopoverGeneration);
+        // The second click of a double-click can commit its native selection
+        // only after the dispatch already finished, and a desktop-layer widget
+        // never receives a deactivation to clear it. Registering the path also
+        // suppresses that late commit at the source, which a scheduled clear
+        // alone cannot outrun on fast dispatch paths.
+        RegisterOpenedItemSelectionSuppression(item);
+        DispatcherQueue.TryEnqueue(
+            Microsoft.UI.Dispatching.DispatcherQueuePriority.Low,
+            () =>
+            {
+                if (_isDisposed || generation != _openStateGeneration)
+                {
+                    return;
+                }
+
+                if (ItemsGrid.SelectedItems.Contains(item) ||
+                    ItemsList.SelectedItems.Contains(item))
+                {
+                    App.Log(
+                        "[FileSurface] Late native selection after " +
+                        $"open cleared path='{item.Path}'");
+                }
+
+                ClearOpenedItemSelection(item, stackPopoverGeneration);
+            });
     }
 
     private void ClearOpenedItemSelection(

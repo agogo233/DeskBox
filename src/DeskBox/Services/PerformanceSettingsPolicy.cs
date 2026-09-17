@@ -64,15 +64,15 @@ public static class PerformanceSettingsPolicy
     public const int CleanupAfter10Minutes = 10 * 60;
     public const int CleanupAfter15Minutes = 15 * 60;
 
-    public const string DefaultMode = ModeBalanced;
+    public const string DefaultMode = ModeResourceSaver;
     public const int DefaultHiddenCacheCleanupDelaySeconds = CleanupAfter30Seconds;
-    public const int DefaultVisibleIdleCacheCleanupDelaySeconds = CleanupAfter10Minutes;
-    public const int DefaultTransientWindowReleaseDelaySeconds = CleanupAfter10Minutes;
-    public const string DefaultCacheBudget = CacheBudgetBalanced;
+    public const int DefaultVisibleIdleCacheCleanupDelaySeconds = CleanupAfter5Minutes;
+    public const int DefaultTransientWindowReleaseDelaySeconds = CleanupAfter2Minutes;
+    public const string DefaultCacheBudget = CacheBudgetSmall;
     public const string DefaultHiddenCacheCleanupScope =
         HiddenCacheCleanupScopeAllRecreatable;
     public const bool DefaultIdleWorkingSetTrimEnabled = true;
-    public const bool DefaultImmediateHiddenWorkingSetTrimEnabled = false;
+    public const bool DefaultImmediateHiddenWorkingSetTrimEnabled = true;
     public const bool DefaultContinuousDecorativeAnimationsEnabled = true;
     public const bool DefaultTextMarqueeAnimationsEnabled = true;
     public const bool DefaultVinylRotationAnimationsEnabled = true;

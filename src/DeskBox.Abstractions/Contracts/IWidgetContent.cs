@@ -48,6 +48,15 @@ public interface IWidgetContent
     /// while the expanded surface is covered without suspending its live data.
     /// </summary>
     void OnCompactStateChanged(bool collapsed) { }
+
+    /// <summary>
+    /// Called when an animated compact bounds transition starts and when it
+    /// releases the UI thread (completion, watchdog recovery, interruption).
+    /// Incremental visual work — icon hydration batches above all — should hold
+    /// while active so it cannot contend with the animation's frames.
+    /// Instant transitions never announce activation.
+    /// </summary>
+    void OnCompactBoundsTransitionActiveChanged(bool isActive) { }
 }
 
 /// <summary>

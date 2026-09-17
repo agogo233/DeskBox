@@ -1540,8 +1540,27 @@ public sealed class SettingsServiceTests : IDisposable
         Assert.Equal(expected, SettingsService.SupportsWidgetOpacity(materialType));
     }
 
+    [Theory]
+    [InlineData(StartupMode.Standard)]
+    [InlineData(StartupMode.ScheduledTask)]
+    public async Task StartupMode_RoundTripsWithoutEnablingStartup(StartupMode mode)
+    {
+        var service = new SettingsService(_settingsRoot);
+        service.Settings.AutoStart = false;
+        service.Settings.AutoStartDefaultApplied = true;
+        service.Settings.AutoStartMode = mode;
+        await service.SaveAsync(notifySubscribers: false);
+        var restored = new SettingsService(_settingsRoot);
+        await restored.LoadAsync();
+        Assert.Equal(mode, restored.Settings.AutoStartMode);
+        Assert.False(restored.Settings.AutoStart);
+        Assert.True(restored.Settings.AutoStartDefaultApplied);
+    }
+
     private static object? CreateNonDefaultSettingValue(Type type, object? defaultValue)
     {
+        if (Nullable.GetUnderlyingType(type) is { IsEnum: true } enumType)
+            return Enum.GetValues(enumType).Cast<object>().First(value => !Equals(value, defaultValue));
         if (type == typeof(string))
         {
             return $"{defaultValue}-changed";

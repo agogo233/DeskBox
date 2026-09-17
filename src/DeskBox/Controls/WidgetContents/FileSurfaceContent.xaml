@@ -129,7 +129,9 @@
                     DragLeave="ItemSurface_DragLeave"
                     DragOver="ItemSurface_DragOver"
                     Drop="ItemSurface_Drop"
-                    PointerPressed="ItemSurface_PointerPressed" />
+                    PointerPressed="ItemSurface_PointerPressed"
+                    PointerReleased="ItemSurface_PointerGestureEnded"
+                    PointerCaptureLost="ItemSurface_PointerGestureEnded" />
             </Grid>
         </DataTemplate>
 
@@ -140,7 +142,7 @@
                 MinHeight="{Binding TileHeight}"
                 Margin="{Binding TileMargin}"
                 Padding="{Binding TilePadding}"
-                CornerRadius="8"
+                CornerRadius="2"
                 AutomationProperties.HelpText="{Binding Summary}"
                 AutomationProperties.ItemStatus="{Binding AutomationState}"
                 AutomationProperties.Name="{Binding Name}"
@@ -287,7 +289,9 @@
                 DragLeave="ItemSurface_DragLeave"
                 DragOver="ItemSurface_DragOver"
                 Drop="ItemSurface_Drop"
-                PointerPressed="ItemSurface_PointerPressed" />
+                PointerPressed="ItemSurface_PointerPressed"
+                PointerReleased="ItemSurface_PointerGestureEnded"
+                PointerCaptureLost="ItemSurface_PointerGestureEnded" />
         </DataTemplate>
 
         <!-- Created only while a stack popover is open. The member objects and
@@ -307,7 +311,9 @@
                 DragLeave="ItemSurface_DragLeave"
                 DragOver="ItemSurface_DragOver"
                 Drop="ItemSurface_Drop"
-                PointerPressed="ItemSurface_PointerPressed" />
+                PointerPressed="ItemSurface_PointerPressed"
+                PointerReleased="ItemSurface_PointerGestureEnded"
+                PointerCaptureLost="ItemSurface_PointerGestureEnded" />
         </DataTemplate>
 
         <DataTemplate x:Key="StackPopoverFileListTemplate">
@@ -323,7 +329,9 @@
                 DragLeave="ItemSurface_DragLeave"
                 DragOver="ItemSurface_DragOver"
                 Drop="ItemSurface_Drop"
-                PointerPressed="ItemSurface_PointerPressed" />
+                PointerPressed="ItemSurface_PointerPressed"
+                PointerReleased="ItemSurface_PointerGestureEnded"
+                PointerCaptureLost="ItemSurface_PointerGestureEnded" />
         </DataTemplate>
 
         <DataTemplate x:Key="SurfaceFileStackListTemplate">
@@ -331,7 +339,7 @@
                 Tag="StackSurface"
                 Margin="{Binding ListMargin}"
                 Padding="{Binding ListPadding}"
-                CornerRadius="8"
+                CornerRadius="2"
                 AutomationProperties.HelpText="{Binding Summary}"
                 AutomationProperties.ItemStatus="{Binding AutomationState}"
                 AutomationProperties.Name="{Binding Name}"
@@ -582,7 +590,7 @@
                 IsItemClickEnabled="True"
                 ItemClick="Items_ItemClick"
                 Loaded="ItemsGrid_UniformPanelLoaded"
-                ItemsSource="{Binding VisibleItems}"
+                ItemsSource="{Binding RenderedItems}"
                 CanDragItems="True"
                 DragItemsCompleted="Items_DragItemsCompleted"
                 DragItemsStarting="Items_DragItemsStarting"
@@ -619,7 +627,7 @@
                 Background="Transparent"
                 IsItemClickEnabled="True"
                 ItemClick="Items_ItemClick"
-                ItemsSource="{Binding VisibleItems}"
+                ItemsSource="{Binding RenderedItems}"
                 CanDragItems="True"
                 DragItemsCompleted="Items_DragItemsCompleted"
                 DragItemsStarting="Items_DragItemsStarting"
@@ -709,7 +717,7 @@
                         Height="2"
                         HorizontalAlignment="Center"
                         VerticalAlignment="Center"
-                        Background="{ThemeResource AccentFillColorDefaultBrush}"
+                        Background="{ThemeResource ControlStrongStrokeColorDefaultBrush}"
                         CornerRadius="1"
                         Opacity="0.88" />
                 </Grid>
@@ -766,7 +774,7 @@
                 Margin="3"
                 Padding="18"
                 Background="{ThemeResource LayerFillColorDefaultBrush}"
-                BorderBrush="{ThemeResource AccentFillColorDefaultBrush}"
+                BorderBrush="{ThemeResource ControlStrongStrokeColorDefaultBrush}"
                 BorderThickness="1"
                 CornerRadius="{StaticResource WidgetCornerRadiusLarge}"
                 IsHitTestVisible="False"

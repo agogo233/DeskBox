@@ -41,11 +41,6 @@ public sealed partial class QuickCaptureWidgetWindow :
 
     private const int MinWidth = (int)SettingsService.MinWidgetWidth;
     private const int MinHeight = (int)SettingsService.MinWidgetHeight;
-    private const double QuickCaptureDialogHorizontalMargin = 24.0;
-    private const double QuickCaptureDialogMinWidth = 176.0;
-    private const double QuickCaptureDialogMaxWidth = 360.0;
-    private const double QuickCaptureDialogMinButtonWidth = 76.0;
-    private const double QuickCaptureDialogMaxButtonWidth = 112.0;
     private const int CopyToastMs = 900;
     private const int StatusToastDefaultMs = 1400;
     private const int StatusToastUndoMs = 4200;
@@ -119,7 +114,6 @@ public sealed partial class QuickCaptureWidgetWindow :
     private readonly WidgetChromeModeResolver _chromeModeResolver;
     private bool _focusRootAfterDragClick;
     private bool _hasPlayedInitialItemsTransition;
-    private bool _isClearingData;
     private bool _isCommittingTitleRename;
     private bool _isCancellingTitleRename;
     private long _titleRenameOpenedAtTick;
@@ -281,6 +275,9 @@ public sealed partial class QuickCaptureWidgetWindow :
     protected override void OnRootElementThemeChanged()
     {
         ApplySurfaceStyle();
+        // The segmented pointer states copy theme-dependent neutral colors at
+        // apply time, so a light/dark flip must re-apply them.
+        ApplySegmentedStyle();
     }
 
     protected override void OnDragEnd(bool hasMoved)

@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Diagnostics;
 using DeskBox.Controls;
 using DeskBox.Contracts;
 using DeskBox.Helpers;
@@ -13,6 +14,7 @@ using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Windows.ApplicationModel.DataTransfer;
+using Windows.System;
 
 namespace DeskBox.Controls.WidgetContents;
 
@@ -24,12 +26,7 @@ public sealed partial class FileSurfaceContent
         _stackSurfacePropertyChangedHandlers = [];
     private readonly FileItemSurfaceStyleCache _itemSurfaceStyleCache = new();
     private bool _folderDropVisualActive;
-    private SolidColorBrush? _stackDropBackgroundBrush;
-    private SolidColorBrush? _stackDropBorderBrush;
     private SolidColorBrush? _stackTransparentBrush;
-    private Windows.UI.Color _stackDropBrushAccent;
-    private ElementTheme _stackDropBrushTheme;
-    private bool _stackDropBrushesInitialized;
     private bool _stackMemberDropVisualActive;
     private string? _stackDropItemsTargetKey;
     private DataPackageView? _stackDropItemsDataView;
@@ -47,14 +44,12 @@ public sealed partial class FileSurfaceContent
 
     private void ApplySelectionRectangleAppearance(Border rectangle)
     {
-        bool isDark = Root.ActualTheme == ElementTheme.Dark;
-        Windows.UI.Color accent =
-            App.Current.ThemeService?.GetEffectiveAccentColor() ??
-            AccentColorHelper.DefaultAccentColor;
-        rectangle.Background = new SolidColorBrush(
-            WithAlpha(accent, isDark ? (byte)0x2D : (byte)0x24));
-        rectangle.BorderBrush = new SolidColorBrush(
-            WithAlpha(accent, isDark ? (byte)0xD8 : (byte)0xCC));
+        // Marquee selection reports what the pointer is sweeping over, so it
+        // draws the neutral interaction palette rather than the accent.
+        rectangle.Background = SharedBrushCache.GetOrCreate(
+            NeutralInteractionBrush.Fill(rectangle));
+        rectangle.BorderBrush = SharedBrushCache.GetOrCreate(
+            NeutralInteractionBrush.Line(rectangle));
         rectangle.BorderThickness = new Thickness(1);
         rectangle.CornerRadius = new CornerRadius(0);
         rectangle.Opacity = 1;
@@ -156,12 +151,26 @@ public sealed partial class FileSurfaceContent
         // drag that starts on one of its selected anchors.
     }
 
+    private void ItemSurface_PointerGestureEnded(
+        object sender,
+        PointerRoutedEventArgs e)
+    {
+        // The press that staged the drag snapshot ended without a drag. The
+        // snapshot must not outlive its gesture: an item-container release or
+        // capture loss never reaches the view-level PointerReleased, and the
+        // stale snapshot then keeps the deactivation selection clear guarded
+        // (it reads as an active drag) after an opened file's app takes the
+        // foreground.
+        _pendingPointerDragItems = [];
+    }
+
     private void ItemSurface_DragOver(
         object sender,
         DragEventArgs e)
     {
         if (!TryGetFolderDropTarget(sender, out Border border, out WidgetItem targetFolder))
         {
+            TryHandleLaunchTargetDragOver(sender, e);
             return;
         }
 
@@ -250,6 +259,20 @@ public sealed partial class FileSurfaceContent
     {
         if (!TryGetFolderDropTarget(sender, out Border border, out _))
         {
+            // A shortcut tile stays the recorded release target while the
+            // pointer is still over it: refreshing a ListView container during
+            // the real-time reorder preview can raise DragLeave even though the
+            // pointer never moved, which would otherwise discard the record.
+            if (TryGetLaunchDropTarget(sender, out Border launchBorder, out _) &&
+                !IsPointerInsideDropElement(launchBorder, e))
+            {
+                ClearInternalLaunchHover();
+                // The tile really lost the pointer. Later root DragOver calls
+                // only clear the folder and stack targets, so the launch hover
+                // would otherwise stay painted until the gesture ends.
+                ClearLaunchDropTarget();
+            }
+
             return;
         }
 
@@ -271,6 +294,7 @@ public sealed partial class FileSurfaceContent
     {
         if (!TryGetFolderDropTarget(sender, out _, out WidgetItem targetFolder))
         {
+            await TryHandleLaunchTargetDropAsync(sender, e);
             return;
         }
 
@@ -395,6 +419,12 @@ public sealed partial class FileSurfaceContent
                     .Where(file => !file.ForceManagedCopy)
                     .Select(file => file.Path)
                     .ToArray();
+                if (!createShortcuts)
+                {
+                    regularPaths = await RemoveUndisplayableFolderDropPathsAsync(
+                        regularPaths);
+                }
+
                 if (regularPaths.Length > 0)
                 {
                     if (createShortcuts)
@@ -425,6 +455,8 @@ public sealed partial class FileSurfaceContent
                     .Where(file => file.ForceManagedCopy)
                     .Select(file => file.Path)
                     .ToArray();
+                forcedCopyPaths = await RemoveUndisplayableFolderDropPathsAsync(
+                    forcedCopyPaths);
                 if (forcedCopyPaths.Length > 0)
                 {
                     results.AddRange(await _fileService.TransferItemsWithResultAsync(
@@ -535,6 +567,41 @@ public sealed partial class FileSurfaceContent
         }
     }
 
+    /// <summary>
+    /// Removes entries the widget item list can never display from a
+    /// folder-tile drop. Folder-tile transfers bypass the ViewModel import
+    /// gate, so the filter is applied here; refused entries stay at their
+    /// source instead of landing invisible inside the folder.
+    /// </summary>
+    private async Task<string[]> RemoveUndisplayableFolderDropPathsAsync(
+        IReadOnlyList<string> paths)
+    {
+        string[] materialized = paths.ToArray();
+        if (materialized.Length == 0)
+        {
+            return materialized;
+        }
+
+        string[] displayable = await Task.Run(() => materialized
+            .Where(path => !FileService.IsFilteredFromWidgetDisplay(path))
+            .ToArray());
+        int skippedCount = materialized.Length - displayable.Length;
+        if (skippedCount > 0)
+        {
+            App.Log(
+                $"[Import] Refused undisplayable folder drop widget={WidgetId} " +
+                $"skipped={skippedCount} requested={materialized.Length}");
+            ShowFeedback(new(
+                _localizationService.Format(
+                    "Widget.ImportSkippedUndisplayable",
+                    skippedCount),
+                WidgetFeedbackSeverity.Warning,
+                "file-import-skipped-undisplayable"));
+        }
+
+        return displayable;
+    }
+
     private async Task<bool> ImportNativeDroppedFilesIntoFolderAsync(
         IReadOnlyList<DroppedFilePath> droppedFiles,
         WidgetItem targetFolder,
@@ -590,6 +657,12 @@ public sealed partial class FileSurfaceContent
                 .Select(file => file.Path)
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToArray();
+            if (!createShortcuts)
+            {
+                regularPaths = await RemoveUndisplayableFolderDropPathsAsync(
+                    regularPaths);
+            }
+
             if (regularPaths.Length > 0)
             {
                 if (createShortcuts)
@@ -621,6 +694,8 @@ public sealed partial class FileSurfaceContent
                 .Select(file => file.Path)
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToArray();
+            forcedCopyPaths = await RemoveUndisplayableFolderDropPathsAsync(
+                forcedCopyPaths);
             if (forcedCopyPaths.Length > 0)
             {
                 results.AddRange(await _fileService.TransferItemsWithResultAsync(
@@ -859,11 +934,8 @@ public sealed partial class FileSurfaceContent
         out WidgetItem folder)
     {
         if (sender is FileItemSurface surface &&
-            surface.DataContext is WidgetItem
-            {
-                IsFolder: true,
-                Path.Length: > 0
-            } item)
+            surface.DataContext is WidgetItem item &&
+            ItemDropBehaviorPolicy.Resolve(item) == ItemDropBehavior.FolderImport)
         {
             border = surface.InteractiveBorder;
             folder = item;
@@ -873,6 +945,450 @@ public sealed partial class FileSurfaceContent
         border = null!;
         folder = null!;
         return false;
+    }
+
+    private static bool TryGetLaunchDropTarget(
+        object sender,
+        out Border border,
+        out WidgetItem launchTarget)
+    {
+        if (sender is FileItemSurface surface &&
+            surface.DataContext is WidgetItem item &&
+            ItemDropBehaviorPolicy.Resolve(item) == ItemDropBehavior.Launch)
+        {
+            border = surface.InteractiveBorder;
+            launchTarget = item;
+            return true;
+        }
+
+        border = null!;
+        launchTarget = null!;
+        return false;
+    }
+
+    /// <summary>
+    /// DragOver on an application-shortcut tile: highlight the tile and
+    /// advertise a link-style accept so the drop lands here instead of the
+    /// root import. DeskBox-sourced drags arm the launch only over the tile's
+    /// icon; the label and padding around it keep their reorder and import
+    /// semantics, so sorting toward a position a shortcut happens to occupy
+    /// never opens it. The "open with" wording itself is carried by the Shell
+    /// drop description, so Explorer's compact drag image stays.
+    /// </summary>
+    private void TryHandleLaunchTargetDragOver(
+        object sender,
+        DragEventArgs e)
+    {
+        if (!TryGetLaunchDropTarget(sender, out Border launchBorder, out WidgetItem launchTile))
+        {
+            return;
+        }
+
+        DragPayloadSnapshot payload = GetDragPayload(e.DataView);
+        bool internalLaunch =
+            ShortcutLaunchPolicy.EvaluateInternalDrag(
+                payload.IsDeskBoxFileDrag,
+                payload.IsStackPopoverMemberDrag,
+                payload.Paths,
+                launchTile.Path) == ShortcutLaunchDecision.Launch &&
+            IsPointerOverLaunchIcon(sender, e);
+        if (payload.IsStackPopoverMemberDrag)
+        {
+            return;
+        }
+
+        if (!internalLaunch && payload.IsDeskBoxFileDrag)
+        {
+            // A DeskBox-sourced drag outside the icon keeps its own semantics:
+            // a same-widget drag hands the gesture back to the surface reorder,
+            // a cross-widget drop falls through to the import, and dragging a
+            // shortcut onto itself lands here too - putting a tile back where
+            // it was never opens it. Leaving the icon after arming must also
+            // drop the launch hover: the root feedback path only clears the
+            // folder and stack targets, nothing else clears it.
+            DisarmLaunchHover(launchTile);
+            return;
+        }
+
+        App.LogVerbose(
+            "[DragProtocol] launch-target dragover " +
+            $"widget={WidgetId} target='{launchTile.Path}' internalLaunch={internalLaunch} " +
+            $"deskBoxDrag={payload.IsDeskBoxFileDrag} " +
+            $"internalReorder={payload.IsInternalReorder} paths={payload.Paths.Length}");
+
+        e.Handled = true;
+        // Same child-target contract as folder tiles: an explicit destination
+        // cancels any root insertion preview so a stale reorder cannot commit.
+        if (_isSurfaceReorderDragActive ||
+            _surfaceReorderInsertionIndex >= 0)
+        {
+            PersistSurfaceReorder();
+        }
+
+        ClearExternalDropPreviewPlacement();
+        SuppressExternalDragOperationBadge(e);
+        // A launch is not a file transfer, so an external drag advertises a
+        // link. An internal drag only ever allows Move - the source is a
+        // ListView reorder - and the pointer being over the icon is what
+        // claims the gesture: the arming DragOver above already discarded the
+        // reorder state, and the completion resolves the release as a launch,
+        // so no reorder ever commits.
+        e.AcceptedOperation = internalLaunch
+            ? e.AllowedOperations.HasFlag(DataPackageOperation.Move)
+                ? DataPackageOperation.Move
+                : e.AllowedOperations
+            : e.AllowedOperations.HasFlag(DataPackageOperation.Link)
+                ? DataPackageOperation.Link
+                : e.AllowedOperations.HasFlag(DataPackageOperation.Copy)
+                    ? DataPackageOperation.Copy
+                    : DataPackageOperation.None;
+        if (e.AcceptedOperation == DataPackageOperation.None)
+        {
+            ClearFolderDropTarget();
+            ClearLaunchDropTarget();
+            return;
+        }
+
+        SetLaunchDropTarget(launchBorder);
+        if (internalLaunch)
+        {
+            // An internal drag carries no Shell drop description, so the
+            // "open with" hint is the XAML caption instead - the same hint the
+            // external path gets from the Shell.
+            ApplyDeskBoxFileDragFeedback(
+                e,
+                e.AcceptedOperation,
+                _localizationService.Format(
+                    "Widget.DropOnShortcutOpenWith",
+                    launchTile.Name));
+            // WinUI will not deliver this gesture's Drop to the tile, so the
+            // release is resolved from DragItemsCompleted: remember what this
+            // DragOver accepted and which container it armed, so the release
+            // can re-read the live icon geometry.
+            _internalLaunchHoverItem = launchTile;
+            _internalLaunchHoverBorder = launchBorder;
+        }
+    }
+
+    // Launch hit-testing slack around the icon glyph host: enough to absorb
+    // pointer jitter between DragOver samples, far smaller than the tile, so
+    // aiming a reorder at the label or padding beside a shortcut never opens.
+    private const double LaunchIconSlackPixels = 6;
+
+    private void ClearInternalLaunchHover()
+    {
+        _internalLaunchHoverItem = null;
+        _internalLaunchHoverBorder = null;
+    }
+
+    /// <summary>
+    /// Drops a launch hover armed for this tile: the pointer left the icon, so
+    /// the gesture is back to reorder/import semantics and neither the hover
+    /// record nor its visual may claim the release.
+    /// </summary>
+    private void DisarmLaunchHover(WidgetItem launchTile)
+    {
+        if (!ReferenceEquals(_internalLaunchHoverItem, launchTile))
+        {
+            return;
+        }
+
+        ClearInternalLaunchHover();
+        ClearLaunchDropTarget();
+    }
+
+    /// <summary>
+    /// The routed drag pointer is over the tile's icon glyph host (with the
+    /// launch slack). The icon is the only launch territory for
+    /// DeskBox-sourced drags; the label and padding around it keep their
+    /// reorder and import semantics.
+    /// </summary>
+    private static bool IsPointerOverLaunchIcon(
+        object sender,
+        DragEventArgs e)
+    {
+        if (sender is not FileItemSurface surface ||
+            surface.IconHitTestElement is not { } iconHost)
+        {
+            return false;
+        }
+
+        try
+        {
+            Windows.Foundation.Point point = e.GetPosition(iconHost);
+            return ShortcutLaunchPolicy.IsPointInsideRectWithSlack(
+                0,
+                0,
+                iconHost.ActualWidth,
+                iconHost.ActualHeight,
+                LaunchIconSlackPixels,
+                point.X,
+                point.Y);
+        }
+        catch (InvalidOperationException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// True when this release was accepted by a shortcut tile's icon and the
+    /// surface never took the gesture. Popover member drags keep their
+    /// membership semantics, and an accepted internal drop reports its own
+    /// operation rather than None. The pointer is checked against the live
+    /// icon geometry, so a release that slid off the icon first does not open
+    /// the files.
+    /// </summary>
+    private bool ShouldLaunchFromCompletedInternalDrag(
+        DragItemsCompletedEventArgs e,
+        bool fromStackPopover)
+    {
+        bool hovered = _internalLaunchHoverItem is not null;
+        bool atPoint = IsCursorInsideLaunchIcon();
+        if (hovered && !atPoint)
+        {
+            // The corner to watch: armed by DragOver but the release geometry
+            // failed (container recycled, pointer slid off between samples).
+            App.LogVerbose(
+                "[ShortcutLaunch] completion geometry rejected the release " +
+                $"widget={WidgetId} target='{_internalLaunchHoverItem?.Path}'");
+        }
+
+        return !fromStackPopover &&
+            ShortcutLaunchPolicy.ShouldLaunchFromCompletedInternalDrag(
+                e.DropResult,
+                hovered,
+                atPoint);
+    }
+
+    /// <summary>
+    /// The physical pointer is still inside the icon of the shortcut tile the
+    /// last DragOver armed. The completion is the only release signal an
+    /// internal drag gets, so the decision reads the live geometry instead of
+    /// a point recorded during DragOver: the real-time reorder preview can
+    /// recycle containers and move tiles under a stationary pointer.
+    /// </summary>
+    private bool IsCursorInsideLaunchIcon()
+    {
+        if (_internalLaunchHoverItem is not { } hoverItem ||
+            !Win32Helper.GetCursorPos(out Win32Helper.POINT cursor))
+        {
+            return false;
+        }
+
+        if (FindLaunchHoverIconHost(hoverItem) is not { } iconHost ||
+            !TryGetScreenPointInElement(
+                iconHost,
+                cursor.X,
+                cursor.Y,
+                out Windows.Foundation.Point local))
+        {
+            return false;
+        }
+
+        return ShortcutLaunchPolicy.IsPointInsideRectWithSlack(
+            0,
+            0,
+            iconHost.ActualWidth,
+            iconHost.ActualHeight,
+            LaunchIconSlackPixels,
+            local.X,
+            local.Y);
+    }
+
+    /// <summary>
+    /// The icon host of the armed shortcut tile, or null when the recorded
+    /// container no longer shows that item - a recycled or rebuilt container
+    /// makes the live geometry unknowable, and an unknowable release must not
+    /// launch.
+    /// </summary>
+    private FrameworkElement? FindLaunchHoverIconHost(WidgetItem hoverItem)
+    {
+        Border? border = _internalLaunchHoverBorder;
+        if (border?.XamlRoot is null ||
+            border.DataContext is not WidgetItem current ||
+            !string.Equals(
+                current.Path,
+                hoverItem.Path,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        return FileItemSurface.FindOwner(border)?.IconHitTestElement;
+    }
+
+    /// <summary>
+    /// Opens the dragged tiles with the application the shortcut points at,
+    /// which is what the release meant. The gesture belongs to the launch, so
+    /// the pending reorder preview is discarded rather than committed.
+    /// </summary>
+    private bool TryLaunchInternalDragOnShortcut(string[] movedPaths)
+    {
+        WidgetItem? launchTarget = _internalLaunchHoverItem;
+        ClearInternalLaunchHover();
+        if (launchTarget is not { Path.Length: > 0 } shortcut ||
+            movedPaths.Length == 0)
+        {
+            return false;
+        }
+
+        PersistSurfaceReorder();
+        ResetExternalDropPreview();
+        ApplyDropVisual(FileDropVisualState.None);
+        ClearFolderDropTarget();
+        // The completion does not raise the tile's DragLeave, so the launch
+        // hover would otherwise stay painted on the shortcut tile.
+        ClearLaunchDropTarget();
+        bool launched = ShortcutFileLauncher.TryLaunchWithFiles(
+            shortcut.Path,
+            movedPaths);
+        MarkNativeLaunchConsumed();
+        if (!launched)
+        {
+            ShowShortcutLaunchRefusedFeedback(shortcut.Name);
+        }
+
+        App.Log(
+            $"[ShortcutLaunch] Internal drag resolved on completion " +
+            $"widget={WidgetId} target='{shortcut.Path}' " +
+            $"paths={movedPaths.Length} launched={launched}");
+        return true;
+    }
+
+    /// <summary>
+    /// Drop on an application-shortcut tile: rebuild a CF_HDROP data object
+    /// from the (possibly virtual, materialized) paths and delegate the drop
+    /// to the shortcut's Shell drop target. The method stays unhandled on any
+    /// refusal, so the routed root import takes over with today's behavior and
+    /// feedback - no transfer session is ever created for the launch attempt.
+    /// </summary>
+    private async Task TryHandleLaunchTargetDropAsync(
+        object sender,
+        DragEventArgs e)
+    {
+        if (!TryGetLaunchDropTarget(sender, out _, out WidgetItem launchItem))
+        {
+            return;
+        }
+
+        DragPayloadSnapshot payload = GetDragPayload(e.DataView);
+        bool internalLaunch =
+            ShortcutLaunchPolicy.EvaluateInternalDrag(
+                payload.IsDeskBoxFileDrag,
+                payload.IsStackPopoverMemberDrag,
+                payload.Paths,
+                launchItem.Path) == ShortcutLaunchDecision.Launch &&
+            IsPointerOverLaunchIcon(sender, e);
+        if (payload.IsStackPopoverMemberDrag)
+        {
+            return;
+        }
+
+        if (!internalLaunch && payload.IsDeskBoxFileDrag)
+        {
+            // Outside the icon a DeskBox-sourced drop keeps its own semantics:
+            // a same-widget drag is resolved by the surface reorder, a
+            // cross-widget drop falls through to the import, and the launch
+            // hover armed over the icon must not survive the release.
+            DisarmLaunchHover(launchItem);
+            return;
+        }
+
+        if (WasLaunchConsumedByNativeDrop())
+        {
+            // The native OLE path delegated this same physical drop while the
+            // real IDataObject was alive; delegating again would launch the
+            // target application a second time.
+            App.LogVerbose(
+                "[DragProtocol] launch double-consumption suppressed " +
+                $"widget={WidgetId} path='{launchItem.Path}'");
+            e.Handled = true;
+            return;
+        }
+
+        ClearFolderDropTarget();
+        // A consumed drop does not raise the tile's DragLeave, so the launch
+        // hover must be cleared here instead of waiting for it.
+        ClearLaunchDropTarget();
+        ApplyDropVisual(FileDropVisualState.None);
+        // Reading StorageItems yields past the synchronous handler body; the
+        // deferral keeps the drag transaction (and the DataView) alive.
+        var deferral = e.GetDeferral();
+        try
+        {
+            string[] paths;
+            if (internalLaunch)
+            {
+                // An internal drag carries its already-resolved source paths, so
+                // the opened files are exactly the tiles that were dragged.
+                paths = payload.Paths
+                    .Where(path => !string.IsNullOrWhiteSpace(path))
+                    .GroupBy(path => path, StringComparer.OrdinalIgnoreCase)
+                    .Select(group => group.First())
+                    .ToArray();
+            }
+            else
+            {
+                using DroppedFileBatch batch =
+                    await GetSurfaceDropFilesAsync(e.DataView);
+                paths = batch.Files
+                    .Where(file => !string.IsNullOrWhiteSpace(file.Path))
+                    .GroupBy(file => file.Path, StringComparer.OrdinalIgnoreCase)
+                    .Select(group => group.First().Path)
+                    .ToArray();
+            }
+
+            if (paths.Length == 0)
+            {
+                return;
+            }
+
+            // The application may accept the launch asynchronously; the routed
+            // root import must not run for this gesture either way, because the
+            // user asked to open the files with this shortcut's application.
+            MarkNativeLaunchConsumed();
+            e.Handled = true;
+            if (ShortcutFileLauncher.TryLaunchWithFiles(launchItem.Path, paths))
+            {
+                e.AcceptedOperation = DataPackageOperation.Link;
+            }
+            else
+            {
+                e.AcceptedOperation = DataPackageOperation.None;
+                ShowShortcutLaunchRefusedFeedback(launchItem.Name);
+            }
+        }
+        finally
+        {
+            deferral.Complete();
+        }
+    }
+
+    private bool WasLaunchConsumedByNativeDrop() => WasLaunchConsumedRecently();
+
+    /// <summary>
+    /// True while another drop path already resolved this physical gesture as an
+    /// application-shortcut launch (opened, refused, or failed). The routed XAML
+    /// Drop and the legacy WM_DROPFILES message must then stand down instead of
+    /// delegating a second time or importing the files.
+    /// </summary>
+    internal bool WasLaunchConsumedRecently()
+    {
+        long consumedTicks = Interlocked.Read(ref _lastLaunchConsumedTicks);
+        return consumedTicks != 0 &&
+            Stopwatch.GetTimestamp() - consumedTicks < LaunchConsumptionWindowTicks;
+    }
+
+    /// <summary>
+    /// Claims this physical drop for the launch path. Callable from the OLE
+    /// thread (before the UI thread would process a legacy duplicate) as well as
+    /// from the UI thread, so the OLE refusal is visible to WM_DROPFILES even
+    /// when the queued visual work has not run yet.
+    /// </summary>
+    internal void MarkNativeLaunchConsumed()
+    {
+        Interlocked.Exchange(ref _lastLaunchConsumedTicks, Stopwatch.GetTimestamp());
     }
 
     private Border? FindItemSurfaceBorder(WidgetItem item)
@@ -922,6 +1438,7 @@ public sealed partial class FileSurfaceContent
     private void SetFolderDropTarget(Border border)
     {
         ClearStackMemberDropTarget();
+        ClearLaunchDropTarget();
         if (ReferenceEquals(_folderDropTarget, border) &&
             _folderDropVisualActive)
         {
@@ -943,6 +1460,42 @@ public sealed partial class FileSurfaceContent
         Border? previous = _folderDropTarget;
         _folderDropTarget = null;
         _folderDropVisualActive = false;
+        if (previous?.XamlRoot is not null)
+        {
+            ApplyItemSurfaceVisual(previous, FileItemSurfaceVisualState.Normal);
+        }
+    }
+
+    /// <summary>
+    /// Highlights a shortcut tile that the pointer is hovering with files to
+    /// open. Like every other drop target - a folder to import into, a stack to
+    /// add to - the launch hover is the neutral hover surface with no border,
+    /// so the shared style cache draws all three the same way.
+    /// </summary>
+    private void SetLaunchDropTarget(Border border)
+    {
+        ClearStackMemberDropTarget();
+        if (ReferenceEquals(_launchDropTarget, border) &&
+            _launchDropVisualActive)
+        {
+            return;
+        }
+
+        if (!ReferenceEquals(_launchDropTarget, border))
+        {
+            ClearLaunchDropTarget();
+            _launchDropTarget = border;
+        }
+
+        ApplyItemSurfaceVisual(border, FileItemSurfaceVisualState.Hover);
+        _launchDropVisualActive = true;
+    }
+
+    private void ClearLaunchDropTarget()
+    {
+        Border? previous = _launchDropTarget;
+        _launchDropTarget = null;
+        _launchDropVisualActive = false;
         if (previous?.XamlRoot is not null)
         {
             ApplyItemSurfaceVisual(previous, FileItemSurfaceVisualState.Normal);
@@ -1586,6 +2139,7 @@ public sealed partial class FileSurfaceContent
         Border border)
     {
         ClearFolderDropTarget();
+        ClearLaunchDropTarget();
         if (!ReferenceEquals(
                 _stackMemberDropTarget,
                 border))
@@ -1627,30 +2181,13 @@ public sealed partial class FileSurfaceContent
     private void ApplyStackSurfaceDropVisual(
         Border border)
     {
-        Windows.UI.Color accent =
-            App.Current.ThemeService?.GetEffectiveAccentColor() ??
-            AccentColorHelper.DefaultAccentColor;
-        ElementTheme theme = Root.ActualTheme;
-        if (!_stackDropBrushesInitialized ||
-            !_stackDropBrushAccent.Equals(accent) ||
-            _stackDropBrushTheme != theme)
-        {
-            _stackDropBrushAccent = accent;
-            _stackDropBrushTheme = theme;
-            _stackDropBackgroundBrush = new SolidColorBrush(
-                WithAlpha(
-                    accent,
-                    theme == ElementTheme.Dark
-                        ? (byte)0x38
-                        : (byte)0x28));
-            _stackDropBorderBrush = new SolidColorBrush(
-                WithAlpha(accent, 0xD8));
-            _stackDropBrushesInitialized = true;
-        }
-
-        border.Background = _stackDropBackgroundBrush;
-        border.BorderBrush = _stackDropBorderBrush;
-        border.BorderThickness = new Thickness(1);
+        // A stack the pointer is hovering with files to add reads as the same
+        // neutral hover surface as every other drop target. The accent color no
+        // longer enters the drop visual, so there is no per-accent brush state
+        // to track here either.
+        border.Background = ResolveBrush("SubtleFillColorSecondaryBrush");
+        border.BorderBrush = GetStackTransparentBrush();
+        border.BorderThickness = new Thickness(0);
     }
 
 
@@ -1752,15 +2289,15 @@ public sealed partial class FileSurfaceContent
         Border border,
         FileItemSurfaceVisualState state)
     {
-        if (ReferenceEquals(border, _folderDropTarget) &&
-            state != FileItemSurfaceVisualState.DropTarget)
+        bool isDropTarget = ReferenceEquals(border, _folderDropTarget) ||
+            ReferenceEquals(border, _launchDropTarget);
+        if (isDropTarget && state != FileItemSurfaceVisualState.DropTarget)
         {
+            // Keep the state describing the drop while the shared cache renders
+            // every drop target with the neutral hover surface.
             state = FileItemSurfaceVisualState.DropTarget;
         }
 
-        Windows.UI.Color accent =
-            App.Current.ThemeService?.GetEffectiveAccentColor() ??
-            AccentColorHelper.DefaultAccentColor;
         WidgetItem? item =
             FileItemSurface.FindOwner(border)?.DataContext as WidgetItem ??
             border.DataContext as WidgetItem;
@@ -1776,9 +2313,9 @@ public sealed partial class FileSurfaceContent
             border,
             state,
             Root.ActualTheme,
-            accent,
             isSelected,
-            item?.IsCut == true);
+            item?.IsCut == true,
+            isDropTarget: state == FileItemSurfaceVisualState.DropTarget);
     }
 
     private void ApplyStackSurfaceVisual(

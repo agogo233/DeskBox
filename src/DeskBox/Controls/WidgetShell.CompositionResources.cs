@@ -24,6 +24,29 @@ public sealed partial class WidgetShell
         }
     }
 
+    /// <summary>
+    /// Creates the shared compact-transition animation templates during the
+    /// expansion warm-up so the first real transition does not pay WinRT
+    /// animation-object creation inside its opening frames.
+    /// </summary>
+    internal void PrewarmCompactTransitionCompositionResources()
+    {
+        try
+        {
+            Compositor compositor = ElementCompositionPreview.GetElementVisual(this).Compositor;
+            _ = _compositionResources.GetScalar(
+                compositor, WidgetAnimationTemplate.CompactOpacity);
+            _ = _compositionResources.GetVector3(
+                compositor, WidgetAnimationTemplate.CompactScale);
+            _ = _compositionResources.GetVector3(
+                compositor, WidgetAnimationTemplate.CompactTranslation);
+        }
+        catch (Exception ex)
+        {
+            App.LogVerbose($"[Composition] Compact transition prewarm failed: {ex.Message}");
+        }
+    }
+
     private void ReleaseParticleAnimation(CompactParticleAnimationState particle)
     {
         CompositionScopedBatch? batch = particle.Batch;

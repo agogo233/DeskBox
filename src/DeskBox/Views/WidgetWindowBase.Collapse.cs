@@ -947,6 +947,10 @@ public abstract partial class WidgetWindowBase
             IsClosing ||
             _isCollapseAnimationRendering ||
             _isShellTransitionActive ||
+            // Any capsule's bounds transition owns the shared frame clock; a
+            // warm-up layout here would stall its callbacks. This slice runs
+            // on the UI thread, so reading coordinator state is safe.
+            WidgetCompactAnimationCoordinator.HasActiveAnimations ||
             _isCompactExpansionWarmupRunning ||
             !RootElement.IsLoaded ||
             !IsCompactExpansionWarmupContentReady)
@@ -958,6 +962,7 @@ public abstract partial class WidgetWindowBase
                 $"shellCollapsed={WidgetShellControl.IsCollapsed} " +
                 $"closing={IsClosing} animation={_isCollapseAnimationRendering} " +
                 $"shellTransition={_isShellTransitionActive} " +
+                $"anyAnimation={WidgetCompactAnimationCoordinator.HasActiveAnimations} " +
                 $"running={_isCompactExpansionWarmupRunning} " +
                 $"rootLoaded={RootElement.IsLoaded} " +
                 $"contentReady={IsCompactExpansionWarmupContentReady} " +
@@ -1999,6 +2004,9 @@ public abstract partial class WidgetWindowBase
         _isPointerOverCompactMoveHandle = false;
         _isPointerOverCompactActions = false;
         CancelTimer(ref _collapseLeaveTimer);
+        // Hover intent precedes every expansion; start paying the shared
+        // animation clock's cold-start cost here instead of on frame one.
+        WidgetCompactAnimationCoordinator.PreArmFrameClock(HWnd);
         QueueCompactExpansionWarmup(urgent: true);
         TryScheduleCompactHoverExpansion();
     }
@@ -2131,6 +2139,11 @@ public abstract partial class WidgetWindowBase
         _collapseHoverTimerAllowsInteractionRegionDwell =
             scheduledForInteractionRegion;
         _compactState = WidgetCompactState.ExpandPending;
+        WidgetCompactAnimationCoordinator.PreArmFrameClock(HWnd);
+        // The hover dwell is otherwise dead time. Starting the pointer-
+        // promoted warm-up now lets a cold capsule finish its expanded
+        // layout inside the dwell instead of inside the readiness deadline.
+        QueueCompactExpansionWarmup(urgent: true);
         ScheduleTimer(
             ref _collapseHoverTimer,
             effectiveDelay,
@@ -3056,13 +3069,42 @@ public abstract partial class WidgetWindowBase
         ScheduleTimer(
             ref _compactExpansionReadinessDeadlineTimer,
             WidgetCompactExpansionReadinessPolicy.DefaultDeadlineMilliseconds,
-            () =>
-            {
-                if (_pendingCompactExpansion?.Generation == generation)
+            () => HandlePendingCompactExpansionDeadline(generation));
+    }
+
+    private void HandlePendingCompactExpansionDeadline(long generation)
+    {
+        if (_pendingCompactExpansion?.Generation != generation)
+        {
+            return;
+        }
+
+        // The capsule has not moved yet. A warm-up that is alive and allowed
+        // to run is worth one bounded extra hold; a live-layout fallback runs
+        // the first expanded layout inside the animation's opening frames.
+        int extensionMs = WidgetCompactExpansionReadinessPolicy
+            .ResolveDeadlineExtensionMilliseconds(
+                warmupActive: _compactExpansionWarmupCancellation is not null,
+                warmupCanRunNow: CanRunCompactExpansionWarmup(urgent: true));
+        if (extensionMs > 0)
+        {
+            PerformanceLogger.Mark(
+                "CompactExpansionDeadlineExtended",
+                $"extensionMs={extensionMs} kind={Config.WidgetKind} id={Config.Id}");
+            ScheduleTimer(
+                ref _compactExpansionReadinessDeadlineTimer,
+                extensionMs,
+                () =>
                 {
-                    ResumePendingCompactExpansion(deadlineElapsed: true);
-                }
-            });
+                    if (_pendingCompactExpansion?.Generation == generation)
+                    {
+                        ResumePendingCompactExpansion(deadlineElapsed: true);
+                    }
+                });
+            return;
+        }
+
+        ResumePendingCompactExpansion(deadlineElapsed: true);
     }
 
     private void ResumePendingCompactExpansion(bool deadlineElapsed)
@@ -3163,15 +3205,12 @@ public abstract partial class WidgetWindowBase
         _collapseAnimationFrom = from;
         _collapseAnimationTo = to;
         _collapseAnimationDurationMs = durationMs;
-        _collapseAnimationStarted = Stopwatch.GetTimestamp();
+        long transitionPrepStarted = Stopwatch.GetTimestamp();
         int refreshRateHz = Win32Helper.GetDisplayRefreshRateForWindow(HWnd);
         _collapseAnimationLastCommittedBounds = from;
         _collapseAnimationPacing.Reset(
             0,
             WidgetCompactAnimationCoordinator.GetFrameBudgetMilliseconds(HWnd));
-        _compactAnimationFrameTracker = new WidgetCompactAnimationFrameTracker(
-            _collapseAnimationStarted,
-            refreshRateHz);
         string cornerPreference = WindowsCompatibilityService.ResolveEffectiveWidgetCornerPreference(
             SettingsService.Settings.WidgetCornerPreference);
         string mediaCornerMode = WindowsCompatibilityService.ResolveEffectiveWidgetCompactMediaCornerMode(
@@ -3190,10 +3229,22 @@ public abstract partial class WidgetWindowBase
                 mediaCornerMode,
                 cornerPreference),
             _collapseAnimationVisualProfile);
+        // Anchor the animation clock after preparation: the refresh-rate
+        // query, border visuals, and composition animation starts above used
+        // to consume the opening progress, skipping the first eased frames.
+        _collapseAnimationStarted = Stopwatch.GetTimestamp();
+        PerformanceLogger.Mark(
+            "CompactBoundsTransitionPrep",
+            $"prepMs={Stopwatch.GetElapsedTime(transitionPrepStarted, _collapseAnimationStarted).TotalMilliseconds:F1} " +
+            $"durationMs={durationMs} kind={Config.WidgetKind} id={Config.Id}");
+        _compactAnimationFrameTracker = new WidgetCompactAnimationFrameTracker(
+            _collapseAnimationStarted,
+            refreshRateHz);
         _isCollapseAnimationRendering = true;
         _collapseAnimationFrameRegistration?.Dispose();
         _collapseAnimationFrameRegistration =
             WidgetCompactAnimationCoordinator.RegisterBoundsTransition(CollapseAnimationRendering, HWnd);
+        OnCompactBoundsTransitionActiveChanged(true);
         SimplifyBackdropForInteraction();
         ScheduleTimer(
             ref _collapseAnimationWatchdogTimer,
@@ -3217,6 +3268,16 @@ public abstract partial class WidgetWindowBase
             Stopwatch.GetTimestamp(),
             generation,
             () => FinishBoundsTransition(collapsed, generation, "watchdog-recovered"));
+    }
+
+    /// <summary>
+    /// Announces that a compact bounds-transition animation now owns (or has
+    /// released) the UI thread's frame budget. Contents that push incremental
+    /// visual updates — icon hydration batches above all — can hold them until
+    /// the transition releases. Instant transitions never announce activation.
+    /// </summary>
+    protected virtual void OnCompactBoundsTransitionActiveChanged(bool isActive)
+    {
     }
 
     private void CollapseAnimationRendering()
@@ -3961,6 +4022,7 @@ public abstract partial class WidgetWindowBase
             return;
         }
 
+        OnCompactBoundsTransitionActiveChanged(false);
         _isCollapseAnimationRendering = false;
         _collapseAnimationFrameRegistration?.Dispose();
         _collapseAnimationFrameRegistration = null;

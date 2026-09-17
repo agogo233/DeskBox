@@ -31,6 +31,9 @@ public sealed partial class DesktopOrganizationPreviewCard : UserControl, IDispo
     private int _visibleCount = -1;
     private int _iconGeneration;
     private int _selectionAnchor = -1;
+    internal const string PreviewIconCacheScope = "desktop-organization-preview";
+    private const int IconLoadBatchSize = 8;
+    private readonly SemaphoreSlim _iconLoadGate = new(IconLoadBatchSize, IconLoadBatchSize);
     private IReadOnlySet<string> _newPaths = new HashSet<string>();
     private readonly List<DesktopOrganizationDestinationOption> _destinations = [];
 
@@ -351,14 +354,27 @@ public sealed partial class DesktopOrganizationPreviewCard : UserControl, IDispo
     {
         try
         {
-            int pixels = Math.Max(_layout.DecodePixelWidth,
-                (int)Math.Ceiling(_layout.ImageSize * (XamlRoot?.RasterizationScale ?? 1)));
-            var icon = await IconHelper.GetIconAsync(tile.Item.SourcePath,
-                hideShortcutArrowOverlay: hideArrow, showImageFilesAsIcons: imagesAsIcons,
-                decodePixelWidth: pixels, cacheScope: "desktop-organization-preview");
-            if (_disposed || generation != _iconGeneration || icon is null) return;
-            tile.Image.Source = icon;
-            tile.Fallback.Visibility = Visibility.Collapsed;
+            // Tile creation is not batched (tiles appear as the layout
+            // expands), so bound the per-tile icon fan-out here: an unbounded
+            // burst floods the shell scheduler and lands a wave of UI-thread
+            // bitmap decodes while the preview is still animating in.
+            await _iconLoadGate.WaitAsync();
+            try
+            {
+                if (_disposed || generation != _iconGeneration) return;
+                int pixels = Math.Max(_layout.DecodePixelWidth,
+                    (int)Math.Ceiling(_layout.ImageSize * (XamlRoot?.RasterizationScale ?? 1)));
+                var icon = await IconHelper.GetIconAsync(tile.Item.SourcePath,
+                    hideShortcutArrowOverlay: hideArrow, showImageFilesAsIcons: imagesAsIcons,
+                    decodePixelWidth: pixels, cacheScope: PreviewIconCacheScope);
+                if (_disposed || generation != _iconGeneration || icon is null) return;
+                tile.Image.Source = icon;
+                tile.Fallback.Visibility = Visibility.Collapsed;
+            }
+            finally
+            {
+                _iconLoadGate.Release();
+            }
         }
         catch { /* Removed/offline files keep the fallback glyph. */ }
     }

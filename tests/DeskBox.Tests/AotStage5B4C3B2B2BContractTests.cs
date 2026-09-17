@@ -20,6 +20,7 @@ public sealed class AotStage5B4C3B2B2BContractTests
                      "int SourceProcessId = 0",
                      "string? EnvelopeId = null",
                      "NativeAppNotificationActivationSource.NotificationInvokedEvent",
+                     "NativeAppNotificationActivationSource.CurrentAppInstance",
                      "DateTimeOffset.UtcNow",
                      "Environment.ProcessId"
                  })
@@ -42,7 +43,6 @@ public sealed class AotStage5B4C3B2B2BContractTests
                  {
                      "OnNativeNotificationActivationObserved(activation);",
                      "OnTodoNotificationActivationRouteObserved(activation, result);",
-                     "NativeAppNotificationActivationSource.CurrentAppInstance",
                      "envelope.ActivationSource",
                      "envelope.CreatedAtUtc",
                      "envelope.SourceProcessId",

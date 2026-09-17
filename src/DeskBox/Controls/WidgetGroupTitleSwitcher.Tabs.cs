@@ -24,6 +24,10 @@ public sealed partial class WidgetGroupTitleSwitcher
     private string? _pressedTabId;
     private string? _pendingTabSelection;
     private TabDragSnapshot? _tabDragSnapshot;
+    private DispatcherQueueTimer? _dragHoverSwitchTimer;
+    private string? _dragHoverSwitchTargetId;
+
+    private const int DragHoverSwitchDelayMilliseconds = 200;
 
     private bool UsesTabs => WidgetGroupNavigationStyles.Normalize(
         NavigationStyle, allowFollowDefault: false) == WidgetGroupNavigationStyles.Tabs;
@@ -80,6 +84,15 @@ public sealed partial class WidgetGroupTitleSwitcher
             new PointerEventHandler(TabsView_PointerCanceled), handledEventsToo: true);
         TabsView.AddHandler(UIElement.KeyDownEvent,
             new KeyEventHandler(TabsView_KeyDown), handledEventsToo: true);
+        // Drag events must be observed with handledEventsToo: TabView's own
+        // external-tab-drop feature marks DragOver handled, which hides
+        // drags from attribute-wired handlers on this element.
+        TabsView.AddHandler(UIElement.DragOverEvent,
+            new DragEventHandler(TabsView_DragOver), handledEventsToo: true);
+        TabsView.AddHandler(UIElement.DragLeaveEvent,
+            new DragEventHandler(TabsView_DragLeave), handledEventsToo: true);
+        TabsView.AddHandler(UIElement.DropEvent,
+            new DragEventHandler(TabsView_Drop), handledEventsToo: true);
     }
 
     private void SynchronizeTabs()
@@ -402,6 +415,7 @@ public sealed partial class WidgetGroupTitleSwitcher
         _draggingMemberId = memberId;
         _tabSelection.Reset();
         CancelAllHoverSwitches();
+        CancelDragHoverSwitch();
         CancelWheelFeedback();
         args.Data.SetData(DetachDragFormat, memberId);
         args.Data.RequestedOperation = DataPackageOperation.Move;
@@ -416,11 +430,182 @@ public sealed partial class WidgetGroupTitleSwitcher
         // The native list owns in-strip reordering. Other groups are not a
         // supported transfer target; ordinary file drops can still bubble to
         // the existing file-content drop handler.
-        if (args.DataView.Contains(DetachDragFormat) && _tabDragSnapshot is null)
+        if (args.DataView.Contains(DetachDragFormat))
         {
-            args.AcceptedOperation = DataPackageOperation.None;
-            args.Handled = true;
+            // A member transfer must never dwell-switch a tab underneath
+            // its own drag, in either group.
+            CancelDragHoverSwitch();
+            if (_tabDragSnapshot is null)
+            {
+                args.AcceptedOperation = DataPackageOperation.None;
+                args.Handled = true;
+            }
+            return;
         }
+
+        // A file drag is not an external tab drop. Reject that reading so
+        // TabView does not draw its tab-insertion invite while the drag-hover
+        // dwell below runs.
+        args.AcceptedOperation = DataPackageOperation.None;
+    }
+
+    private void TabsView_DragOver(object sender, DragEventArgs args)
+    {
+        if (args.DataView.Contains(DetachDragFormat))
+        {
+            CancelDragHoverSwitch();
+            return;
+        }
+
+        ObserveDragHoverSwitch(FindTabMemberUnderDrag(args), native: false);
+    }
+
+    private void TabsView_DragLeave(object sender, DragEventArgs args)
+    {
+        CancelDragHoverSwitch();
+    }
+
+    private void TabsView_Drop(object sender, DragEventArgs args)
+    {
+        // The drag session has ended. The event itself stays untouched: the
+        // shell's drop handling is authoritative for ordinary file drops.
+        CancelDragHoverSwitch();
+    }
+
+    // Dwelling a file drag over a specific tab switches to that member so the
+    // eventual drop lands inside it. The dwell is deliberately not restarted
+    // while the pointer keeps hovering the same tab; DragOver fires on every
+    // move and a restart would make the switch unreachable. The XAML routed
+    // path and the window's native pointer observation feed the same core.
+    private void ObserveDragHoverSwitch(string? targetId, bool native)
+    {
+        if (targetId is null ||
+            _presentation is null ||
+            string.Equals(_presentation.ActiveMemberId, targetId, StringComparison.Ordinal))
+        {
+            CancelDragHoverSwitch();
+            return;
+        }
+
+        if (string.Equals(_dragHoverSwitchTargetId, targetId, StringComparison.Ordinal) &&
+            _dragHoverSwitchTimer is { IsRunning: true })
+        {
+            return;
+        }
+
+        CancelDragHoverSwitch();
+        _dragHoverSwitchTargetId = targetId;
+        DispatcherQueueTimer timer = DispatcherQueue.CreateTimer();
+        timer.Interval = TimeSpan.FromMilliseconds(DragHoverSwitchDelayMilliseconds);
+        timer.IsRepeating = false;
+        timer.Tick += (_, _) => CommitDragHoverSwitch();
+        _dragHoverSwitchTimer = timer;
+        timer.Start();
+        App.Log(
+            $"[WidgetGroup] Drag-hover dwell start member={targetId} " +
+            $"native={native} group={_presentation.GroupId}");
+    }
+
+    internal void ObserveNativeDragHoverTab(TabViewItem? tab)
+    {
+        ObserveDragHoverSwitch(tab?.Tag as string, native: true);
+    }
+
+    private string? FindTabMemberUnderDrag(DragEventArgs args)
+    {
+        try
+        {
+            foreach (GroupTab row in _tabs.Values)
+            {
+                if (row.Tab.ActualWidth <= 0 || row.Tab.ActualHeight <= 0)
+                {
+                    continue;
+                }
+                // Same per-item coordinate probe the pointer-release commit
+                // uses; per-tab GetPosition survives tabs that are mid-layout.
+                Windows.Foundation.Point point = args.GetPosition(row.Tab);
+                if (point.X >= 0 && point.Y >= 0 &&
+                    point.X <= row.Tab.ActualWidth &&
+                    point.Y <= row.Tab.ActualHeight)
+                {
+                    return (string)row.Tab.Tag;
+                }
+            }
+        }
+        catch (InvalidOperationException)
+        {
+            // A tab that is not in the visual tree cannot be positioned.
+        }
+        return null;
+    }
+
+    private void CommitDragHoverSwitch()
+    {
+        string? targetId = _dragHoverSwitchTargetId;
+        CancelDragHoverSwitch();
+        if (targetId is null)
+        {
+            return;
+        }
+
+        string? reason = ResolveDragHoverSwitchBlockReason(targetId);
+        if (reason is not null)
+        {
+            App.Log(
+                $"[WidgetGroup] Drag-hover dwell blocked member={targetId} " +
+                $"reason={reason}");
+            return;
+        }
+
+        App.Log(
+            $"[WidgetGroup] Drag-hover dwell switch member={targetId} " +
+            $"group={_presentation!.GroupId}");
+        MemberInvoked?.Invoke(
+            this,
+            new WidgetGroupMemberEventArgs(targetId, WidgetGroupSwitchOrigin.DragHover));
+    }
+
+    private string? ResolveDragHoverSwitchBlockReason(string targetId)
+    {
+        if (!UsesTabs)
+        {
+            return "style";
+        }
+        if (_draggingMemberId is not null)
+        {
+            return "detach";
+        }
+        if (IsTabInteractionBusy)
+        {
+            return "busy";
+        }
+        if (_presentation is not { Members.Count: > 1 } presentation)
+        {
+            return "members";
+        }
+        if (string.Equals(presentation.ActiveMemberId, targetId, StringComparison.Ordinal))
+        {
+            return "active";
+        }
+        if (!presentation.Members.Any(member => member.WidgetId == targetId))
+        {
+            return "missing";
+        }
+        // Esc-cancels and drops elsewhere can end the native drag loop without
+        // a DragLeave reaching the strip; a held button certifies the drag is
+        // still alive, matching the tab detach commit check.
+        if (!Win32Helper.IsAnyMouseButtonDown())
+        {
+            return "button";
+        }
+        return null;
+    }
+
+    internal void CancelDragHoverSwitch()
+    {
+        _dragHoverSwitchTimer?.Stop();
+        _dragHoverSwitchTimer = null;
+        _dragHoverSwitchTargetId = null;
     }
 
     private async void TabsView_TabDragCompleted(TabView sender, TabViewTabDragCompletedEventArgs args)

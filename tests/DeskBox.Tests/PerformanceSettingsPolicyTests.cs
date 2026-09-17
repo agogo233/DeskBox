@@ -6,7 +6,7 @@ namespace DeskBox.Tests;
 public sealed class PerformanceSettingsPolicyTests
 {
     [Fact]
-    public void Defaults_ResolveToBalancedWarmRetention()
+    public void Defaults_ResolveToResourceSaverBudget()
     {
         var settings = new AppSettings();
 
@@ -14,14 +14,14 @@ public sealed class PerformanceSettingsPolicyTests
             PerformanceSettingsPolicy.Resolve(settings);
 
         Assert.Equal(
-            PerformanceSettingsPolicy.ModeBalanced,
+            PerformanceSettingsPolicy.ModeResourceSaver,
             effective.Mode);
         Assert.Equal(30, effective.HiddenCacheCleanupDelaySeconds);
-        Assert.Equal(5 * 60, effective.HiddenDeepCleanupDelaySeconds);
-        Assert.Equal(10 * 60, effective.VisibleIdleCacheCleanupDelaySeconds);
-        Assert.Equal(10 * 60, effective.TransientWindowReleaseDelaySeconds);
+        Assert.Equal(60, effective.HiddenDeepCleanupDelaySeconds);
+        Assert.Equal(5 * 60, effective.VisibleIdleCacheCleanupDelaySeconds);
+        Assert.Equal(2 * 60, effective.TransientWindowReleaseDelaySeconds);
         Assert.Equal(
-            PerformanceSettingsPolicy.CacheBudgetBalanced,
+            PerformanceSettingsPolicy.CacheBudgetSmall,
             effective.CacheBudget);
         Assert.Equal(
             PerformanceSettingsPolicy.HiddenCacheCleanupScopeAllRecreatable,

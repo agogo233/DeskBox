@@ -133,11 +133,11 @@ public sealed partial class QuickCaptureWidgetWindow
         EmptyStateIcon.Foreground = GetOrUpdateSolidColorBrush(EmptyStateIcon.Foreground, secondaryForeground);
         SelectionRectangle.Background = GetOrUpdateSolidColorBrush(
             SelectionRectangle.Background,
-            WithAlpha(accentColor, isDark ? (byte)0x2D : (byte)0x24));
+            NeutralInteractionBrush.Fill(SelectionRectangle));
         SelectionRectangle.BorderBrush = GetOrUpdateSolidColorBrush(
             SelectionRectangle.BorderBrush,
-            WithAlpha(accentColor, isDark ? (byte)0xD8 : (byte)0xCC));
-        ApplySearchVisualStyle(isDark, accentColor);
+            NeutralInteractionBrush.Line(SelectionRectangle));
+        ApplySearchVisualStyle(isDark);
         ApplyEditOverlayStyle(isDark, accentColor);
         RefreshSelectedViewSegment();
         RefreshItemMaterialSurfaces();
@@ -243,21 +243,22 @@ public sealed partial class QuickCaptureWidgetWindow
             ViewModel.Config.IsSizeLocked);
     }
 
-    private void ApplySearchVisualStyle(bool isDark, Windows.UI.Color accentColor)
+    private void ApplySearchVisualStyle(bool isDark)
     {
-        var background = BuildAccentSurfaceColor(
-            isDark,
-            accentColor,
-            isDark ? ColorHelper.FromArgb(0xFF, 0x24, 0x27, 0x2D) : ColorHelper.FromArgb(0xFF, 0xFF, 0xFF, 0xFF),
-            accentMix: ViewModel.IsSearchExpanded ? (isDark ? 0.20 : 0.10) : 0.0,
-            overlayMix: isDark ? 0.05 : 0.0);
-
+        // The search field is an input surface, so it follows the inline-rename
+        // precedent: neutral palette whether idle or expanded, no accent wash.
         SearchTextBox.Background = GetOrUpdateSolidColorBrush(
             SearchTextBox.Background,
-            WithAlpha(background, isDark ? (byte)0xE8 : (byte)0xF6));
+            WithAlpha(
+                isDark
+                    ? ColorHelper.FromArgb(0xFF, 0x24, 0x27, 0x2D)
+                    : ColorHelper.FromArgb(0xFF, 0xFF, 0xFF, 0xFF),
+                isDark ? (byte)0xE8 : (byte)0xF6));
         SearchTextBox.BorderBrush = GetOrUpdateSolidColorBrush(
             SearchTextBox.BorderBrush,
-            WithAlpha(accentColor, isDark ? (byte)0xCC : (byte)0xAA));
+            WithAlpha(
+                NeutralInteractionBrush.Line(SearchTextBox),
+                isDark ? (byte)0xCC : (byte)0xAA));
     }
 
     private void ApplyEditOverlayStyle(bool isDark, Windows.UI.Color accentColor)

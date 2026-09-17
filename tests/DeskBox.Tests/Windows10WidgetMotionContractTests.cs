@@ -337,7 +337,7 @@ public sealed class Windows10WidgetMotionContractTests
             "await WidgetManager.RestoreWidgetsAsync();",
             StringComparison.Ordinal);
         int hotkeyIndex = app.IndexOf(
-            "InitializeGlobalHotkeyService(localizationService);",
+            "InitializeGlobalHotkeyService(localizationService)",
             StringComparison.Ordinal);
         Assert.True(restoreIndex >= 0);
         Assert.True(hotkeyIndex > restoreIndex);

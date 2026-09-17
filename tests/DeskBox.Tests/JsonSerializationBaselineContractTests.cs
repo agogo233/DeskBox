@@ -13,7 +13,7 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
         Guid.NewGuid().ToString("N"));
 
     [Fact]
-    public void ProductionInventory_IsFrozenAtTwentyEightFilesAndSixtyFourCalls()
+    public void ProductionInventory_IsFrozenAtThirtyFilesAndSeventyCalls()
     {
         var expected = new Dictionary<string, int>(StringComparer.Ordinal)
         {
@@ -35,13 +35,14 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
             ["src/DeskBox/Services/DeskBoxDataBackupService.cs"] = 11,
             ["src/DeskBox/Services/DeskBoxDiagnosticsBundleService.cs"] = 1,
             ["src/DeskBox/Services/DesktopOrganizationRecoveryStore.cs"] = 2,
+            ["src/DeskBox/Services/FeedbackService.cs"] = 4,
             ["src/DeskBox/Services/GlanceImageService.cs"] = 2,
             ["src/DeskBox/Services/GlanceWidgetStore.cs"] = 7,
             ["src/DeskBox/Services/LocalizationService.cs"] = 1,
-            ["src/DeskBox/Services/MusicSettingsStore.cs"] = 3,
             ["src/DeskBox/Services/NativeNotificationActivationEnvelopeStore.cs"] = 2,
             ["src/DeskBox/Services/QuickCaptureStore.cs"] = 2,
             ["src/DeskBox/Services/SearchHistoryService.cs"] = 2,
+            ["src/DeskBox/Services/SettingsMigrationService.cs"] = 2,
             ["src/DeskBox/Services/SettingsService.cs"] = 2,
             ["src/DeskBox/Services/TodoWidgetStore.cs"] = 2,
             ["src/DeskBox/Services/WeatherService.cs"] = 5,
@@ -65,8 +66,8 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
             Assert.Equal(expectedCount, actual[path]);
         }
 
-        Assert.Equal(29, actual.Count);
-        Assert.Equal(67, actual.Values.Sum());
+        Assert.Equal(30, actual.Count);
+        Assert.Equal(70, actual.Values.Sum());
 
         string[] expectedContextOwners =
         [
@@ -86,10 +87,10 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
             "src/DeskBox/Services/DeskBoxDataBackupService.cs",
             "src/DeskBox/Services/DeskBoxDiagnosticsBundleService.cs",
             "src/DeskBox/Services/DesktopOrganizationRecoveryStore.cs",
+            "src/DeskBox/Services/FeedbackService.cs",
             "src/DeskBox/Services/GlanceImageService.cs",
             "src/DeskBox/Services/GlanceWidgetStore.cs",
             "src/DeskBox/Services/LocalizationService.cs",
-            "src/DeskBox/Services/MusicSettingsStore.cs",
             "src/DeskBox/Services/NativeNotificationActivationEnvelopeStore.cs",
             "src/DeskBox/Services/QuickCaptureStore.cs",
             "src/DeskBox/Services/SearchHistoryService.cs",
@@ -662,8 +663,19 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
             .Order()
             .ToArray();
 
-    private static IEnumerable<string> ProductionSourceFiles() =>
-        TestPaths.EnumerateProductionSourceFiles();
+    private static IEnumerable<string> ProductionSourceFiles()
+    {
+        string projectDirectory = TestPaths.FromRepository("src/DeskBox");
+        return Directory.EnumerateFiles(projectDirectory, "*.cs", SearchOption.AllDirectories)
+            .Where(path =>
+            {
+                string relative = Path.GetRelativePath(projectDirectory, path)
+                    .Replace(Path.DirectorySeparatorChar, '/');
+                return !relative.StartsWith("bin/", StringComparison.OrdinalIgnoreCase) &&
+                       !relative.StartsWith("obj/", StringComparison.OrdinalIgnoreCase) &&
+                       !relative.StartsWith("AppPackages/", StringComparison.OrdinalIgnoreCase);
+            });
+    }
 
     private static string RepositoryRelativePath(string path) =>
         Path.GetRelativePath(TestPaths.FromRepository("."), path)

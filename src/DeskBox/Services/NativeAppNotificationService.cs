@@ -1,3 +1,4 @@
+using Microsoft.Windows.AppLifecycle;
 using Microsoft.Windows.AppNotifications;
 using Microsoft.Windows.AppNotifications.Builder;
 
@@ -64,6 +65,43 @@ public sealed class NativeAppNotificationService : IDisposable
 
     public bool IsRegistered => _isRegistered;
 
+    internal NativeAppNotificationActivation? ReadCurrentActivation()
+    {
+        if (!_isRegistered || _isDisposed)
+            return null;
+        try
+        {
+            var activatedArgs = AppInstance.GetCurrent().GetActivatedEventArgs();
+            if (activatedArgs.Kind == ExtendedActivationKind.AppNotification &&
+                activatedArgs.Data is AppNotificationActivatedEventArgs notificationArgs)
+            {
+                var userInput = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var input in notificationArgs.UserInput)
+                {
+                    if (!string.IsNullOrWhiteSpace(input.Key))
+                    {
+                        userInput[input.Key] = input.Value ?? string.Empty;
+                    }
+                }
+
+                return new NativeAppNotificationActivation(
+                    notificationArgs.Argument,
+                    userInput,
+                    NativeAppNotificationActivationSource.CurrentAppInstance,
+                    DateTimeOffset.UtcNow,
+                    Environment.ProcessId);
+            }
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[Notification] Failed to read native notification activation args: {ex.Message}");
+        }
+
+        return null;
+    }
+
+
+
     public bool Register(bool forceRetry = false)
     {
         if (_isDisposed)
@@ -85,6 +123,14 @@ public sealed class NativeAppNotificationService : IDisposable
         _lastRegisterAttemptAtUtc = DateTimeOffset.UtcNow;
         try
         {
+            // The SDK's Register is a no-op in unsupported processes (for
+            // example elevated ones). Do not mistake that for a usable native
+            // deserializer and read activation arguments with no wait handle.
+            if (!AppNotificationManager.IsSupported())
+            {
+                App.Log("[Notification] Native app notifications are not supported in this process");
+                return false;
+            }
             AppNotificationManager.Default.NotificationInvoked += OnNotificationInvoked;
             AppNotificationManager.Default.Register();
             _isRegistered = true;
@@ -93,7 +139,8 @@ public sealed class NativeAppNotificationService : IDisposable
         }
         catch (Exception ex)
         {
-            AppNotificationManager.Default.NotificationInvoked -= OnNotificationInvoked;
+            try { AppNotificationManager.Default.NotificationInvoked -= OnNotificationInvoked; }
+            catch { /* A failed platform activation must leave ordinary startup available. */ }
             App.Log(
                 $"[Notification] Native app notification registration failed: {ex}");
             LogNotificationPlatformEnvironment();

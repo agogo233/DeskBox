@@ -32,7 +32,11 @@ public sealed record WidgetContentDescriptor(
     WidgetChromeCategory ChromeCategory = WidgetChromeCategory.Interactive,
     WidgetChromeMode DefaultChromeMode = WidgetChromeMode.Standard,
     bool CanUseOverlayChrome = true,
-    bool CanHideChrome = true)
+    bool CanHideChrome = true,
+    // A feature widget is user-enableable: it stays hidden until the user opts
+    // in, and the settings page owns that switch. Defaults to false so a new
+    // kind is never silently gated behind a switch nobody asked for.
+    bool IsFeatureWidget = false)
 {
     public bool HasImplementedContent => ContentStage == WidgetContentStage.Implemented;
     public bool HasPlaceholderContent => ContentStage == WidgetContentStage.Placeholder;

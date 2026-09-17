@@ -7,9 +7,16 @@ public sealed class StartupRegistrationContractTests
     private static readonly string[] StartupStatusKeys =
     [
         "Settings.AutoStart.WindowsDisabled",
+        "Settings.AutoStart.TaskDisabled",
         "Settings.AutoStart.Pending",
         "Settings.AutoStart.Failed",
-        "Settings.AutoStart.OpenSystemSettings"
+        "Settings.AutoStart.OpenSystemSettings",
+        "Settings.AutoStart.Mode.Title",
+        "Settings.AutoStart.Mode.Description",
+        "Settings.AutoStart.Mode.Standard",
+        "Settings.AutoStart.Mode.ScheduledTask",
+        "Settings.AutoStart.Fallback",
+        "Settings.AutoStart.ChangeFailed"
     ];
 
     [Fact]

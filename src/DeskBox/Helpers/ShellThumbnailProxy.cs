@@ -8,10 +8,15 @@ namespace DeskBox.Helpers;
 /// Resolves Explorer thumbnails and Shell-item icons in a short-lived native
 /// process. No Shell handler DLL is ever loaded into the DeskBox process, and
 /// a hung or crashing handler is contained by the per-request timeout.
+/// Concurrently arriving requests are coalesced into one batch process
+/// (see <c>--extract-batch</c> in the native proxy), so process creation,
+/// COM apartment setup, and Shell handler DLL loads are paid once per batch
+/// instead of once per icon. Set DESKBOX_DISABLE_ICON_BATCH=1 to fall back to
+/// the legacy one-process-per-request path.
 /// </summary>
 internal static class ShellThumbnailProxy
 {
-    private enum ShellImageMode
+    internal enum ShellImageMode
     {
         Thumbnail,
         Icon,
@@ -26,7 +31,8 @@ internal static class ShellThumbnailProxy
         int MinX,
         int MinY,
         int MaxX,
-        int MaxY)
+        int MaxY,
+        byte PeakAlpha)
     {
         public int VisibleWidth => MaxX - MinX + 1;
         public int VisibleHeight => MaxY - MinY + 1;
@@ -40,11 +46,32 @@ internal static class ShellThumbnailProxy
     private const long FailureRetryDelayMilliseconds = 30_000;
     private static readonly TimeSpan ExtractionTimeout =
         TimeSpan.FromMilliseconds(2500);
+    private const uint BatchProtocolMagic = 0x4458_4231;
+    private const uint BatchProtocolVersion = 1;
+    private const int MaximumBatchRequests = 8;
+    private static readonly TimeSpan BatchCoalesceWindow =
+        TimeSpan.FromMilliseconds(25);
+    private static readonly TimeSpan BatchExtractionTimeout =
+        TimeSpan.FromMilliseconds(2500);
+    // Safety net so a caller can never hang on a lost or crashed dispatcher;
+    // every batch normally resolves within BatchExtractionTimeout.
+    private static readonly TimeSpan BatchWaiterSafetyTimeout =
+        TimeSpan.FromMilliseconds(6000);
+    private static readonly bool s_batchExtractionDisabled =
+        Environment.GetEnvironmentVariable("DESKBOX_DISABLE_ICON_BATCH") == "1";
+    private static readonly ConcurrentQueue<ProxyBatchRequest> s_batchQueue = new();
+    private static int s_batchDispatchScheduled;
     private static readonly ConcurrentDictionary<string, bool>
         s_registeredProviderByExtension = new(StringComparer.OrdinalIgnoreCase);
     private static readonly ConcurrentDictionary<string, long>
         s_recentFailures = new(StringComparer.OrdinalIgnoreCase);
     private static int s_missingExecutableLogged;
+
+    internal sealed record ProxyBatchRequest(
+        ShellImageMode Mode,
+        string Path,
+        int Size,
+        TaskCompletionSource<byte[]?> Completion);
 
     public static Task<bool> HasRegisteredThumbnailProviderAsync(string path)
     {
@@ -87,10 +114,28 @@ internal static class ShellThumbnailProxy
                 : ShellImageMode.Icon);
     }
 
+    /// <summary>
+    /// Loads a Shell-item icon without cropping a padded canvas, so the caller
+    /// can decide whether a later request would return an icon frame the canvas
+    /// actually fills. <see cref="TryLoadIconAsync"/> keeps cropping for every
+    /// caller that only needs a usable bitmap.
+    /// </summary>
+    public static async Task<byte[]?> TryLoadIconPayloadAsync(
+        string path,
+        int requestedSize)
+    {
+        return await TryLoadAsync(
+            path,
+            requestedSize,
+            ShellImageMode.Icon,
+            normalizeIconPayload: false);
+    }
+
     private static async Task<byte[]?> TryLoadAsync(
         string path,
         int requestedSize,
-        ShellImageMode mode)
+        ShellImageMode mode,
+        bool normalizeIconPayload = true)
     {
         string normalizedPath = NormalizePath(path);
         string failureKey = BuildFailureKey(normalizedPath, mode);
@@ -116,6 +161,65 @@ internal static class ShellThumbnailProxy
         }
 
         int normalizedSize = Math.Clamp(requestedSize, 24, 512);
+        byte[]? output = s_batchExtractionDisabled
+            ? await ExtractViaSingleProcessAsync(
+                executablePath,
+                normalizedPath,
+                normalizedSize,
+                mode)
+            : await ExtractViaBatchAsync(
+                executablePath,
+                normalizedPath,
+                normalizedSize,
+                mode);
+
+        if (output is null || !IsVisibleBitmapPayload(output))
+        {
+            RecordFailure(failureKey);
+            App.LogVerbose(
+                $"[ShellThumbnailProxy] No usable image mode={mode} " +
+                $"path={normalizedPath}");
+            return null;
+        }
+
+        if (normalizeIconPayload &&
+            mode is ShellImageMode.Icon or ShellImageMode.IconWithOverlays)
+        {
+            byte[]? normalizedOutput = NormalizeIconPayload(output);
+            if (normalizedOutput is null)
+            {
+                RecordFailure(failureKey);
+                App.LogVerbose(
+                    $"[ShellThumbnailProxy] Unable to normalize Shell-item icon " +
+                    $"path={normalizedPath}");
+                return null;
+            }
+
+            if (normalizedOutput.Length != output.Length)
+            {
+                App.LogVerbose(
+                    $"[ShellThumbnailProxy] Cropped padded Shell-item icon " +
+                    $"path={normalizedPath}");
+            }
+
+            output = normalizedOutput;
+        }
+
+        s_recentFailures.TryRemove(failureKey, out _);
+        return output;
+    }
+
+    /// <summary>
+    /// Legacy single-request path: one proxy process per extraction. Kept as
+    /// the fallback for <c>DESKBOX_DISABLE_ICON_BATCH=1</c> and for A/B
+    /// comparison against the batched dispatcher.
+    /// </summary>
+    private static async Task<byte[]?> ExtractViaSingleProcessAsync(
+        string executablePath,
+        string normalizedPath,
+        int normalizedSize,
+        ShellImageMode mode)
+    {
         var startInfo = new ProcessStartInfo
         {
             FileName = executablePath,
@@ -142,13 +246,11 @@ internal static class ShellThumbnailProxy
         {
             if (!process.Start())
             {
-                RecordFailure(failureKey);
                 return null;
             }
         }
         catch (Exception ex)
         {
-            RecordFailure(failureKey);
             App.Log(
                 $"[ShellThumbnailProxy] Start failed mode={mode} " +
                 $"path={normalizedPath}: " +
@@ -171,7 +273,6 @@ internal static class ShellThumbnailProxy
             TryKill(process);
             await ObserveExitAsync(process);
             await ObserveOutputAsync(outputTask, errorTask);
-            RecordFailure(failureKey);
             App.Log(
                 $"[ShellThumbnailProxy] Extraction timed out " +
                 $"timeoutMs={ExtractionTimeout.TotalMilliseconds:0} " +
@@ -189,46 +290,281 @@ internal static class ShellThumbnailProxy
         catch (Exception ex)
         {
             TryKill(process);
-            RecordFailure(failureKey);
             App.Log(
                 $"[ShellThumbnailProxy] Invalid proxy output " +
                 $"mode={mode} path={normalizedPath}: {ex.Message}");
             return null;
         }
 
-        if (process.ExitCode != 0 || !IsVisibleBitmapPayload(output))
+        if (process.ExitCode != 0)
         {
-            RecordFailure(failureKey);
             App.LogVerbose(
-                $"[ShellThumbnailProxy] No usable image exit={process.ExitCode} " +
+                $"[ShellThumbnailProxy] Proxy exited {process.ExitCode} " +
                 $"mode={mode} path={normalizedPath} error={error.Trim()}");
             return null;
         }
 
-        if (mode is ShellImageMode.Icon or ShellImageMode.IconWithOverlays)
+        return output;
+    }
+
+    /// <summary>
+    /// Queues one extraction for batch dispatch. Icon hydration fires its
+    /// items concurrently, so requests arriving within the coalesce window
+    /// share a single proxy process instead of each paying process creation,
+    /// COM apartment setup, and Shell handler DLL loads.
+    /// </summary>
+    private static async Task<byte[]?> ExtractViaBatchAsync(
+        string executablePath,
+        string normalizedPath,
+        int normalizedSize,
+        ShellImageMode mode)
+    {
+        var completion = new TaskCompletionSource<byte[]?>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        s_batchQueue.Enqueue(
+            new ProxyBatchRequest(mode, normalizedPath, normalizedSize, completion));
+        ScheduleBatchDispatch(executablePath);
+        try
         {
-            byte[]? normalizedOutput = NormalizeIconPayload(output);
-            if (normalizedOutput is null)
-            {
-                RecordFailure(failureKey);
-                App.LogVerbose(
-                    $"[ShellThumbnailProxy] Unable to normalize Shell-item icon " +
-                    $"path={normalizedPath}");
-                return null;
-            }
+            return await completion.Task.WaitAsync(BatchWaiterSafetyTimeout);
+        }
+        catch (TimeoutException)
+        {
+            return null;
+        }
+    }
 
-            if (normalizedOutput.Length != output.Length)
-            {
-                App.LogVerbose(
-                    $"[ShellThumbnailProxy] Cropped padded Shell-item icon " +
-                    $"path={normalizedPath}");
-            }
-
-            output = normalizedOutput;
+    private static void ScheduleBatchDispatch(string executablePath)
+    {
+        if (Interlocked.Exchange(ref s_batchDispatchScheduled, 1) != 0)
+        {
+            return;
         }
 
-        s_recentFailures.TryRemove(failureKey, out _);
-        return output;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(BatchCoalesceWindow);
+                var batch = new List<ProxyBatchRequest>(MaximumBatchRequests);
+                while (true)
+                {
+                    batch.Clear();
+                    while (batch.Count < MaximumBatchRequests &&
+                        s_batchQueue.TryDequeue(out ProxyBatchRequest? request))
+                    {
+                        batch.Add(request);
+                    }
+
+                    if (batch.Count == 0)
+                    {
+                        break;
+                    }
+
+                    await DispatchBatchAsync(executablePath, batch);
+                }
+            }
+            catch (Exception ex)
+            {
+                App.Log($"[ShellThumbnailProxy] Batch dispatcher failed: {ex.Message}");
+            }
+            finally
+            {
+                Volatile.Write(ref s_batchDispatchScheduled, 0);
+                if (!s_batchQueue.IsEmpty)
+                {
+                    ScheduleBatchDispatch(executablePath);
+                }
+            }
+        });
+    }
+
+    private static async Task DispatchBatchAsync(
+        string executablePath,
+        List<ProxyBatchRequest> batch)
+    {
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = executablePath,
+            WorkingDirectory = AppContext.BaseDirectory,
+            UseShellExecute = false,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true
+        };
+        startInfo.ArgumentList.Add("--extract-batch");
+
+        using var process = new Process { StartInfo = startInfo };
+        var fulfilled = new bool[batch.Count];
+        Task<string>? errorTask = null;
+        try
+        {
+            if (!process.Start())
+            {
+                throw new InvalidOperationException(
+                    "The thumbnail proxy process failed to start.");
+            }
+
+            errorTask = process.StandardError.ReadToEndAsync();
+            WriteBatchManifest(process.StandardInput.BaseStream, batch);
+            using var timeoutSource = new CancellationTokenSource(
+                BatchExtractionTimeout);
+            int failedCount = await ReadBatchFramesAsync(
+                process.StandardOutput.BaseStream,
+                batch,
+                fulfilled,
+                timeoutSource.Token);
+            await process.WaitForExitAsync(timeoutSource.Token);
+            if (failedCount > 0)
+            {
+                // Per-item extraction failures are otherwise silent at the
+                // default log level, which hid a whole class of "icon never
+                // loads" regressions during cold startup (2026-09-14).
+                App.Log(
+                    $"[ShellThumbnailProxy] Batch items failed " +
+                    $"count={failedCount}/{batch.Count}");
+            }
+        }
+        catch (Exception ex)
+        {
+            TryKill(process);
+            await ObserveExitAsync(process);
+            if (errorTask is not null)
+            {
+                try
+                {
+                    _ = await errorTask;
+                }
+                catch
+                {
+                }
+            }
+
+            App.Log(
+                $"[ShellThumbnailProxy] Batch failed count={batch.Count}: {ex.Message}");
+        }
+        finally
+        {
+            for (int index = 0; index < batch.Count; index++)
+            {
+                if (!fulfilled[index])
+                {
+                    batch[index].Completion.TrySetResult(null);
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Writes the count-prefixed batch manifest and closes the stream: the
+    /// count-prefixed proxy reads exactly this many requests, and closing
+    /// stdin signals no more input follows. The writer owns the close (an
+    /// explicit stream close before writer disposal throws
+    /// ObjectDisposedException from the writer's final flush).
+    /// </summary>
+    internal static void WriteBatchManifest(
+        Stream stream,
+        IReadOnlyList<ProxyBatchRequest> batch)
+    {
+        using var writer = new System.IO.BinaryWriter(
+            stream,
+            System.Text.Encoding.UTF8,
+            leaveOpen: false);
+        writer.Write(BatchProtocolMagic);
+        writer.Write(BatchProtocolVersion);
+        writer.Write((uint)batch.Count);
+        foreach (ProxyBatchRequest request in batch)
+        {
+            writer.Write(BatchModeValue(request.Mode));
+            writer.Write((uint)request.Size);
+            byte[] pathBytes = System.Text.Encoding.Unicode.GetBytes(request.Path);
+            writer.Write((uint)pathBytes.Length);
+            writer.Write(pathBytes);
+        }
+
+        writer.Flush();
+    }
+
+    private static uint BatchModeValue(ShellImageMode mode) => mode switch
+    {
+        ShellImageMode.Thumbnail => 0,
+        ShellImageMode.Icon => 1,
+        _ => 2,
+    };
+
+    /// <summary>
+    /// Reads result frames from a batch proxy until every request resolved,
+    /// the proxy exits early, or the caller's cancellation kills the batch.
+    /// Frames may arrive in any order; each request completes as soon as its
+    /// frame lands, so one hung extraction cannot hold its batch-mates back.
+    /// Reports how many frames carried an extraction failure.
+    /// </summary>
+    internal static async Task<int> ReadBatchFramesAsync(
+        Stream stream,
+        IReadOnlyList<ProxyBatchRequest> batch,
+        bool[] fulfilled,
+        CancellationToken cancellationToken)
+    {
+        byte[] header = new byte[12];
+        int remaining = batch.Count;
+        int failedCount = 0;
+        while (remaining > 0)
+        {
+            int headerBytes = await stream.ReadAtLeastAsync(
+                header,
+                header.Length,
+                throwOnEndOfStream: false,
+                cancellationToken).ConfigureAwait(false);
+            if (headerBytes == 0)
+            {
+                // The proxy exited before writing every frame; the dispatcher
+                // fails the requests that never received one.
+                break;
+            }
+
+            if (headerBytes != header.Length)
+            {
+                throw new InvalidDataException(
+                    "The thumbnail proxy returned a truncated batch frame header.");
+            }
+
+            uint index = BitConverter.ToUInt32(header, 0);
+            uint status = BitConverter.ToUInt32(header, 4);
+            uint length = BitConverter.ToUInt32(header, 8);
+            if (index >= (uint)batch.Count || fulfilled[index])
+            {
+                throw new InvalidDataException(
+                    $"The thumbnail proxy returned an invalid batch frame index {index}.");
+            }
+
+            if (status == 0 && (length < 138 || length > MaximumPayloadBytes))
+            {
+                throw new InvalidDataException(
+                    "The thumbnail proxy batch payload size was outside its limit.");
+            }
+
+            byte[] payload = new byte[length];
+            if (length > 0)
+            {
+                await stream.ReadExactlyAsync(payload, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+
+            fulfilled[index] = true;
+            remaining--;
+            if (status == 0)
+            {
+                batch[(int)index].Completion.TrySetResult(payload);
+            }
+            else
+            {
+                failedCount++;
+                batch[(int)index].Completion.TrySetResult(null);
+            }
+        }
+
+        return failedCount;
     }
 
     public static void Invalidate(string path)
@@ -339,14 +675,74 @@ internal static class ShellThumbnailProxy
 
     internal static bool IsLikelyPaddedIconPayload(byte[] bytes)
     {
-        return TryReadVisibleBitmapPayload(
-                   bytes,
-                   out BitmapPayloadInfo payload) &&
-               IconBitmapQuality.IsLikelyPadded(
-                   payload.Width,
-                   payload.Height,
-                   payload.VisibleWidth,
-                   payload.VisibleHeight);
+        if (!TryReadVisibleBitmapPayload(
+                bytes,
+                out BitmapPayloadInfo payload))
+        {
+            return false;
+        }
+
+        BitmapPayloadInfo artwork = ResolveArtworkBounds(bytes, payload);
+        return IconBitmapQuality.IsLikelyPadded(
+            payload.Width,
+            payload.Height,
+            artwork.VisibleWidth,
+            artwork.VisibleHeight);
+    }
+
+    /// <summary>
+    /// Resolves the bounds that read as visible artwork. Pixels below
+    /// <see cref="IconBitmapQuality.SignificantAlphaThreshold"/> are ignored so
+    /// the near-invisible border the Shell paints around a small icon frame it
+    /// centered inside a larger canvas cannot make a padded canvas look full.
+    /// Payloads whose every pixel is that faint keep their non-transparent
+    /// bounds, which preserves the pre-existing behavior for them.
+    /// </summary>
+    private static BitmapPayloadInfo ResolveArtworkBounds(
+        byte[] bytes,
+        BitmapPayloadInfo payload)
+    {
+        byte threshold = IconBitmapQuality.SignificantAlphaThreshold(
+            payload.PeakAlpha);
+        if (payload.PeakAlpha < threshold)
+        {
+            return payload;
+        }
+
+        int rowByteCount = checked(payload.Width * 4);
+        int minX = payload.Width;
+        int minY = payload.Height;
+        int maxX = -1;
+        int maxY = -1;
+        for (int y = 0; y < payload.Height; y++)
+        {
+            int rowStart = checked(payload.PixelOffset + (y * rowByteCount));
+            for (int x = 0; x < payload.Width; x++)
+            {
+                if (bytes[rowStart + (x * 4) + 3] < threshold)
+                {
+                    continue;
+                }
+
+                minX = Math.Min(minX, x);
+                maxX = Math.Max(maxX, x);
+                minY = Math.Min(minY, y);
+                maxY = Math.Max(maxY, y);
+            }
+        }
+
+        if (maxX < minX || maxY < minY)
+        {
+            return payload;
+        }
+
+        return payload with
+        {
+            MinX = minX,
+            MinY = minY,
+            MaxX = maxX,
+            MaxY = maxY
+        };
     }
 
     /// <summary>
@@ -364,19 +760,20 @@ internal static class ShellThumbnailProxy
             return null;
         }
 
+        BitmapPayloadInfo artwork = ResolveArtworkBounds(bytes, payload);
         if (!IconBitmapQuality.IsLikelyPadded(
                 payload.Width,
                 payload.Height,
-                payload.VisibleWidth,
-                payload.VisibleHeight))
+                artwork.VisibleWidth,
+                artwork.VisibleHeight))
         {
             return bytes;
         }
 
         try
         {
-            int cropWidth = payload.VisibleWidth;
-            int cropHeight = payload.VisibleHeight;
+            int cropWidth = artwork.VisibleWidth;
+            int cropHeight = artwork.VisibleHeight;
             int rowByteCount = checked(cropWidth * 4);
             int pixelByteCount = checked(rowByteCount * cropHeight);
             int outputSize = checked(payload.PixelOffset + pixelByteCount);
@@ -396,12 +793,12 @@ internal static class ShellThumbnailProxy
             for (int y = 0; y < cropHeight; y++)
             {
                 int sourceY = payload.SignedHeight < 0
-                    ? payload.MinY + y
-                    : payload.MaxY - y;
+                    ? artwork.MinY + y
+                    : artwork.MaxY - y;
                 int sourceOffset = checked(
                     payload.PixelOffset +
                     (sourceY * sourceRowByteCount) +
-                    (payload.MinX * 4));
+                    (artwork.MinX * 4));
                 int destinationOffset = checked(
                     payload.PixelOffset + (y * rowByteCount));
                 Buffer.BlockCopy(
@@ -464,16 +861,19 @@ internal static class ShellThumbnailProxy
         int minY = parsedHeight;
         int maxX = -1;
         int maxY = -1;
+        byte peakAlpha = 0;
         for (int y = 0; y < parsedHeight; y++)
         {
             int rowStart = checked(pixelStart + (y * rowByteCount));
             for (int x = 0; x < parsedWidth; x++)
             {
-                if (bytes[rowStart + (x * 4) + 3] == 0)
+                byte alpha = bytes[rowStart + (x * 4) + 3];
+                if (alpha == 0)
                 {
                     continue;
                 }
 
+                peakAlpha = Math.Max(peakAlpha, alpha);
                 minX = Math.Min(minX, x);
                 maxX = Math.Max(maxX, x);
                 minY = Math.Min(minY, y);
@@ -494,7 +894,8 @@ internal static class ShellThumbnailProxy
             minX,
             minY,
             maxX,
-            maxY);
+            maxY,
+            peakAlpha);
         return true;
     }
 

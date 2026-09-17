@@ -7,6 +7,13 @@ namespace DeskBox;
 
 public partial class App
 {
+    // A quick hide/show round trip (hotkey toggles) must not pay the
+    // back-fault cost of a trim the user is about to undo. The grace window
+    // also collapses consecutive hide/show cycles into at most one trim.
+    // Any visible transition during the window cancels the pending request,
+    // so only a genuinely hidden session trims.
+    private const int ImmediateHiddenWorkingSetTrimGracePeriodMs = 3000;
+
     private readonly HiddenWorkingSetTrimTracker _immediateHiddenWorkingSetTrimTracker = new();
 
     private bool IsImmediateHiddenWorkingSetTrimEnabled =>
@@ -48,6 +55,7 @@ public partial class App
         }
 
         await manager.WaitForTrayAnimationsIdleAsync();
+        await Task.Delay(ImmediateHiddenWorkingSetTrimGracePeriodMs);
         if (!_immediateHiddenWorkingSetTrimTracker.TryConsume(generation))
         {
             return;

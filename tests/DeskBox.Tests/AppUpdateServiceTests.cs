@@ -25,10 +25,10 @@ public sealed class AppUpdateServiceTests : IDisposable
         Assert.False(AppUpdateService.IsInstallerAssetName("DeskBox_Setup_1.4.3_x64_Full.exe", "x64"));
         Assert.False(AppUpdateService.IsInstallerAssetName("DeskBox_Setup_1.4.3_arm64_Full.exe", "arm64"));
         Assert.True(AppUpdateService.IsInstallerDownloadCompatibleWithArchitecture(
-            "https://example.com/DeskBox_Setup_1.2.4_arm64.exe",
+            "https://deskbox.fun/DeskBox_Setup_1.2.4_arm64.exe",
             "arm64"));
         Assert.False(AppUpdateService.IsInstallerDownloadCompatibleWithArchitecture(
-            "https://example.com/DeskBox_Setup_1.2.4_x64.exe",
+            "https://deskbox.fun/DeskBox_Setup_1.2.4_x64.exe",
             "arm64"));
         Assert.True(AppUpdateService.IsInstallerDownloadCompatibleWithArchitecture(
             "https://example.com/download/latest",
@@ -44,10 +44,10 @@ public sealed class AppUpdateServiceTests : IDisposable
         var manifest = new AppUpdateManifest
         {
             Version = "1.3.8",
-            DownloadUrl = "https://example.com/DeskBox_Setup_1.3.8_x64.exe",
+            DownloadUrl = "https://deskbox.fun/DeskBox_Setup_1.3.8_x64.exe",
             Sha256 = new string('A', 64),
             Size = 101,
-            Arm64DownloadUrl = "https://example.com/DeskBox_Setup_1.3.8_arm64.exe",
+            Arm64DownloadUrl = "https://deskbox.fun/DeskBox_Setup_1.3.8_arm64.exe",
             Arm64Sha256 = new string('B', 64),
             Arm64Size = 202
         };
@@ -64,10 +64,10 @@ public sealed class AppUpdateServiceTests : IDisposable
         var manifest = new AppUpdateManifest
         {
             Version = "1.3.8",
-            DownloadUrl = "https://example.com/DeskBox_Setup_1.3.8_x64.exe",
+            DownloadUrl = "https://deskbox.fun/DeskBox_Setup_1.3.8_x64.exe",
             Sha256 = new string('A', 64),
             Size = 101,
-            Arm64DownloadUrl = "https://example.com/DeskBox_Setup_1.3.8_arm64.exe",
+            Arm64DownloadUrl = "https://deskbox.fun/DeskBox_Setup_1.3.8_arm64.exe",
             Arm64Sha256 = new string('B', 64),
             Arm64Size = 202
         };
@@ -298,7 +298,7 @@ public sealed class AppUpdateServiceTests : IDisposable
         var result = await service.DownloadUpdateAsync(new AppUpdateManifest
         {
             Version = "1.2.2",
-            DownloadUrl = "https://example.com/DeskBox_Setup_1.2.2_x64.exe"
+            DownloadUrl = "https://deskbox.fun/DeskBox_Setup_1.2.2_x64.exe"
         });
 
         Assert.False(result.Success);
@@ -319,7 +319,7 @@ public sealed class AppUpdateServiceTests : IDisposable
         var result = await service.DownloadUpdateAsync(new AppUpdateManifest
         {
             Version = "1.2.2",
-            DownloadUrl = "https://example.com/DeskBox_Setup_1.2.2_x64.exe",
+            DownloadUrl = "https://deskbox.fun/DeskBox_Setup_1.2.2_x64.exe",
             Sha256 = sha256,
             Size = payload.Length
         });
@@ -346,7 +346,7 @@ public sealed class AppUpdateServiceTests : IDisposable
         var result = await service.DownloadUpdateAsync(new AppUpdateManifest
         {
             Version = "1.2.2",
-            DownloadUrl = $"https://example.com/DeskBox_Setup_1.2.2_{otherArchitecture}.exe",
+            DownloadUrl = $"https://deskbox.fun/DeskBox_Setup_1.2.2_{otherArchitecture}.exe",
             Sha256 = sha256,
             Size = payload.Length
         });
@@ -369,7 +369,7 @@ public sealed class AppUpdateServiceTests : IDisposable
         var result = await service.DownloadUpdateAsync(new AppUpdateManifest
         {
             Version = "1.2.2",
-            DownloadUrl = $"https://example.com/DeskBox_Setup_1.2.2_{AppUpdateService.CurrentInstallerArchitectureSuffix}.exe",
+            DownloadUrl = $"https://deskbox.fun/DeskBox_Setup_1.2.2_{AppUpdateService.CurrentInstallerArchitectureSuffix}.exe",
             Sha256 = "00"
         }, cancellationToken: cancellation.Token);
 
@@ -443,5 +443,42 @@ public sealed class AppUpdateServiceTests : IDisposable
         {
             return Task.FromResult(_handler(request));
         }
+    }
+
+    [Theory]
+    [InlineData("https://deskbox.fun/update/DeskBox_Setup.exe", true)]
+    [InlineData("https://cdn.deskbox.fun/DeskBox_Setup.exe", true)]
+    [InlineData("https://github.com/Tianyu199509/DeskBox/releases/download/v1.5.2/DeskBox_Setup.exe", true)]
+    [InlineData("http://deskbox.fun/update/DeskBox_Setup.exe", false)]
+    [InlineData("https://evil.example.com/DeskBox_Setup.exe", false)]
+    [InlineData("https://deskbox.fun.evil.example.com/DeskBox_Setup.exe", false)]
+    [InlineData("https://github.evil.example.com/DeskBox_Setup.exe", false)]
+    [InlineData("https://github.com/attacker/evil/releases/download/v1.0.0/DeskBox_Setup.exe", false)]
+    [InlineData("https://github.com/Tianyu199509/DeskBox/blob/main/DeskBox_Setup.exe", false)]
+    [InlineData("https://objects.githubusercontent.com/some-asset-path", false)]
+    public void IsManifestUsable_PinsTheInstallerOriginToTrustedHttpsHosts(
+        string downloadUrl,
+        bool expected)
+    {
+        var manifest = new AppUpdateManifest
+        {
+            Version = "1.5.2.0",
+            DownloadUrl = downloadUrl
+        };
+
+        Assert.Equal(expected, AppUpdateService.IsManifestUsable(manifest));
+    }
+
+    [Fact]
+    public void IsManifestUsable_RejectsAnUntrustedArm64DownloadUrl()
+    {
+        var manifest = new AppUpdateManifest
+        {
+            Version = "1.5.2.0",
+            DownloadUrl = "https://deskbox.fun/update/DeskBox_Setup_x64.exe",
+            Arm64DownloadUrl = "http://evil.example.com/DeskBox_Setup_arm64.exe"
+        };
+
+        Assert.False(AppUpdateService.IsManifestUsable(manifest));
     }
 }

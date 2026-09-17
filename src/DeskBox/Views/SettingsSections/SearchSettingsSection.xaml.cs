@@ -3,6 +3,7 @@ using DeskBox.Models;
 using DeskBox.Services;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Input;
 using Windows.Storage.Pickers;
 using Windows.System;
@@ -439,6 +440,9 @@ private void UpdateEverythingDashboard(EverythingConnectionSnapshot snapshot)
             SearchHotkeyCaptureButton.Content = GlobalHotkeyService.FormatGesture(gesture, Localization);
         }
 
+        SearchHotkeyPresetAltSpaceButton.IsChecked =
+            gesture.Equals(SearchHotkeyService.AltSpaceGesture);
+
         SearchHotkeyStatusText.Text = settings.SearchHotkeyEnabled && hotkeyAvailable
             ? Localization.T("Settings.Search.Hotkey.Status.Active")
             : Localization.T("Settings.Search.Hotkey.Status.Disabled");
@@ -468,7 +472,7 @@ private void UpdateEverythingDashboard(EverythingConnectionSnapshot snapshot)
         SearchHotkeyCaptureButton.Focus(FocusState.Programmatic);
     }
 
-    private void SearchHotkeyCaptureButton_KeyDown(object sender, KeyRoutedEventArgs e)
+    private async void SearchHotkeyCaptureButton_KeyDown(object sender, KeyRoutedEventArgs e)
     {
         if (!_isRecordingSearchHotkey)
         {
@@ -490,16 +494,74 @@ private void UpdateEverythingDashboard(EverythingConnectionSnapshot snapshot)
 
         var gesture = new GlobalHotkeyGesture(GetPressedHotkeyModifiers(), (int)e.Key);
         EndSearchHotkeyRecording();
+        await ApplySearchHotkeyGestureAsync(gesture);
+        e.Handled = true;
+    }
 
-        if (App.Current.SearchHotkeyService is not { } service || !service.TryApplyGesture(gesture))
+    private async void SearchHotkeyPresetButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_isLoading || sender is not ToggleButton { Tag: "AltSpace" })
         {
-            SearchHotkeyStatusText.Text = Localization.T("Settings.Search.Hotkey.Status.Failed");
-            e.Handled = true;
+            return;
+        }
+
+        await ApplySearchHotkeyGestureAsync(SearchHotkeyService.AltSpaceGesture);
+    }
+
+    private async Task ApplySearchHotkeyGestureAsync(GlobalHotkeyGesture gesture)
+    {
+        if (App.Current.SearchHotkeyService is not { } service)
+        {
+            RefreshSearchHotkeyControls();
+            return;
+        }
+
+        var settings = Settings.Settings;
+        var current = GlobalHotkeyService.NormalizeGesture(
+            settings.SearchHotkeyModifiers,
+            settings.SearchHotkeyKey);
+        if (gesture.Equals(SearchHotkeyService.AltSpaceGesture) &&
+            !gesture.Equals(current) &&
+            !await ConfirmSearchReservedHotkeyOverrideAsync())
+        {
+            RefreshSearchHotkeyControls();
+            return;
+        }
+
+        if (!service.TryApplyGesture(gesture, out string? error))
+        {
+            SearchHotkeyStatusText.Text = error ??
+                Localization.T("Settings.Search.Hotkey.Status.Failed");
             return;
         }
 
         RefreshSearchHotkeyControls();
-        e.Handled = true;
+    }
+
+    private async Task<bool> ConfirmSearchReservedHotkeyOverrideAsync()
+    {
+        if (XamlRoot is null)
+        {
+            return false;
+        }
+
+        var dialog = new ContentDialog
+        {
+            XamlRoot = XamlRoot,
+            Title = GlobalHotkeyService.FormatGesture(
+                SearchHotkeyService.AltSpaceGesture,
+                Localization),
+            PrimaryButtonText = Localization.T("Common.Enable"),
+            CloseButtonText = Localization.T("Common.Cancel"),
+            DefaultButton = ContentDialogButton.Close,
+            Content = new TextBlock
+            {
+                Text = Localization.T("Settings.GlobalHotkey.AltSpaceWarning"),
+                TextWrapping = TextWrapping.Wrap
+            }
+        };
+
+        return await dialog.ShowAsync() == ContentDialogResult.Primary;
     }
 
     private void SearchHotkeyCaptureButton_LostFocus(object sender, RoutedEventArgs e)

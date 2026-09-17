@@ -11,10 +11,51 @@ using Microsoft.UI.Xaml;
 
 namespace DeskBox.Services;
 
+public enum FileWidgetPathConflictKind
+{
+    ManagedStorageRoot,
+    ExistingWidget
+}
+
+/// <summary>
+/// Why a folder cannot be mapped, and which existing surface owns it, so the
+/// UI can resolve the conflict instead of only announcing it.
+/// </summary>
+public sealed record FileWidgetPathConflict(
+    FileWidgetPathConflictKind Kind,
+    WidgetConfig? ConflictingWidget);
+
+public sealed record ManagedStorageMigrationResidue(
+    string WidgetId,
+    string WidgetName,
+    string SourceFolder,
+    string Reason);
+
 public sealed record ManagedStorageMigrationResult(
     int AffectedWidgetCount,
     string OldRootPath,
-    string NewRootPath);
+    string NewRootPath,
+    IReadOnlyList<ManagedStorageMigrationResidue> Residues);
+
+/// <summary>
+/// The migration destination already holds non-empty widget folders, usually
+/// a complete copy left by a previous failed attempt. Proceeding would fork
+/// the trees under "(2)" renamed duplicates, so the caller must clean the
+/// stale destination (recycle bin) before retrying.
+/// </summary>
+public sealed class ManagedStorageDestinationResidueException : Exception
+{
+    internal ManagedStorageDestinationResidueException(
+        IReadOnlyList<string> staleDestinationFolders)
+        : base(
+            "The destination already contains folders from a previous " +
+            "migration attempt.")
+    {
+        StaleDestinationFolders = staleDestinationFolders;
+    }
+
+    public IReadOnlyList<string> StaleDestinationFolders { get; }
+}
 
 public enum WidgetRemovalAction
 {
@@ -821,22 +862,22 @@ public sealed partial class WidgetManager :
         }
 
         using var perfScope = PerformanceLogger.Measure("WidgetManager.RestoreWidgets", $"count={configs.Count}");
-        foreach (var config in configs)
-        {
-            try
+        await StartupWidgetRestoreRunner.RestoreAsync(
+            configs,
+            async config =>
             {
+                // A folder widget with thousands of items can take a while to
+                // restore; each widget proves startup is still progressing.
+                App.MarkStartupProgress();
                 using var widgetPerfScope = PerformanceLogger.Measure(
                     "WidgetManager.RestoreWidget",
                     $"id={config.Id} name={config.Name}");
                 await CreateRegisteredWidgetFromConfigAsync(config);
-            }
-            catch (Exception ex)
+            },
+            (config, ex) =>
             {
                 App.Log($"[WidgetManager] Failed to restore widget '{config.Name}' ({config.Id}): {ex}");
-            }
-
-            await Task.Yield();
-        }
+            });
 
         // A grouped widget owns one persistent content surface.  Restoring
         // only the active member above is normally sufficient, but the host
@@ -1023,6 +1064,29 @@ public sealed partial class WidgetManager :
         string? excludedWidgetId = null,
         bool candidateFollowsDefaultStoragePath = false)
     {
+        if (!TryGetFileWidgetPathConflict(
+                folderPath,
+                out FileWidgetPathConflict? conflict,
+                excludedWidgetId,
+                candidateFollowsDefaultStoragePath) ||
+            conflict is null)
+        {
+            return;
+        }
+
+        throw new InvalidOperationException(_localizationService.Format(
+            "Widget.Error.FileWidgetPathConflict",
+            conflict.Kind == FileWidgetPathConflictKind.ManagedStorageRoot
+                ? _localizationService.T("WidgetTitleIcon.Label.ManagedStorage")
+                : conflict.ConflictingWidget!.Name));
+    }
+
+    public bool TryGetFileWidgetPathConflict(
+        string folderPath,
+        out FileWidgetPathConflict? conflict,
+        string? excludedWidgetId = null,
+        bool candidateFollowsDefaultStoragePath = false)
+    {
         string normalizedPath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(folderPath));
         if (!candidateFollowsDefaultStoragePath)
         {
@@ -1031,13 +1095,14 @@ public sealed partial class WidgetManager :
                     _settingsService.Settings.DefaultManagedStorageRootPath);
             if (FileService.PathsOverlap(normalizedPath, managedStorageRoot))
             {
-                throw new InvalidOperationException(_localizationService.Format(
-                    "Widget.Error.FileWidgetPathConflict",
-                    _localizationService.T("WidgetTitleIcon.Label.ManagedStorage")));
+                conflict = new FileWidgetPathConflict(
+                    FileWidgetPathConflictKind.ManagedStorageRoot,
+                    null);
+                return true;
             }
         }
 
-        WidgetConfig? conflict = _settingsService.Settings.Widgets.FirstOrDefault(widget =>
+        WidgetConfig? conflictingWidget = _settingsService.Settings.Widgets.FirstOrDefault(widget =>
             widget.WidgetKind == WidgetKind.File &&
             !IsDeleted(widget.Id) &&
             !string.Equals(widget.Id, excludedWidgetId, StringComparison.Ordinal) &&
@@ -1046,15 +1111,10 @@ public sealed partial class WidgetManager :
                 normalizedPath,
                 candidateFollowsDefaultStoragePath,
                 widget));
-
-        if (conflict is null)
-        {
-            return;
-        }
-
-        throw new InvalidOperationException(_localizationService.Format(
-            "Widget.Error.FileWidgetPathConflict",
-            conflict.Name));
+        conflict = conflictingWidget is null
+            ? null
+            : new FileWidgetPathConflict(FileWidgetPathConflictKind.ExistingWidget, conflictingWidget);
+        return conflictingWidget is not null;
     }
 
     internal static bool IsFileWidgetPathConflict(
@@ -1408,10 +1468,16 @@ public sealed partial class WidgetManager :
         ClearTemporaryRaiseLease("set-all-hidden");
         SetWidgetsRaisedFromTray(false);
         _sessionManager.MarkHidden("set-all-hidden");
+        long endedRaiseGeneration = _trayRaiseBatchGeneration;
         _trayRaiseBatchGeneration++;
         StopTrayLayerRestoreMonitor();
         SaveBatchVisibilityState();
         await _trayBatchAnimationDriver.WaitForIdleAsync();
+        // Guests are demoted only after the hide animations settle: doing it
+        // at the flag flip would sink them below widgets that are still
+        // fading out in the topmost band. The generation guard keeps guests
+        // re-held by a fast reraise during the await.
+        SweepRaisedBandGuests("set-all-hidden", endedRaiseGeneration);
         App.LogVerbose($"[TrayBatch] SetAllVisible completed visible=false prepared={windowsToHide.Count}");
         ReconcileBackgroundMemoryCleanupForWidgetVisibility(
             "tray-batch-hidden",
@@ -1719,6 +1785,22 @@ public sealed partial class WidgetManager :
         config.Name = newName;
         config.IsDefaultTitle = false;
         _settingsService.UpdateWidget(config);
+        // The managed folder rename already happened on disk. UpdateWidget
+        // only schedules a debounce-delayed save, so a crash or a failed
+        // save inside that window would restore a config that still points
+        // at the old folder name: the widget comes up empty while all of
+        // its files live in the renamed folder. Persist immediately, the
+        // same transactional pattern the group flows use.
+        bool persisted = await _settingsService.FlushPendingSaveAsync(
+            notifySubscribers: false);
+        if (!persisted)
+        {
+            App.Log(
+                $"[WidgetManager] Widget folder renamed on disk but the " +
+                $"settings save failed widget={config.Id} " +
+                $"folder='{config.MappedFolderPath}'");
+        }
+
         if (WidgetGroupSettings.FindByMember(_settingsService.Settings, widgetId) is not null)
         {
             RaiseWidgetGroupsChanged();
@@ -1812,7 +1894,19 @@ public sealed partial class WidgetManager :
                 existingWindow.WindowHandle != IntPtr.Zero &&
                 Win32Helper.IsWindowVisible(existingWindow.WindowHandle))
             {
-                existingWindow.RestoreBoundsForCurrentTopology();
+                try
+                {
+                    existingWindow.RestoreBoundsForCurrentTopology();
+                }
+                catch (Exception ex)
+                {
+                    // Bounds restoration is best-effort: a window that keeps its
+                    // previous bounds is far better than a failed startup.
+                    App.Log(
+                        $"[WidgetGroup] Bounds restore failed group={group.Id} " +
+                        $"active={group.ActiveMemberId}: {ex}");
+                }
+
                 App.Log(
                     $"[WidgetGroup] Kept visible group surface during restore: " +
                     $"group={group.Id}, active={group.ActiveMemberId}, " +
@@ -1898,6 +1992,24 @@ public sealed partial class WidgetManager :
                         continue;
                     }
 
+                    // "Every icon still null" is also the normal mid-pass state
+                    // of a slow cold hydration (8-item batches through a
+                    // 2-slot shell scheduler; a single OneDrive-bound item can
+                    // stall its batch for seconds). Restarting hydration while
+                    // a pass is still running would discard that in-flight
+                    // work, so give it a bounded grace window and only match
+                    // the manual refresh once the pass has actually ended with
+                    // nothing resolved.
+                    if (fileSurface.ViewModel.IsItemHydrationActive)
+                    {
+                        await WaitForItemHydrationToSettleAsync(fileSurface.ViewModel);
+                        if (fileSurface.ViewModel.IsItemHydrationActive ||
+                            fileSurface.ViewModel.Items.Any(item => item.Icon is not null))
+                        {
+                            continue;
+                        }
+                    }
+
                     await fileSurface.RefreshAsync();
                     App.Log(
                         $"[StartupIconRecovery] Refreshed visible grouped file surface " +
@@ -1909,6 +2021,17 @@ public sealed partial class WidgetManager :
                 App.Log($"[WidgetManager] Startup grouped file icon recovery failed: {ex}");
             }
         });
+    }
+
+    private static async Task WaitForItemHydrationToSettleAsync(
+        WidgetViewModel viewModel)
+    {
+        // Bounded grace window (15 × 200 ms) for a legitimately slow cold
+        // pass; the caller re-evaluates once this returns either way.
+        for (int attempt = 0; attempt < 15 && viewModel.IsItemHydrationActive; attempt++)
+        {
+            await Task.Delay(200);
+        }
     }
 
     private bool IsSessionCandidate(WidgetConfig widget)
@@ -1980,6 +2103,7 @@ public sealed partial class WidgetManager :
             $"[TrayBatch] RestoreDesktopLayer force={force} file={_fileWidgets.Count} content={_contentWidgets.Count}");
         ClearTemporaryRaiseLease("raised-session-restored");
         SetWidgetsRaisedFromTray(false);
+        long endedRaiseGeneration = _trayRaiseBatchGeneration;
         _trayRaiseBatchGeneration++;
         StopTrayLayerRestoreMonitor();
         IReadOnlyList<IDesktopWidgetWindow> windows =
@@ -2006,6 +2130,10 @@ public sealed partial class WidgetManager :
         App.LogVerbose(
             $"[TrayBatch] RestoreDesktopLayer group-applied={applied} " +
             $"count={windows.Count} order={FormatIdlePeerOrder(windows)}");
+        // Guests are normally swept by the quick-reveal hide path; this restore
+        // (e.g. a layer-mode switch away from quick reveal) is the second
+        // session-end exit and must not leave orphaned topmost guests.
+        SweepRaisedBandGuests("raised-session-restored", endedRaiseGeneration);
     }
 
     /// <summary>

@@ -1560,10 +1560,10 @@ public sealed partial class QuickCaptureSurfaceContent :
                 button.Tag as string,
                 _detailAppearance.ToString(),
                 StringComparison.Ordinal);
+            // A selected swatch ring is a selection state, so it uses the
+            // neutral strong stroke rather than the accent.
             button.BorderBrush = selected
-                ? new SolidColorBrush(
-                    App.Current.ThemeService?.GetEffectiveAccentColor() ??
-                    AccentColorHelper.DefaultAccentColor)
+                ? new SolidColorBrush(NeutralInteractionBrush.Line(button))
                 : new SolidColorBrush(Colors.Transparent);
             button.BorderThickness = new Thickness(selected ? 1.5 : 1);
         }
@@ -2819,10 +2819,10 @@ public sealed partial class QuickCaptureSurfaceContent :
         bool active,
         bool insertAfter)
     {
+        // Insertion position is a drag state, so it draws the neutral
+        // interaction line rather than the accent.
         border.BorderBrush = active
-            ? new SolidColorBrush(
-                App.Current.ThemeService?.GetEffectiveAccentColor() ??
-                AccentColorHelper.DefaultAccentColor)
+            ? new SolidColorBrush(NeutralInteractionBrush.Line(border))
             : new SolidColorBrush(Colors.Transparent);
         border.BorderThickness = active
             ? insertAfter
@@ -2835,15 +2835,14 @@ public sealed partial class QuickCaptureSurfaceContent :
         Border border,
         bool active)
     {
+        // As in the file surface, a drop target reads as the neutral hover
+        // surface: neutral wash plus a neutral border, with no accent and no
+        // hardcoded fallback colour.
         border.Background = active
-            ? ResolveBrush(
-                "SubtleFillColorSecondaryBrush",
-                Color.FromArgb(0x28, 0x78, 0x9E, 0xFF))
+            ? new SolidColorBrush(NeutralInteractionBrush.Fill(border))
             : new SolidColorBrush(Colors.Transparent);
         border.BorderBrush = active
-            ? new SolidColorBrush(
-                App.Current.ThemeService?.GetEffectiveAccentColor() ??
-                AccentColorHelper.DefaultAccentColor)
+            ? new SolidColorBrush(NeutralInteractionBrush.Line(border))
             : new SolidColorBrush(Colors.Transparent);
         border.BorderThickness = new Thickness(active ? 1 : 0);
     }
@@ -2992,6 +2991,10 @@ public sealed partial class QuickCaptureSurfaceContent :
 
         ApplyDetailMaterialSurface();
         RefreshItemMaterialSurfaces();
+        // The segmented pointer states copy theme-dependent neutral colors at
+        // apply time, so a light/dark flip must re-apply them (parity with the
+        // standalone window's OnRootElementThemeChanged).
+        ApplySegmentedStyle();
     }
 
     private void RefreshItemMaterialSurfaces()

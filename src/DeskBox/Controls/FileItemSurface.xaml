@@ -37,7 +37,7 @@
                 HorizontalAlignment="Center"
                 Spacing="{x:Bind LayoutContext.IconContentSpacing, Mode=OneWay}"
                 Visibility="{x:Bind IconLayoutVisibility, Mode=OneWay}">
-                <Grid HorizontalAlignment="Center" VerticalAlignment="Center">
+                <Grid x:Name="IconItemIconHost" HorizontalAlignment="Center" VerticalAlignment="Center">
                     <Image
                         Width="{x:Bind LayoutContext.IconImageSize, Mode=OneWay}"
                         Height="{x:Bind LayoutContext.IconImageSize, Mode=OneWay}"
@@ -94,7 +94,7 @@
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
-                <Grid Width="{x:Bind LayoutContext.ListIconSize, Mode=OneWay}">
+                <Grid x:Name="ListItemIconHost" Width="{x:Bind LayoutContext.ListIconSize, Mode=OneWay}">
                     <Image
                         Width="{x:Bind LayoutContext.ListIconSize, Mode=OneWay}"
                         Height="{x:Bind LayoutContext.ListIconSize, Mode=OneWay}"
@@ -165,7 +165,7 @@
         MaxWidth="{Binding SurfaceMaxWidth, ElementName=SurfaceRoot}"
         Margin="{Binding SurfaceMargin, ElementName=SurfaceRoot}"
         Padding="{Binding SurfacePadding, ElementName=SurfaceRoot}"
-        CornerRadius="4"
+        CornerRadius="2"
         Loaded="SurfaceBorder_Loaded"
         Unloaded="SurfaceBorder_Unloaded"
         PointerEntered="SurfaceBorder_PointerEntered"

@@ -944,9 +944,17 @@ public sealed class FileSurfaceParityContractTests
             "class StackPopoverInlineRenameWindow : Window",
             stackPopoverRenameWindow,
             StringComparison.Ordinal);
+        // The borderless presenter is applied through the shared degrading
+        // helper: early-logon sessions reject these windowing calls outright.
+        Assert.Contains(
+            "WindowShellState.TryApplyBorderlessOverlappedPresenter(_appWindow);",
+            stackPopoverRenameWindow,
+            StringComparison.Ordinal);
         Assert.Contains(
             "presenter.SetBorderAndTitleBar(false, false)",
-            stackPopoverRenameWindow,
+            File.ReadAllText(Path.Combine(
+                root,
+                "src/DeskBox/Helpers/WindowShellState.cs")),
             StringComparison.Ordinal);
         Assert.Contains(
             "extendedStyle &= ~Win32Helper.WS_EX_NOACTIVATE",
@@ -972,8 +980,14 @@ public sealed class FileSurfaceParityContractTests
             stackPopoverRenameWindow,
             StringComparison.Ordinal);
         Assert.Contains(
-            "IsShownInSwitchers = false",
+            "WindowShellState.TryHideFromSwitchers(_appWindow);",
             stackPopoverRenameWindow,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "appWindow.IsShownInSwitchers = false;",
+            File.ReadAllText(Path.Combine(
+                root,
+                "src/DeskBox/Helpers/WindowShellState.cs")),
             StringComparison.Ordinal);
         Assert.DoesNotContain(
             "new ContentDialog",
@@ -1877,6 +1891,145 @@ public sealed class FileSurfaceParityContractTests
             StringComparison.Ordinal);
         Assert.DoesNotContain("ContentDropHighlight", shell, StringComparison.Ordinal);
         Assert.DoesNotContain("ContentDropHighlight", shellXaml, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ShortcutTiles_LaunchForInternalDragsToo()
+    {
+        // Dragging a tile onto an application-shortcut tile inside the same
+        // widget must open the file with the linked application, exactly like
+        // an Explorer drag does. WinUI does not deliver the routed Drop for a
+        // drag that started from the same ListView, so the release is resolved
+        // from DragItemsCompleted through the shared policy - and the accepted
+        // link result is what makes the source keep its files.
+        string root = FindRepositoryRoot();
+        string visuals = File.ReadAllText(Path.Combine(
+            root,
+            "src/DeskBox/Controls/WidgetContents/FileSurfaceContent.ItemVisuals.cs"));
+        string surface = File.ReadAllText(Path.Combine(
+            root,
+            "src/DeskBox/Controls/WidgetContents/FileSurfaceContent.xaml.cs"));
+        string dragOver = ReadPrivateMethod(
+            visuals,
+            "private void TryHandleLaunchTargetDragOver(");
+        string drop = ReadPrivateMethod(
+            visuals,
+            "private async Task TryHandleLaunchTargetDropAsync(");
+        string launchOnCompletion = ReadPrivateMethod(
+            visuals,
+            "private bool TryLaunchInternalDragOnShortcut(");
+        string completed = ReadPrivateMethod(
+            surface,
+            "private void Items_DragItemsCompleted(");
+
+        Assert.Contains(
+            "ShortcutLaunchPolicy.EvaluateInternalDrag(",
+            dragOver,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "ShortcutLaunchPolicy.EvaluateInternalDrag(",
+            drop,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "PersistSurfaceReorder();",
+            dragOver,
+            StringComparison.Ordinal);
+        // A DeskBox-sourced drag arms the launch only over the tile's icon:
+        // the label and padding keep reorder/import semantics, in both the
+        // DragOver handler and the routed Drop that cross-view drags receive.
+        Assert.Contains(
+            "IsPointerOverLaunchIcon(",
+            dragOver,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "IsPointerOverLaunchIcon(",
+            drop,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "_internalLaunchHoverBorder = launchBorder;",
+            dragOver,
+            StringComparison.Ordinal);
+        // Leaving the icon after arming must disarm: the root feedback path
+        // only clears the folder and stack targets, nothing else.
+        Assert.Contains(
+            "DisarmLaunchHover(",
+            dragOver,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "DisarmLaunchHover(",
+            drop,
+            StringComparison.Ordinal);
+        // The completion resolves the release from the live icon geometry
+        // instead of a point recorded during DragOver.
+        Assert.Contains(
+            "IsCursorInsideLaunchIcon()",
+            visuals,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "Widget.DropOnShortcutOpenWith",
+            dragOver,
+            StringComparison.Ordinal);
+        // The launch hover must read like a plain tile hover (neutral surface,
+        // no accent border), so it uses its own target rather than the folder
+        // drop target's accent visual.
+        Assert.Contains(
+            "SetLaunchDropTarget(launchBorder);",
+            dragOver,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "SetFolderDropTarget(launchBorder);",
+            dragOver,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "FileItemSurfaceVisualState.Hover",
+            ReadPrivateMethod(
+                visuals,
+                "private void SetLaunchDropTarget("),
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "ShortcutLaunchPolicy.ShouldLaunchFromCompletedInternalDrag(",
+            visuals,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "ShouldLaunchFromCompletedInternalDrag(",
+            completed,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "TryLaunchInternalDragOnShortcut(",
+            completed,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "ShortcutFileLauncher.TryLaunchWithFiles(",
+            launchOnCompletion,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "MarkNativeLaunchConsumed();",
+            launchOnCompletion,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "PersistSurfaceReorder();",
+            launchOnCompletion,
+            StringComparison.Ordinal);
+        // A consumed launch never raises the tile's DragLeave, so both
+        // completion paths must clear the launch hover themselves.
+        Assert.Contains(
+            "ClearLaunchDropTarget();",
+            launchOnCompletion,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "ClearLaunchDropTarget();",
+            drop,
+            StringComparison.Ordinal);
+        // A successful launch is silent: the application window is its own
+        // feedback. Only refusals and failures report.
+        Assert.DoesNotContain(
+            "ShowShortcutLaunchFeedback(",
+            visuals + surface,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "ShowShortcutLaunchRefusedFeedback(",
+            launchOnCompletion,
+            StringComparison.Ordinal);
     }
 
     private static string ReadPrivateMethod(string source, string marker)

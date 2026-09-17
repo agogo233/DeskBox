@@ -354,6 +354,8 @@ public const int DefaultSearchMaxResults = 100;
             {
                 [nameof(AppSettings.Language)] = DefaultPreferencePreservationReason.UserChoice,
                 [nameof(AppSettings.AutoStart)] = DefaultPreferencePreservationReason.SystemIntegration,
+                [nameof(AppSettings.AutoStartDefaultApplied)] = DefaultPreferencePreservationReason.SystemIntegration,
+                [nameof(AppSettings.AutoStartMode)] = DefaultPreferencePreservationReason.SystemIntegration,
                 [nameof(AppSettings.FeatureWidgetEnabledStates)] = DefaultPreferencePreservationReason.UserChoice,
                 [nameof(AppSettings.QuickCaptureEnabled)] = DefaultPreferencePreservationReason.UserChoice,
                 [nameof(AppSettings.TodoEnabled)] = DefaultPreferencePreservationReason.UserChoice,
@@ -457,7 +459,6 @@ public const int DefaultSearchMaxResults = 100;
         settings.WidgetMaterialIntensity = DefaultWidgetMaterialIntensity;
         settings.WidgetForegroundMode = WidgetForegroundSettings.ModeFollowTheme;
         settings.WidgetForegroundColor = WidgetForegroundSettings.DefaultCustomColorHex;
-        settings.WidgetTextEdgeMode = WidgetForegroundSettings.EdgeOff;
         settings.WidgetBorderColorMode = WidgetBorderColorModeNeutral;
         settings.WidgetBorderStyle = WidgetBorderStyleThin;
         settings.WidgetAnimationEffect = WidgetAnimationEffectSlideFade;
@@ -690,9 +691,12 @@ settings.FocusClickedWidgetOnRaise = false;
                     }
                 }
 
-                // Run schema migrations if the loaded version is older than current
+                // Run schema migrations if the loaded version is older than current.
+                // Copy-on-write: the pipeline returns the migrated graph (or the
+                // input untouched on failure) and this service swaps the reference.
                 var migrationPipeline = new SettingsMigrationPipeline();
-                changed |= migrationPipeline.RunMigrations(_settings);
+                (_settings, bool migrationsApplied) = migrationPipeline.RunMigrationsOnCopy(_settings);
+                changed |= migrationsApplied;
 
                 // Schema migration treats every existing profile as having resolved
                 // the legacy default file-widget setup. Only a genuinely missing
@@ -2803,11 +2807,14 @@ settings.FocusClickedWidgetOnRaise = false;
             changed = true;
         }
 
-        // Alt+Space is reserved by Windows for the window system menu and cannot be
-        // registered via RegisterHotKey. Reset a saved Alt+Space gesture to the
-        // working default (Alt+D) so the search hotkey functions out of the box.
+        // Alt+Space rides the opt-in reserved hook and can only belong to one
+        // hotkey at a time. When the main hotkey owns it, reset a saved Alt+Space
+        // search gesture to the working default (Alt+D) so search stays usable.
         var searchModifiers = (Models.HotkeyModifierKeys)settings.SearchHotkeyModifiers;
-        if (settings.SearchHotkeyKey == 0x20 && searchModifiers == Models.HotkeyModifierKeys.Alt)
+        if (settings.SearchHotkeyKey == 0x20 && searchModifiers == Models.HotkeyModifierKeys.Alt &&
+            settings.GlobalHotkeyActivationKind == Models.HotkeyActivationKind.Chord &&
+            settings.GlobalHotkeyModifiers == (int)Models.HotkeyModifierKeys.Alt &&
+            settings.GlobalHotkeyKey == 0x20)
         {
             settings.SearchHotkeyModifiers = (int)Models.HotkeyModifierKeys.Alt;
             settings.SearchHotkeyKey = 0x44; // D

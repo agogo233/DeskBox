@@ -38,4 +38,55 @@ public sealed class FileItemSurfaceStyleCacheTests
         Assert.True(selected.A > hover.A);
         Assert.True(selectedHover.A > selected.A);
     }
+
+    [Fact]
+    public void DropTargets_UseTheNeutralHoverSurfaceWithoutAnAccentBorder()
+    {
+        // Folder import, stack add and shortcut launch are one visual family:
+        // the shared cache renders each as the neutral hover surface, so the
+        // accent color never enters a drop visual and no border is drawn.
+        string root = FindRepositoryRoot();
+        string cache = File.ReadAllText(Path.Combine(
+            root,
+            "src/DeskBox/Controls/FileItemSurfaceStyleCache.cs"));
+        string visuals = File.ReadAllText(Path.Combine(
+            root,
+            "src/DeskBox/Controls/WidgetContents/FileSurfaceContent.ItemVisuals.cs"));
+
+        Assert.Contains("bool isDropTarget = false", cache, StringComparison.Ordinal);
+        Assert.Contains("_hoverSurfaceBrush", cache, StringComparison.Ordinal);
+        Assert.Contains("_selectedHoverSurfaceBrush", cache, StringComparison.Ordinal);
+        Assert.DoesNotContain("_dropTargetSurfaceBrush", cache, StringComparison.Ordinal);
+        Assert.DoesNotContain("_dropTargetBorderBrush", cache, StringComparison.Ordinal);
+        Assert.Contains("new Thickness(0)", cache, StringComparison.Ordinal);
+        // The stack drop highlight must not rebuild an accent border or
+        // background either.
+        Assert.DoesNotContain("_stackDropBorderBrush", visuals, StringComparison.Ordinal);
+        Assert.DoesNotContain("_stackDropBrushesInitialized", visuals, StringComparison.Ordinal);
+        Assert.Contains(
+            "isDropTarget: state == FileItemSurfaceVisualState.DropTarget",
+            visuals,
+            StringComparison.Ordinal);
+    }
+
+    private static string FindRepositoryRoot()
+    {
+        DirectoryInfo? current = new(AppContext.BaseDirectory);
+        while (current is not null)
+        {
+            if (File.Exists(Path.Combine(
+                    current.FullName,
+                    "src",
+                    "DeskBox",
+                    "DeskBox.csproj")))
+            {
+                return current.FullName;
+            }
+
+            current = current.Parent;
+        }
+
+        throw new DirectoryNotFoundException(
+            "DeskBox repository root was not found.");
+    }
 }

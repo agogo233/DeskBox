@@ -289,6 +289,36 @@ public sealed class DesktopOrganizationCoordinator
         }
 
         await _organizerService.UndoAsync(historyId, ownerWindowHandle);
+        await CleanupCreatedTargetsAsync(history);
+    }
+
+    /// <summary>
+    /// Stops further restore attempts for an interrupted undo and cleans up
+    /// widgets the operation created that are now empty. The unblock itself
+    /// is durable; widget cleanup is best-effort.
+    /// </summary>
+    public async Task AbandonUndoAsync(string historyId)
+    {
+        OrganizationHistoryEntry? history = await _transaction.AbandonUndoAsync(historyId);
+        if (history is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await CleanupCreatedTargetsAsync(history);
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[DesktopOrganization] Widget cleanup after abandoning restore failed: {ex}");
+        }
+    }
+
+    public Task AbandonPendingRecoveryAsync() => _transaction.AbandonPendingRecoveryAsync();
+
+    private async Task CleanupCreatedTargetsAsync(OrganizationHistoryEntry history)
+    {
         foreach (OrganizationHistoryTarget target in history.Targets)
         {
             if (target.WasCreated && (!Directory.Exists(target.DirectoryPath) ||

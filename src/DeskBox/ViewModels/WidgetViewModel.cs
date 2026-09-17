@@ -27,6 +27,7 @@ public partial class WidgetViewModel : ObservableObject, IDisposable
     private const int ShortcutTargetHydrationBatchSize = 4;
     private const int ShellKindHydrationBatchSize = 8;
     private const int FolderCountHydrationYieldMs = 24;
+    private const int CompactTransitionHydrationPausePollMilliseconds = 33;
 
     private readonly DispatcherQueue _dispatcherQueue;
     private readonly FileService _fileService;
@@ -39,6 +40,8 @@ public partial class WidgetViewModel : ObservableObject, IDisposable
     private readonly WidgetSurfaceActivityTracker _surfaceActivity = new();
     private int _itemHydrationGeneration;
     private CancellationTokenSource? _itemHydrationCancellation;
+    private int _itemHydrationActiveCount;
+    private int _compactTransitionHydrationPauseCount;
     private int _iconDecodePixelWidth;
     private bool _isDisposed;
 
@@ -410,6 +413,7 @@ public partial class WidgetViewModel : ObservableObject, IDisposable
         _settingsService.SettingsChanged += OnSettingsChanged;
         _localizationService.LanguageChanged += OnLanguageChanged;
         InitializeStacks();
+        AttachRenderWindowTracking();
     }
 
     public WidgetViewModel(

@@ -132,7 +132,7 @@ public static class JumpListService
                             app.GetFolderPickerOwnerWindowHandle());
                         if (!string.IsNullOrWhiteSpace(folderPath))
                         {
-                            await app.WidgetManager.CreateFolderWidgetAsync(folderPath);
+                            await app.TryCreateFolderWidgetAsync(folderPath);
                         }
                     }
                     break;

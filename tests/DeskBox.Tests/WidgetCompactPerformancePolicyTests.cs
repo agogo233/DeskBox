@@ -57,6 +57,44 @@ public sealed class WidgetCompactPerformancePolicyTests
     }
 
     [Fact]
+    public void Readiness_ExtendsDeadlineOnlyWhileWarmupCanStillRun()
+    {
+        Assert.Equal(
+            WidgetCompactExpansionReadinessPolicy.ExtendedDeadlineMilliseconds -
+                WidgetCompactExpansionReadinessPolicy.DefaultDeadlineMilliseconds,
+            WidgetCompactExpansionReadinessPolicy.ResolveDeadlineExtensionMilliseconds(
+                warmupActive: true,
+                warmupCanRunNow: true));
+        Assert.Equal(
+            0,
+            WidgetCompactExpansionReadinessPolicy.ResolveDeadlineExtensionMilliseconds(
+                warmupActive: false,
+                warmupCanRunNow: true));
+        Assert.Equal(
+            0,
+            WidgetCompactExpansionReadinessPolicy.ResolveDeadlineExtensionMilliseconds(
+                warmupActive: true,
+                warmupCanRunNow: false));
+        Assert.Equal(
+            0,
+            WidgetCompactExpansionReadinessPolicy.ResolveDeadlineExtensionMilliseconds(
+                warmupActive: false,
+                warmupCanRunNow: false));
+    }
+
+    [Fact]
+    public void Readiness_ExtendedDeadlineStaysWithinPerceptibleHoldBudget()
+    {
+        Assert.True(
+            WidgetCompactExpansionReadinessPolicy.ExtendedDeadlineMilliseconds >
+                WidgetCompactExpansionReadinessPolicy.DefaultDeadlineMilliseconds);
+        Assert.InRange(
+            WidgetCompactExpansionReadinessPolicy.ExtendedDeadlineMilliseconds,
+            200,
+            500);
+    }
+
+    [Fact]
     public void LayerRestore_WaitsForCollapsedSurfaceToCommit()
     {
         Assert.Equal(

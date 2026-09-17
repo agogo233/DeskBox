@@ -96,6 +96,13 @@ public sealed partial class FileService
 
             if (shellLink && shortcutProbe.IsBroken)
             {
+                // Windows resolves links by tracking the file, so a shortcut
+                // whose stored path moved can still open from Explorer. Hand the
+                // link to the shell, and report this separately from a real
+                // dispatch: nothing was launched on this path.
+                App.Log(
+                    $"[OpenItem] branch=shortcut-target-missing path='{itemPath}' " +
+                    $"target='{targetPath}'");
                 using (PerformanceLogger.Measure(
                            "FileService.OpenItem.BrokenShortcutUi",
                            $"kind={kind}"))
@@ -106,7 +113,7 @@ public sealed partial class FileService
                             ownerHwnd);
                     result = resolution == BrokenShortcutResolution.ShortcutDeleted
                         ? OpenItemResult.ShortcutDeleted
-                        : OpenItemResult.OpenedOrHandled;
+                        : OpenItemResult.ShortcutTargetMissing;
                 }
                 trace?.Mark("broken-shortcut-result", $"result={result}");
 
@@ -139,6 +146,15 @@ public sealed partial class FileService
             // remains associated with the widget. The call is deliberately
             // isolated on the STA worker because it can synchronously wait for
             // Explorer, a provider, or a modal Shell dialog.
+            if (!Win32Helper.HasShellOpenAssociation(pathToOpen))
+            {
+                // Both Explorer's dispatch and a local ShellExecuteEx report a
+                // dismissed picker as a silent success. Defer to the UI layer,
+                // whose application picker reports its own outcome.
+                trace?.Mark("no-association", "deferred-to-open-with-picker");
+                return OpenItemResult.RequiresOpenWithPicker;
+            }
+
             using (PerformanceLogger.Measure(
                        "FileService.OpenItem.ShellDispatch",
                        $"kind={kind}"))

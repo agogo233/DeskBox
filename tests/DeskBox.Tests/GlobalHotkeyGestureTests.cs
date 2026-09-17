@@ -69,4 +69,32 @@ public sealed class GlobalHotkeyGestureTests
         Assert.Equal(HotkeyActivationKind.Chord, activation.Kind);
         Assert.Equal((int)VirtualKey.F7, activation.Gesture.VirtualKey);
     }
+
+    [Fact]
+    public void CopilotKeyGesture_IsAValidNonReservedChord()
+    {
+        Assert.Equal(
+            HotkeyModifierKeys.Windows | HotkeyModifierKeys.Shift,
+            GlobalHotkeyService.CopilotKeyGesture.Modifiers);
+        Assert.Equal((int)VirtualKey.F23, GlobalHotkeyService.CopilotKeyGesture.VirtualKey);
+        Assert.True(GlobalHotkeyService.IsValidGesture(GlobalHotkeyService.CopilotKeyGesture));
+        Assert.False(GlobalHotkeyService.IsReservedSystemGesture(GlobalHotkeyService.CopilotKeyGesture));
+        Assert.False(GlobalHotkeyService.IsRiskyGesture(GlobalHotkeyService.CopilotKeyGesture));
+        Assert.Equal(
+            GlobalHotkeyService.CopilotKeyGesture,
+            GlobalHotkeyService.NormalizeGesture(
+                (int)(HotkeyModifierKeys.Windows | HotkeyModifierKeys.Shift),
+                (int)VirtualKey.F23));
+    }
+
+    [Fact]
+    public void SearchAltSpaceGesture_IsAValidReservedSystemGesture()
+    {
+        Assert.Equal(
+            HotkeyModifierKeys.Alt,
+            SearchHotkeyService.AltSpaceGesture.Modifiers);
+        Assert.Equal((int)VirtualKey.Space, SearchHotkeyService.AltSpaceGesture.VirtualKey);
+        Assert.True(GlobalHotkeyService.IsValidGesture(SearchHotkeyService.AltSpaceGesture));
+        Assert.True(GlobalHotkeyService.IsReservedSystemGesture(SearchHotkeyService.AltSpaceGesture));
+    }
 }

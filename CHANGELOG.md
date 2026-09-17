@@ -1,4 +1,142 @@
-﻿# Changelog
+# Changelog
+
+## 1.5.3 - 2026-09-16
+
+### English
+
+#### New features
+
+- Add standard startup and an optional scheduled-task method to direct installations. New users default to standard startup; existing installations keep their active method. Failed task registration can fall back to verified standard startup, failed switches preserve the previous entry, and Windows disable choices are respected.
+
+#### Fixes
+
+- Read scheduled-task definitions and rollback snapshots directly as Unicode so non-ASCII account names and installation paths pass registration verification.
+- Register notifications before decoding activation arguments, preventing the uninitialized notification-deserializer path during notification launches. Queue early notification input until the main instance is ready, and keep ordinary startup available when notifications are unsupported or cannot register.
+- Retry tray creation while the desktop shell starts and terminate fatal initialization failures instead of leaving a headless process holding the instance lock. Extend the watchdog to constructor initialization.
+- Retry failed first-time autostart registration on a later launch without consuming the one-time default marker.
+- Preserve boolean verification results in diagnostic exports while continuing to hide actual paths and account identifiers.
+
+### 中文
+
+#### 新功能
+
+- 为直装版增加标准自启和可选计划任务。新用户默认标准方式，已有安装保留实际生效的方式；任务注册失败时可回退到验证成功的标准自启，切换失败保留旧入口，并尊重 Windows 禁用选择。
+
+#### 修复
+
+- 直接按 Unicode 读取计划任务定义和回滚快照，避免非 ASCII 账户名及安装路径在注册校验时被读错。
+- 先注册通知再解码激活参数，修复通知拉起应用时进入未初始化反序列化路径的问题；初始化期间的通知先排队，等主实例就绪后处理，通知不受支持或注册失败时仍保留普通启动。
+- 在桌面外壳启动期间重试托盘创建，不可恢复的初始化失败会退出，避免留下占用实例锁的无界面进程；看门狗同时覆盖构造阶段。
+- 首次自动开启自启失败后允许后续启动重试，不再提前消耗一次性默认标记。
+- 在诊断导出中保留布尔校验结果，同时继续隐藏实际路径和账户标识。
+
+## 1.5.2 - 2026-09-15
+
+### English
+
+#### Fixes
+
+- File widgets no longer cap their contents at the first 30 items. Folders up to the render threshold show every item again, and larger folders extend the rendered window whenever the visible area is not yet filled (1.5.1 could leave tall widgets stuck at 30 items with no way to reach the rest — reported through the in-app feedback channel).
+
+### 中文
+
+#### 修复
+
+- 修复文件格子最多只显示前 30 个项目的问题。不高于渲染阈值的文件夹恢复显示全部条目，更大的文件夹在可视区域尚未填满时自动扩展渲染窗口（1.5.1 中较高的格子可能停在 30 项且无法查看其余内容——经应用内反馈渠道报告）。
+
+## 1.5.1 - 2026-09-15
+
+### English
+
+#### New features
+
+- Dropping files onto an application shortcut tile now opens them with that application, both for drops from the desktop and drags between widgets; non-executable or unverifiable targets keep the default system behavior.
+- Hovering a file you are dragging over a widget-group tab for a short dwell now switches to that member, so multi-widget groups can be reached without dropping the file first.
+- Added a sixth global hotkey preset for the hardware Copilot key (delivered as Win+Shift+F23 by most keyboards), including the show-desktop special case.
+- In click-collapse mode, clicking a widget's title bar now collapses it directly; the identity area keeps its double-click meaning through a short delayed window.
+- The search popup gains Images and Documents result tabs; switching tabs scrolls back to the top, and the category filter resets for each new query.
+- Added an in-app feedback entry point in Settings that opens the feedback dialog with diagnostics context (delivery depends on the feedback service backend).
+- Direct-install autostart now registers a least-privilege logon task as the single startup entry; the legacy Run key is treated only as a migration source, and a task disabled by the user is never bypassed.
+
+#### Fixes
+
+- Changing the default storage location no longer fails when a widget folder contains read-only files (a common trait of files received over chat apps, cloud drives, or attachment bundles): source cleanup now clears the read-only attribute before deleting and restores it if the delete is blocked.
+- Source cleanup only deletes files that were verifiably copied and unchanged; a file that appears or changes inside the folder during the move is kept in both places instead of being deleted.
+- When the old folder cannot be cleaned up after a complete copy, the migration finishes and offers to move the leftover folders to the recycle bin instead of failing and rolling back; retrying into a folder that still holds a previous attempt's copy offers to clear it first instead of creating "name (2)" duplicates. Dropping folders into widgets, organizing desktop files, and moving a deleted widget's contents back to the desktop share the same fixes.
+- The recommended-apps grid in the search popup now responds to the mouse: single-click selects, double-click opens, and arrow keys plus Enter launch the highlighted card (mouse handling had silently never worked since the grid was introduced), and icons now resolve on the very first open instead of appearing only after reopening the popup.
+- Opening a file with no shell association now raises the system Open With picker instead of appearing dead, success toasts for opens were removed, and the selection ghost after clicking an item is suppressed.
+- Opening a shortcut whose stored target is gone now reports the lost target instead of claiming the request was handed to Windows.
+- Dropping hidden or otherwise undisplayable shortcuts no longer swallows them silently — the drop is rejected as a whole with feedback, so files never land in the folder without a tile.
+- Renaming a widget no longer leaves an empty tile when the on-disk rename lands inside the one-second save debounce window.
+- Capsule transitions are fully repaired: collapsing a widget no longer leaves a residual 4-DIP upward offset on the title bar of the next expansion, and the first expansion after a fresh launch no longer leaves capsule icon and title ghosts floating over the expanded body (both were Composition properties left at their last animation frame or aborted mid-completion).
+- Clicking an item in the native Windows context menu no longer stalls the whole system for one to two seconds: the low-level mouse hook moved off the UI thread onto a dedicated pump thread and unloads as soon as the menu closes.
+- Associated icons whose artwork sits inside a larger transparent canvas no longer shrink inside file tiles; the significant-alpha boundary check re-issues the icon at its native frame size.
+- Organize Desktop recovery is hardened: abandoning an unrecoverable restore has an explicit confirmation and diagnostics path, orphaned recovery journals are cleared, same-volume frees are exempt from the space check, failure messages are specific, and widget-mapping conflicts auto-resolve or reveal the conflicting tiles instead of failing silently.
+- The recycle-bin third-level confirmation can no longer fail to appear in Smart mode because of a missing lease, and deleting a widget whose managed folder is empty now removes the empty folder outright.
+- Search, notes, and other popup windows opened during a quick-reveal (tray or hotkey) session no longer sink below the raised widget layer while it stays on top.
+- Switching the active member of a stack no longer flashes the previous member's tiles; the popover clears and refills its containers on switch.
+- Search-row selection indicators align with the text center, and row heights are cached with a highlight retry after lazy metadata loads.
+- Widget-local failure dialogs (delete and rename failures, the color picker) became in-widget feedback bars and flyouts instead of ContentDialogs that small widget windows clipped.
+- Orphaned todo widget data is cleaned up, and cache directories are excluded from automatic backups.
+
+#### Performance and memory
+
+- File widgets now render a windowed slice of very large folders and hydrate more rows as you scroll, so opening a folder with thousands of files no longer freezes the interface.
+- First launch after a fresh install is faster: shell icon extraction runs as one batched request through the thumbnail proxy instead of per-item broker round trips.
+- New installations now default to the Resource saver performance preset: visible-idle maintenance after 5 minutes, hidden cache release after 30 seconds with full recreatable-cache scope, and the small cache budget. The experimental immediate hidden working-set trim waits 3 seconds after hiding, and quick hide/show round trips trim at most once. Existing settings are never rewritten on upgrade.
+- Marquee selection applies incrementally instead of clearing and refilling the list, display-topology changes (plug, unplug, resolution) are event-driven instead of a two-second poll, and the retired smart animation adapter stack plus throttled text-shadow reconciliation remove idle animation overhead.
+- Capsule expansion animations only animate the properties the transition actually changes, and window bounds commits during animations are batched, removing start/stop cost from opening frames.
+
+#### Interface
+
+- Interaction chrome — the group drop-preview outline, capsule position-rail dots, and title wheel feedback — now draws the neutral interaction tone instead of the accent color and re-resolves correctly on light/dark flips.
+- Corner radii across tiles, search rows, note cards, and todo rows converge to a tighter scale, and the immediate-trim setting documents its 3-second grace window in all 12 languages.
+
+### 中文
+
+#### 新功能
+
+- 拖放文件到应用快捷方式格子上，现在会用该应用打开文件；桌面拖入与格间互拖均支持，非可执行或无法验证的目标仍按系统默认行为处理。
+- 拖动文件时在分组标签上悬停片刻即切换到对应格子，多格组内拖拽不再需要先放下文件。
+- 新增第 6 个全局热键预设：Copilot 实体键（多数键盘以 Win+Shift+F23 上报），并处理了系统显示桌面的特判。
+- 点击收起模式下，点击格子标题栏即直接收起；身份区通过短暂的延迟双击窗口保留原有双击语义。
+- 搜索弹窗新增图片与文档结果 Tab；切换 Tab 滚动回到顶部，分类筛选随新查询自动重置。
+- 设置中新增应用内一键反馈入口，带诊断上下文打开反馈弹窗（实际送达依赖反馈服务后端）。
+- 直装版自启动改为注册最小权限登录任务作为唯一启动入口；旧 Run 键仅作为迁移来源，用户禁用的任务不会被绕过。
+
+#### 修复
+
+- 修改默认收纳路径不再因格子文件夹里有只读文件而失败（聊天工具、网盘、附件包收到的文件常带只读属性）：清理源目录前会先清除只读属性，删除受阻时恢复原属性。
+- 源目录清理只删除已确认复制且未发生变化的文件；搬移期间在文件夹里新出现或被修改的文件会在两边同时保留，绝不会被误删。
+- 复制完成后旧文件夹清不掉时，迁移正常完成并提供把残留文件夹移入回收站的选项，而不是判为失败并回滚；重试的目标里还有上次留下的副本时，会先提示清理而不是复制出一堆「名称 (2)」。拖文件夹进格子、整理桌面文件、删除格子时把内容移回桌面走同一套修复。
+- 搜索弹窗推荐区的应用图标现在响应鼠标：单击选中、双击打开、方向键加 Enter 启动高亮卡片（该区域自上线以来鼠标操作一直静默无效），并且图标在首次打开时即可解析显示，不再需要第二次打开。
+- 双击无文件关联的文件现在弹出系统「打开方式」选择器而不是毫无反应；打开成功的 toast 提示已移除，点击后的选中残留也被抑制。
+- 打开目标已丢失的快捷方式现在明确提示目标丢失，不再谎报"已交给系统打开"。
+- 拖入隐藏属性或无法显示的快捷方式不再被静默吞掉——整笔拒绝并给出反馈，文件不会进目录后凭空没有格子。
+- 重命名格子不再因磁盘改名落在一秒保存防抖窗口内而留下空格子。
+- 胶囊过渡彻底修复：收起格子后再次展开，标题栏不再残留 4 DIP 的上移偏移；全新安装后首次展开胶囊，展开区域中间不再残留胶囊图标与标题（两者分别是合成动画属性停在最后一帧、以及完成链被异常中断所致）。
+- 点击 Windows 原生右键菜单项不再令整机卡顿 1-2 秒：底层鼠标钩子从 UI 线程移到专职泵线程，菜单关闭即卸载。
+- 关联图标画布带大透明边距时不再在文件格子内缩水；显著 alpha 边界检测会按原始帧尺寸重新取图。
+- 整理桌面恢复强化：不可恢复的放弃有明确确认与诊断出口、孤儿恢复日志被清理、同卷释放豁免空间检查、报错信息具体化、格子映射冲突自动解决或揭示冲突格子，不再静默失败。
+- 回收站第三级确认不再因缺少租约而在 Smart 模式下弹不出；删除管理文件夹已空的格子时直接删除空文件夹。
+- 快捷唤起（托盘或热键）期间打开的搜索、随记等弹窗不再沉到置顶的格子层下面。
+- 切换叠放活动成员不再闪现前一成员的瓦片；弹层在切换时清空并重填容器。
+- 搜索行选中指示条与文字中心对齐；行高缓存并在懒加载元数据后重试高亮。
+- 格子内的失败弹窗（删除、重命名失败与取色器）改为应用内反馈条与 Flyout，不再被小窗口裁剪。
+- 清理孤儿待办数据，自动备份不再包含缓存目录。
+
+#### 性能与内存
+
+- 文件格子对超大文件夹改为窗口化渲染，滚动时按需水合更多行，打开上千文件的文件夹不再卡死界面。
+- 全新安装后的首次启动更快：Shell 图标提取改为通过缩略图代理单次批量请求，不再逐项往返。
+- 全新安装的默认性能预设改为「节省资源」：可见空闲维护 5 分钟、隐藏后 30 秒释放全部可重建缓存、较小缓存预算。实验性的「隐藏后立即裁剪工作集」改为隐藏 3 秒后执行，连续隐藏/显示最多裁剪一次。升级安装绝不改写既有设置。
+- 框选改为增量应用不再清空重填；显示器拓扑变化（插拔、分辨率）改为事件驱动不再 2 秒轮询；退役智能动画适配栈并节流文本阴影对账，消除空闲动画开销。
+- 胶囊展开动画只动画该过渡实际变化的属性，动画期间的窗口边界提交改为批量合并，消除起始帧的启停开销。
+
+#### 界面
+
+- 交互元素——组拖放预览描边、胶囊位置指示点、标题滚轮反馈——改用中性交互色，不再跟随强调色，亮暗主题切换即时正确刷新。
+- 瓦片、搜索行、随记卡片与待办条目的圆角收敛到更紧凑的档位；「隐藏后立即裁剪」设置在全部 12 种语言中说明了 3 秒宽限窗口。
 
 ## 1.6.0 - Unreleased
 

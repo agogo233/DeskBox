@@ -284,6 +284,7 @@ public partial class SettingsViewModel
         OnPropertyChanged(nameof(PinQuickAccessButtonText));
         OnPropertyChanged(nameof(PinQuickAccessToolTipText));
         OnPropertyChanged(nameof(AutoStartStatusText));
+        OnPropertyChanged(nameof(AvailableAutoStartModeOptions));
         OnPropertyChanged(nameof(GlobalHotkeyDescription));
         OnPropertyChanged(nameof(GlobalHotkeyWarningText));
         OnPropertyChanged(nameof(GlobalHotkeyText));

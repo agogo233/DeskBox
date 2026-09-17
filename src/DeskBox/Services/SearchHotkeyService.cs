@@ -1,18 +1,20 @@
 using System.Runtime.InteropServices;
 using DeskBox.Helpers;
 using DeskBox.Models;
+using Windows.System;
 
 namespace DeskBox.Services;
 
 /// <summary>
-/// Manages the global hotkey for invoking the search popup.
-/// Uses the standard Win32 RegisterHotKey + WM_HOTKEY mechanism only.
-/// No WH_KEYBOARD_LL low-level hook — that hook intercepted every keystroke
-/// of the gesture key (e.g. 'D'), risking stuck keys and input latency.
+/// Manages the global hotkey for invoking the search popup. Ordinary gestures
+/// use the standard Win32 RegisterHotKey + WM_HOTKEY mechanism; the opt-in
+/// Alt+Space preset rides the reserved low-level hook, matching how the main
+/// hotkey handles system-reserved gestures.
 /// </summary>
 public sealed class SearchHotkeyService : IDisposable
 {
     private const int SearchHotkeyId = 0x4444;
+    private const uint WmReservedSearchHotkey = 0x8444;
     private const uint ModAlt = 0x0001;
     private const uint ModControl = 0x0002;
     private const uint ModShift = 0x0004;
@@ -20,26 +22,37 @@ public sealed class SearchHotkeyService : IDisposable
     private static readonly UIntPtr SubclassId = new(0x4444);
 
     private readonly SettingsService _settingsService;
+    private readonly LocalizationService _localizationService;
     private readonly Func<Task> _invokeAsync;
     private readonly Win32Helper.SubclassProc _subclassProc;
+    private readonly ReservedHotkeyHookService _reservedHotkeyHook = new();
     private IntPtr _windowHandle;
     private bool _isSubclassInstalled;
     private bool _isRegistered;
+    private bool _usesReservedHook;
     private bool _isInvoking;
     private long _receivedSequence;
     private long _invocationSequence;
     private long _dispatchFailureSequence;
 
+    public static GlobalHotkeyGesture AltSpaceGesture { get; } = new(
+        HotkeyModifierKeys.Alt,
+        (int)VirtualKey.Space);
+
     public SearchHotkeyService(
         SettingsService settingsService,
+        LocalizationService localizationService,
         Func<Task> invokeAsync)
     {
         _settingsService = settingsService;
+        _localizationService = localizationService;
         _invokeAsync = invokeAsync;
         _subclassProc = WindowSubclassProc;
     }
 
-    public bool IsRegistered => _isRegistered;
+    public bool IsRegistered => _isRegistered &&
+        (!_usesReservedHook || _reservedHotkeyHook.IsActive);
+    public bool UsesReservedHook => _usesReservedHook && IsRegistered;
     public long ReceivedCount => Interlocked.Read(ref _receivedSequence);
     public long InvocationCount => Interlocked.Read(ref _invocationSequence);
     public long DispatchFailureCount => Interlocked.Read(ref _dispatchFailureSequence);
@@ -92,6 +105,12 @@ public sealed class SearchHotkeyService : IDisposable
         }
 
         var gesture = CurrentGesture;
+        if (gesture.Equals(AltSpaceGesture))
+        {
+            ApplyReservedAltSpaceGesture();
+            return;
+        }
+
         if (gesture.Modifiers.HasFlag(HotkeyModifierKeys.Windows) ||
             !GlobalHotkeyService.IsValidGesture(gesture))
         {
@@ -109,12 +128,81 @@ public sealed class SearchHotkeyService : IDisposable
         }
     }
 
+    private void ApplyReservedAltSpaceGesture()
+    {
+        if (IsGestureOwnedByMainHotkey())
+        {
+            App.Log("[SearchHotkey] Alt+Space is owned by the main hotkey; staying unregistered");
+            return;
+        }
+
+        if (IsReservedHookDisabledByEnvironment())
+        {
+            App.Log("[SearchHotkey] Reserved hotkey hook disabled by environment");
+            return;
+        }
+
+        bool hookStarted;
+        int hookError;
+        try
+        {
+            hookStarted = _reservedHotkeyHook.TryStart(
+                _windowHandle,
+                WmReservedSearchHotkey,
+                ReservedHotkeyMode.AltSpace,
+                out hookError);
+        }
+        catch (Exception ex)
+        {
+            hookStarted = false;
+            hookError = Marshal.GetHRForException(ex);
+            App.Log($"[SearchHotkey] Reserved hook startup threw: {ex}");
+        }
+
+        if (hookStarted)
+        {
+            _isRegistered = true;
+            _usesReservedHook = true;
+            App.Log("[SearchHotkey] Registered reserved gesture=Alt + Space mode=hook");
+            return;
+        }
+
+        App.Log($"[SearchHotkey] Reserved hook registration failed error={hookError}");
+    }
+
+    internal bool IsGestureOwnedByMainHotkey()
+    {
+        return App.Current?.GlobalHotkeyService?.CurrentActivation is
+            { Kind: HotkeyActivationKind.Chord } activation &&
+            activation.Gesture.Equals(AltSpaceGesture);
+    }
+
+    private static bool IsReservedHookDisabledByEnvironment()
+    {
+        string? value = Environment.GetEnvironmentVariable("DESKBOX_DISABLE_RESERVED_HOTKEY_HOOK");
+        return string.Equals(value, "1", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(value, "true", StringComparison.OrdinalIgnoreCase);
+    }
+
     public bool TryApplyGesture(GlobalHotkeyGesture gesture)
     {
+        return TryApplyGesture(gesture, out _);
+    }
+
+    public bool TryApplyGesture(GlobalHotkeyGesture gesture, out string? error)
+    {
+        error = null;
         gesture = GlobalHotkeyService.NormalizeGesture((int)gesture.Modifiers, gesture.VirtualKey);
         if (gesture.Modifiers.HasFlag(HotkeyModifierKeys.Windows) ||
             !GlobalHotkeyService.IsValidGesture(gesture))
         {
+            error = _localizationService.T("Settings.GlobalHotkey.Status.Invalid");
+            return false;
+        }
+
+        if (gesture.Equals(AltSpaceGesture) && IsGestureOwnedByMainHotkey())
+        {
+            error = _localizationService.T("Settings.Search.Hotkey.Status.GlobalHotkeyConflict");
             return false;
         }
 
@@ -184,6 +272,24 @@ public sealed class SearchHotkeyService : IDisposable
 
     private IntPtr WindowSubclassProc(IntPtr hWnd, uint message, UIntPtr wParam, IntPtr lParam, UIntPtr uIdSubclass, UIntPtr dwRefData)
     {
+        if (message == WmReservedSearchHotkey && _usesReservedHook)
+        {
+            long reservedReceivedId = Interlocked.Increment(ref _receivedSequence);
+            // The Alt+Space hook path owns its Alt key-up state and never
+            // injects synthetic modifier releases.
+            if (App.UiDispatcherQueue.TryEnqueue(() =>
+            {
+                _ = InvokeAsync();
+            }))
+            {
+                return IntPtr.Zero;
+            }
+
+            Interlocked.Increment(ref _dispatchFailureSequence);
+            App.Log($"[SearchHotkey] UI dispatch rejected id={reservedReceivedId}");
+            return IntPtr.Zero;
+        }
+
         if (message == GlobalHotkeyService.WmHotkey &&
             wParam.ToUInt32() == SearchHotkeyId)
         {
@@ -237,12 +343,24 @@ public sealed class SearchHotkeyService : IDisposable
 
     private void Unregister()
     {
-        if (_isRegistered && _windowHandle != IntPtr.Zero)
+        if (_usesReservedHook || _reservedHotkeyHook.IsActive)
+        {
+            try
+            {
+                _reservedHotkeyHook.Stop();
+            }
+            catch (Exception ex)
+            {
+                App.Log($"[SearchHotkey] Reserved hook removal failed: {ex}");
+            }
+        }
+        else if (_isRegistered && _windowHandle != IntPtr.Zero)
         {
             Win32Helper.UnregisterHotKey(_windowHandle, SearchHotkeyId);
         }
 
         _isRegistered = false;
+        _usesReservedHook = false;
     }
 
     private void RemoveSubclass()
@@ -310,5 +428,6 @@ public sealed class SearchHotkeyService : IDisposable
     public void Dispose()
     {
         Detach();
+        _reservedHotkeyHook.Dispose();
     }
 }

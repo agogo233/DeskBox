@@ -133,6 +133,9 @@ public sealed partial class DesktopOrganizationTaskView : UserControl
             UpdateRecoveryState();
             var pendingUndo = App.Current.SettingsService.Settings.RecentOrganizationHistory.FirstOrDefault(entry =>
                 entry.ActionType == OrganizationActionType.DesktopOrganization && entry.UndoStarted && entry.CanUndo);
+            AbandonUndoButton.Visibility = pendingUndo is not null
+                ? Visibility.Visible
+                : Visibility.Collapsed;
             if (pendingUndo is not null)
             {
                 _lastHistoryId = pendingUndo.Id;
@@ -141,7 +144,8 @@ public sealed partial class DesktopOrganizationTaskView : UserControl
                 ResultInfo.Severity = InfoBarSeverity.Warning;
                 ResultInfo.Title = T("DesktopOrganization.Public.UndoPendingTitle");
                 ResultInfo.Message = Format("DesktopOrganization.Public.UndoPending",
-                    pendingUndo.Items.Count(item => item.IsRestored), pendingUndo.Items.Count(item => !item.IsRestored));
+                    pendingUndo.Items.Count(item => item.IsRestored), pendingUndo.Items.Count(item => !item.IsRestored)) +
+                    BuildStuckItemSummary(pendingUndo);
                 ResultInfo.IsOpen = true;
             }
         }
@@ -207,6 +211,7 @@ public sealed partial class DesktopOrganizationTaskView : UserControl
         _pendingRecovery = null;
         UndoButton.Visibility = Visibility.Collapsed;
         UndoButton.Content = T("DesktopOrganization.Layout.Undo");
+        AbandonUndoButton.Visibility = Visibility.Collapsed;
         DoneButton.Visibility = Visibility.Collapsed;
         CancelButton.Visibility = Visibility.Visible;
         ExecuteButton.Visibility = Visibility.Visible;
@@ -271,7 +276,28 @@ public sealed partial class DesktopOrganizationTaskView : UserControl
         CancelButton.Content = T("DesktopOrganization.Window.Cancel");
         RetryPublicButton.Content = T("DesktopOrganization.Layout.RetryRemaining");
         RecoverButton.Content = T("DesktopOrganization.Public.Recover");
-        RecoveryInfo.Message = T("DesktopOrganization.Public.RecoveryPending");
+        RecoveryInfoText.Text = T("DesktopOrganization.Public.RecoveryPending");
+        AbandonRecoveryButton.Content = T("DesktopOrganization.Public.AbandonRestore");
+        AbandonUndoButton.Content = T("DesktopOrganization.Public.AbandonRestore");
         DoneButton.Content = T("DesktopOrganization.Window.Done");
+    }
+
+    // The banner counts alone never told users WHICH files kept the restore
+    // pending; name the first few so the message is actionable.
+    private static string BuildStuckItemSummary(OrganizationHistoryEntry entry)
+    {
+        List<OrganizationHistoryItem> stuck = entry.Items.Where(item => !item.IsRestored).ToList();
+        if (stuck.Count == 0)
+        {
+            return string.Empty;
+        }
+
+        string names = string.Join("、", stuck.Take(3).Select(item => item.Name));
+        if (stuck.Count > 3)
+        {
+            names += " " + Format("DesktopOrganization.Public.AbandonMoreItems", stuck.Count - 3);
+        }
+
+        return "\n" + Format("DesktopOrganization.Public.StuckItemSummary", names);
     }
 }

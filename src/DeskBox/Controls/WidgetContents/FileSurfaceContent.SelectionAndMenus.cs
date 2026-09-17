@@ -160,8 +160,15 @@ public sealed partial class FileSurfaceContent
         }
     }
 
-    private void HandleItemsPointerCaptureLost(ListViewBase listView) =>
+    private void HandleItemsPointerCaptureLost(ListViewBase listView)
+    {
         FinishBoxSelection(listView);
+        // Capture loss ends the gesture that staged the drag snapshot. A
+        // stale snapshot keeps the deactivation selection clear guarded
+        // (it reads as an active drag) exactly when the app opened from a
+        // mid-press double-click has just taken the foreground away.
+        _pendingPointerDragItems = [];
+    }
 
     private bool CanStartBoxSelection(object? originalSource)
     {
@@ -225,13 +232,33 @@ public sealed partial class FileSurfaceContent
             }
         }
 
+        // A marquee spends most of its life not changing the selection: the
+        // pointer moves, the rectangle moves, but the same items stay inside it.
+        // Re-applying in that case would clear and re-add every item (one
+        // selection notification each) and walk the whole visual tree for
+        // visuals that are already correct.
+        var current = new HashSet<WidgetItem>(
+            listView.SelectedItems.OfType<WidgetItem>());
+        if (current.SetEquals(selected))
+        {
+            return;
+        }
+
         _isSynchronizingSelection = true;
         try
         {
-            listView.SelectedItems.Clear();
+            // Only the delta is touched, so crossing a few items costs a few
+            // notifications instead of one per item per pointer move.
+            foreach (WidgetItem item in current
+                         .Where(item => !selected.Contains(item))
+                         .ToArray())
+            {
+                listView.SelectedItems.Remove(item);
+            }
+
             foreach (WidgetItem item in listView.Items
                          .OfType<WidgetItem>()
-                         .Where(selected.Contains))
+                         .Where(item => selected.Contains(item) && !current.Contains(item)))
             {
                 listView.SelectedItems.Add(item);
             }
@@ -318,6 +345,29 @@ public sealed partial class FileSurfaceContent
         _stackPopoverItemsView?.SelectedItems.Clear();
         UpdateSelectionCommandBar();
         RefreshItemSelectionVisuals();
+    }
+
+    private void RegisterOpenedItemSelectionSuppression(WidgetItem item)
+    {
+        _openedItemSelectionSuppression[item.Path] =
+            Environment.TickCount64 + OpenedSelectionSuppressionMs;
+    }
+
+    private bool IsOpenSelectionSuppressed(WidgetItem item)
+    {
+        if (_openedItemSelectionSuppression.TryGetValue(
+                item.Path,
+                out long until))
+        {
+            if (Environment.TickCount64 < until)
+            {
+                return true;
+            }
+
+            _openedItemSelectionSuppression.Remove(item.Path);
+        }
+
+        return false;
     }
 
     private void ClearSelection() => ClearItemSelection();
@@ -1373,6 +1423,7 @@ public sealed partial class FileSurfaceContent
     {
         ResetBoxSelectionState();
         _pendingPointerDragItems = [];
+        _openedItemSelectionSuppression.Clear();
         _pressedStack = null;
         _stackPointerDragStarted = false;
         ItemsGrid.SelectedItems.Clear();

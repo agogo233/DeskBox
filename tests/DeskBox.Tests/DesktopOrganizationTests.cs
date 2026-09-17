@@ -651,20 +651,21 @@ public sealed class DesktopOrganizationTests : IDisposable
         });
         var store = new DesktopOrganizationRecoveryStore(
             Path.Combine(_root, "pending-recovery.json"));
+        var item = new DesktopOrganizationRecoveryItem
+        {
+            SourcePath = sourcePath,
+            DestinationPath = destinationPath,
+            TargetWidgetId = "temporary",
+            Completed = true
+        };
+        // A real crash after RecordCompleted persists the destination object
+        // identity alongside the receipt.
+        DesktopOrganizationTransaction.RecordDestinationIdentity(item, destinationPath);
         await store.SaveAsync(new DesktopOrganizationRecoveryJournal
         {
             TransactionId = "transaction",
             CreatedWidgetIds = ["temporary"],
-            Items =
-            [
-                new DesktopOrganizationRecoveryItem
-                {
-                    SourcePath = sourcePath,
-                    DestinationPath = destinationPath,
-                    TargetWidgetId = "temporary",
-                    Completed = false
-                }
-            ]
+            Items = [item]
         });
 
         int restored = await new DesktopOrganizationTransaction(
@@ -680,6 +681,123 @@ public sealed class DesktopOrganizationTests : IDisposable
         Assert.DoesNotContain(settings.Settings.RecentOrganizationHistory, entry => entry.Id == "transaction");
         Assert.False(store.HasPendingJournal);
 
+    }
+
+    [Fact]
+    public async Task RecoverPendingAsync_KeepsItemsWithoutRecordedIdentity()
+    {
+        // Items without a destination identity (legacy journals, or the rare
+        // crash between the physical move and the receipt write) have no
+        // automatic restore authority: the file stays at the destination and
+        // the journal keeps the record.
+        string root = Directory.CreateDirectory(Path.Combine(_root, "identity-none")).FullName;
+        string desktopPath = Path.Combine(root, "desktop");
+        string storagePath = Path.Combine(root, "storage");
+        Directory.CreateDirectory(desktopPath);
+        Directory.CreateDirectory(storagePath);
+        string destinationPath = Path.Combine(storagePath, "moved.txt");
+        File.WriteAllText(destinationPath, "already moved");
+        var settings = new SettingsService(Path.Combine(root, "settings"));
+        var store = new DesktopOrganizationRecoveryStore(
+            Path.Combine(root, "pending-recovery.json"));
+        await store.SaveAsync(new DesktopOrganizationRecoveryJournal
+        {
+            TransactionId = "transaction",
+            CreatedWidgetIds = ["temporary"],
+            Items =
+            [
+                new DesktopOrganizationRecoveryItem
+                {
+                    SourcePath = Path.Combine(desktopPath, "moved.txt"),
+                    DestinationPath = destinationPath,
+                    TargetWidgetId = "temporary",
+                    Completed = true,
+                    DestinationIdentity = null
+                }
+            ]
+        });
+
+        int restored = await new DesktopOrganizationTransaction(
+            settings,
+            new FileService(),
+            store).RecoverPendingAsync();
+
+        Assert.Equal(0, restored);
+        Assert.True(
+            File.Exists(destinationPath),
+            "no identity means no automatic move");
+    }
+
+    [Fact]
+    public async Task Undo_PartialFailureRetryMovesOnlyTheRemainingItem()
+    {
+        // A retry after a partial undo must not touch the already-restored
+        // item: its undo target is gone and re-running it would relocate
+        // whatever reappeared at that path.
+        string root = Directory.CreateDirectory(Path.Combine(_root, "undo-retry")).FullName;
+        string desktopPath = Path.Combine(root, "desktop");
+        string widgetPath = Path.Combine(root, "widget");
+        Directory.CreateDirectory(desktopPath);
+        Directory.CreateDirectory(widgetPath);
+        string firstSource = Path.Combine(desktopPath, "first.txt");
+        string secondSource = Path.Combine(desktopPath, "second.txt");
+        File.WriteAllText(firstSource, "first");
+        File.WriteAllText(secondSource, "second");
+        // The widget-side objects must exist before their identities are
+        // captured as undo receipts (a real move records them on arrival).
+        File.WriteAllText(Path.Combine(widgetPath, "first.txt"), "first");
+        File.WriteAllText(Path.Combine(widgetPath, "second.txt"), "second");
+        var settings = new SettingsService(Path.Combine(root, "settings"));
+        var history = new OrganizationHistoryEntry
+        {
+            Id = "undo-retry",
+            ActionType = OrganizationActionType.MoveBackToDesktop,
+            CanUndo = true,
+            Items =
+            [
+                new OrganizationHistoryItem
+                {
+                    Name = "first.txt",
+                    SourcePath = firstSource,
+                    DestinationPath = Path.Combine(widgetPath, "first.txt"),
+                    DestinationIdentity = FileService.CaptureUndoReceiptIdentity(
+                        Path.Combine(widgetPath, "first.txt"))
+                },
+                new OrganizationHistoryItem
+                {
+                    Name = "second.txt",
+                    SourcePath = secondSource,
+                    DestinationPath = Path.Combine(widgetPath, "second.txt"),
+                    DestinationIdentity = FileService.CaptureUndoReceiptIdentity(
+                        Path.Combine(widgetPath, "second.txt"))
+                }
+            ]
+        };
+        settings.Settings.RecentOrganizationHistory.Add(history);
+        await settings.SaveAsync(notifySubscribers: false);
+        // Simulate the state after a partial undo: the first item was already
+        // restored to the desktop (its data still sits at the widget path,
+        // which is exactly the trap — moving it again would duplicate), the
+        // second is still in the widget.
+        File.WriteAllText(firstSource, "first");
+        history.Items[0].IsRestored = true;
+        history.Items[0].RestoredPath = firstSource;
+        await settings.SaveAsync(notifySubscribers: false);
+
+        var service = new OrganizerService(
+            settings,
+            new FileService(),
+            () => desktopPath);
+        await service.UndoAsync("undo-retry");
+
+        Assert.True(history.IsUndone);
+        Assert.Equal(
+            "second",
+            await File.ReadAllTextAsync(secondSource));
+        Assert.False(
+            File.Exists(Path.Combine(desktopPath, "first (2).txt")),
+            "the retry must never duplicate the restored item");
+        Assert.Single(Directory.GetFiles(desktopPath, "first*.txt"));
     }
 
     private DesktopOrganizationFileSnapshot Snapshot(

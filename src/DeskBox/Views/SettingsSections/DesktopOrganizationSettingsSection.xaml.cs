@@ -222,6 +222,7 @@ public sealed partial class DesktopOrganizationSettingsSection : UserControl
             RuleStatusInfo.Title = T("DesktopOrganization.Public.UndoPendingTitle");
             RuleStatusInfo.Message = Format("DesktopOrganization.Public.UndoPending", ex.RestoredCount, ex.RemainingCount);
             RuleStatusInfo.IsOpen = true;
+            AttachAbandonRestoreAction(historyId);
             Refresh();
         }
         catch (Exception ex)
@@ -234,6 +235,67 @@ public sealed partial class DesktopOrganizationSettingsSection : UserControl
             RuleStatusInfo.IsOpen = true;
             UndoOrganizationButton.IsEnabled = true;
         }
+    }
+
+    // A restore that can never finish (files moved away by hand) used to
+    // keep "开始整理" disabled forever; this action is the way out.
+    private void AttachAbandonRestoreAction(string historyId)
+    {
+        var abandon = new Button
+        {
+            Content = T("DesktopOrganization.Public.AbandonRestore")
+        };
+        abandon.Click += async (_, _) =>
+        {
+            abandon.IsEnabled = false;
+            try
+            {
+                var app = global::DeskBox.App.Current;
+                var entry = app.SettingsService.Settings.RecentOrganizationHistory
+                    .FirstOrDefault(candidate => string.Equals(candidate.Id, historyId, StringComparison.Ordinal));
+                if (entry is not { CanUndo: true } || app.WidgetManager is not { } widgetManager)
+                {
+                    Refresh();
+                    return;
+                }
+
+                if (!await Controls.DesktopOrganizationAbandonDialog.ConfirmAsync(
+                        XamlRoot,
+                        app.LocalizationService,
+                        Controls.DesktopOrganizationAbandonDialog.BuildItemDetails(app.LocalizationService, entry)))
+                {
+                    abandon.IsEnabled = true;
+                    return;
+                }
+
+                var coordinator = new DesktopOrganizationCoordinator(
+                    app.SettingsService,
+                    app.FileService,
+                    widgetManager,
+                    app.OrganizerService,
+                    app.LocalizationService);
+                await coordinator.AbandonUndoAsync(historyId);
+                RuleStatusInfo.ActionButton = null;
+                RuleStatusInfo.Severity = InfoBarSeverity.Success;
+                RuleStatusInfo.Title = T("DesktopOrganization.Public.AbandonDone");
+                RuleStatusInfo.Message = string.Empty;
+                RuleStatusInfo.IsOpen = true;
+            }
+            catch (Exception ex)
+            {
+                App.Log($"[DesktopOrganization] Abandon restore from settings failed: {ex}");
+                RuleStatusInfo.ActionButton = null;
+                RuleStatusInfo.Severity = InfoBarSeverity.Error;
+                RuleStatusInfo.Title = T("DesktopOrganization.Undo.Failed");
+                RuleStatusInfo.Message = T("DesktopOrganization.Undo.FailedBody");
+                RuleStatusInfo.IsOpen = true;
+            }
+            finally
+            {
+                Refresh();
+            }
+        };
+        RuleStatusInfo.ActionButton = abandon;
     }
 
     private void WidgetSearchBox_TextChanged(AutoSuggestBox sender, AutoSuggestBoxTextChangedEventArgs args)

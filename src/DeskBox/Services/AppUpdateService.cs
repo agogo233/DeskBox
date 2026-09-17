@@ -438,7 +438,47 @@ public sealed partial class AppUpdateService : IAppUpdateService
         return manifest is not null &&
             manifest.SchemaVersion == 1 &&
             !string.IsNullOrWhiteSpace(manifest.Version) &&
-            Uri.TryCreate(manifest.DownloadUrl, UriKind.Absolute, out _);
+            Uri.TryCreate(manifest.DownloadUrl, UriKind.Absolute, out Uri? downloadUri) &&
+            IsTrustedInstallerDownloadUri(downloadUri) &&
+            (string.IsNullOrWhiteSpace(manifest.Arm64DownloadUrl) ||
+                (Uri.TryCreate(manifest.Arm64DownloadUrl, UriKind.Absolute, out Uri? arm64Uri) &&
+                    IsTrustedInstallerDownloadUri(arm64Uri)));
+    }
+
+    /// <summary>
+    /// The installer may only come from DeskBox's own distribution hosts over
+    /// HTTPS. The manifest hash proves integrity but not authenticity: a
+    /// compromised feed can serve a malicious installer together with its own
+    /// correct hash, so the origin itself has to be pinned.
+    /// </summary>
+    private static bool IsTrustedInstallerDownloadUri(Uri uri)
+    {
+        if (!string.Equals(uri.Scheme, "https", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (IsHostOrSubdomain(uri, "deskbox.fun"))
+        {
+            return true;
+        }
+
+        // GitHub hosts third-party repositories, so trusting the whole domain
+        // would let a tampered manifest point at any attacker repository with
+        // a matching hash. Only this project's own release downloads count;
+        // the actual asset bytes arrive via redirect from
+        // objects.githubusercontent.com, which the HTTP client follows and
+        // which therefore must never be trusted as a manifest origin itself.
+        return string.Equals(uri.Host, "github.com", StringComparison.OrdinalIgnoreCase) &&
+            uri.AbsolutePath.StartsWith(
+                "/Tianyu199509/DeskBox/releases/download/",
+                StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsHostOrSubdomain(Uri uri, string domain)
+    {
+        return uri.Host.Equals(domain, StringComparison.OrdinalIgnoreCase) ||
+            uri.Host.EndsWith("." + domain, StringComparison.OrdinalIgnoreCase);
     }
 
     internal static bool TrySelectInstallerForArchitecture(

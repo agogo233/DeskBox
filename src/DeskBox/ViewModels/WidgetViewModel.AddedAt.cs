@@ -57,7 +57,7 @@ public partial class WidgetViewModel
         {
             addedAt = preferred ?? DateTimeOffset.Now;
             Config.FileAddedAtByPath[item.Path] = addedAt;
-            PersistAddedAtTracking();
+            PersistAddedAtTrackingIfNeeded();
         }
 
         item.AddedAt = addedAt;
@@ -73,7 +73,7 @@ public partial class WidgetViewModel
         EnsureAddedAtDictionaryComparer();
         Config.FileAddedAtByPath[path] = addedAt;
         Config.FileAddedAtTrackingInitialized = true;
-        PersistAddedAtTracking();
+        PersistAddedAtTrackingIfNeeded();
     }
 
     private void TransferFileAddedAt(string oldPath, string newPath)
@@ -84,7 +84,7 @@ public partial class WidgetViewModel
             : DateTimeOffset.Now;
         Config.FileAddedAtByPath.Remove(oldPath);
         Config.FileAddedAtByPath[newPath] = addedAt;
-        PersistAddedAtTracking();
+        PersistAddedAtTrackingIfNeeded();
     }
 
     private void RemoveFileAddedAt(string path)
@@ -92,8 +92,27 @@ public partial class WidgetViewModel
         EnsureAddedAtDictionaryComparer();
         if (Config.FileAddedAtByPath.Remove(path))
         {
-            PersistAddedAtTracking();
+            PersistAddedAtTrackingIfNeeded();
         }
+    }
+
+    /// <summary>
+    /// Every AddedAt mutation used to hit the settings debounce pipeline
+    /// immediately — a 2000-file import therefore rescheduled the save once
+    /// per file (plus once more per upsert through AssignAddedAt). Inside a
+    /// batch mutation scope the dictionary mutations are free and the persist
+    /// happens once, at the scope finalization.
+    /// </summary>
+    private void PersistAddedAtTrackingIfNeeded()
+    {
+        if (_itemMutationBatchDepth > 0)
+        {
+            _addedAtPersistPending = true;
+            MarkItemMutationBatchDirty();
+            return;
+        }
+
+        PersistAddedAtTracking();
     }
 
     private void ResetAddedAtTracking()

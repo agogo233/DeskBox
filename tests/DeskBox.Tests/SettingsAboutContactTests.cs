@@ -3,7 +3,7 @@
 public sealed class SettingsAboutContactTests
 {
     [Fact]
-    public void AboutSection_ShowsFeedbackEmailAndNoRepositoryButton()
+    public void AboutSection_UsesInAppFeedbackAndExposesNoEmailOrRepositoryButton()
     {
         string root = FindRepositoryRoot();
         string xaml = File.ReadAllText(Path.Combine(
@@ -24,6 +24,9 @@ public sealed class SettingsAboutContactTests
         string storeActions = File.ReadAllText(Path.Combine(
             root,
             "src/DeskBox/Views/SettingsWindow.StorageAndUpdates.cs"));
+        string feedbackView = File.ReadAllText(Path.Combine(
+            root,
+            "src/DeskBox/Views/SettingsWindow.Feedback.cs"));
         string project = File.ReadAllText(Path.Combine(
             root,
             "src/DeskBox/DeskBox.csproj"));
@@ -66,11 +69,28 @@ public sealed class SettingsAboutContactTests
                     StringComparison.Ordinal)));
 
         Assert.Contains("Settings.About.FeedbackTitle", xaml, StringComparison.Ordinal);
-        Assert.Contains("FeedbackEmailButton", xaml, StringComparison.Ordinal);
+        Assert.Contains("ShowFeedbackDialogButton_Click", xaml, StringComparison.Ordinal);
+        Assert.Contains("Settings.About.FeedbackSendButton", xaml, StringComparison.Ordinal);
         Assert.Contains("x:Name=\"AboutRightPanel\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Spacing=\"6\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("1047078635@qq.com", viewModel, StringComparison.Ordinal);
-        Assert.Contains("FeedbackEmailButton.HorizontalAlignment", responsiveLayout, StringComparison.Ordinal);
+        // In-app feedback replaced the email channel entirely: no address, no mailto.
+        Assert.DoesNotContain("FeedbackEmailButton", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("1047078635@qq.com", viewModel, StringComparison.Ordinal);
+        Assert.DoesNotContain("FeedbackEmail", viewModel, StringComparison.Ordinal);
+        Assert.DoesNotContain("FeedbackEmail", aboutViewModel, StringComparison.Ordinal);
+        Assert.DoesNotContain("FeedbackEmail", responsiveLayout, StringComparison.Ordinal);
+        Assert.DoesNotContain("FeedbackEmail", storeActions, StringComparison.Ordinal);
+        Assert.DoesNotContain("mailto", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("EmailFallback", feedbackView, StringComparison.Ordinal);
+        Assert.DoesNotContain("mailto", feedbackView, StringComparison.Ordinal);
+        Assert.DoesNotContain("EmailFallback", File.ReadAllText(Path.Combine(
+            root,
+            "src/DeskBox/Strings/en-US.json")), StringComparison.Ordinal);
+        Assert.Empty(ProductionSourcesContaining(root, "FeedbackEmail"));
+        Assert.Empty(ProductionSourcesContaining(root, "1047078635"));
+        // mailto stays legal inside the markdown renderer (Uri.UriSchemeMailto), but no
+        // UI surface may offer an email entry point.
+        Assert.Empty(ProductionSourcesContaining(root, "mailto", "Views", "ViewModels"));
         Assert.Contains("Grid.SetRow(AboutRightPanel", responsiveLayout, StringComparison.Ordinal);
         Assert.Contains("x:Name=\"AboutMeDialog\"", xaml, StringComparison.Ordinal);
         Assert.Contains("ShowAboutMeButton_Click", xaml, StringComparison.Ordinal);
@@ -125,6 +145,33 @@ public sealed class SettingsAboutContactTests
         Assert.DoesNotContain("AboutVersionTextBlock", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("AboutDeveloperText", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("Settings.Dialog.AboutMeP3", xaml, StringComparison.Ordinal);
+    }
+
+    private static string[] ProductionSourcesContaining(
+        string root,
+        string needle,
+        params string[] relativeDirectories)
+    {
+        string projectDirectory = Path.Combine(root, "src", "DeskBox");
+        IEnumerable<string> searchRoots = relativeDirectories.Length == 0
+            ? [projectDirectory]
+            : relativeDirectories.Select(directory => Path.Combine(projectDirectory, directory));
+
+        return searchRoots
+            .SelectMany(directory => Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories))
+            .Where(path =>
+            {
+                string relative = Path.GetRelativePath(projectDirectory, path)
+                    .Replace(Path.DirectorySeparatorChar, '/');
+                return !relative.StartsWith("bin/", StringComparison.OrdinalIgnoreCase) &&
+                       !relative.StartsWith("obj/", StringComparison.OrdinalIgnoreCase) &&
+                       !relative.StartsWith("AppPackages/", StringComparison.OrdinalIgnoreCase) &&
+                       !relative.StartsWith("artifacts/", StringComparison.OrdinalIgnoreCase);
+            })
+            .Where(path => File.ReadAllText(path).Contains(needle, StringComparison.OrdinalIgnoreCase))
+            .Select(path => Path.GetRelativePath(root, path))
+            .Order()
+            .ToArray();
     }
 
     private static int CountOccurrences(string source, string value)

@@ -7,7 +7,7 @@ English | [简体中文](README.zh-CN.md)
 > External pull requests are not being merged at this time — bug reports, ideas, and discussions are very welcome via Issues / Discussions. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 [![CI](https://github.com/Tianyu199509/DeskBox/actions/workflows/ci.yml/badge.svg)](https://github.com/Tianyu199509/DeskBox/actions/workflows/ci.yml)
-[![Latest release](https://img.shields.io/badge/release-1.5.0-2563EB.svg)](https://github.com/Tianyu199509/DeskBox/releases/tag/v1.5.0)
+[![Release 1.5.3](https://img.shields.io/badge/release-1.5.3-2563EB.svg)](https://github.com/Tianyu199509/DeskBox/releases/tag/v1.5.3)
 [![Windows 10/11](https://img.shields.io/badge/Windows-10%2F11-0078D4.svg)](#system-requirements)
 [![x64 and ARM64](https://img.shields.io/badge/architecture-x64%20%7C%20ARM64-5C2D91.svg)](#download)
 [![License: GPL v3](https://img.shields.io/badge/license-GPLv3-blue.svg)](LICENSE)
@@ -40,10 +40,10 @@ All twelve selectable languages share the same resource-key and formatting-place
 
 ## Download
 
-The current stable release is DeskBox 1.5.0, available from [GitHub Releases](https://github.com/Tianyu199509/DeskBox/releases/tag/v1.5.0).
+DeskBox 1.5.3 is prepared for release. The [GitHub Releases](https://github.com/Tianyu199509/DeskBox/releases/tag/v1.5.3) download links below will become available after publication.
 
-- [DeskBox 1.5.0 for x64](https://github.com/Tianyu199509/DeskBox/releases/download/v1.5.0/DeskBox_Setup_1.5.0_x64.exe), recommended for most Intel and AMD PCs.
-- [DeskBox 1.5.0 for ARM64](https://github.com/Tianyu199509/DeskBox/releases/download/v1.5.0/DeskBox_Setup_1.5.0_arm64.exe), recommended for Snapdragon, Surface Pro X, and other Windows on ARM PCs.
+- [DeskBox 1.5.3 for x64](https://github.com/Tianyu199509/DeskBox/releases/download/v1.5.3/DeskBox_Setup_1.5.3_x64.exe), recommended for most Intel and AMD PCs.
+- [DeskBox 1.5.3 for ARM64](https://github.com/Tianyu199509/DeskBox/releases/download/v1.5.3/DeskBox_Setup_1.5.3_arm64.exe), recommended for Snapdragon, Surface Pro X, and other Windows on ARM PCs.
 
 Both packages are Full Native AOT builds with the matching private Windows App Runtime 2.4, so they can install offline without downloading a separate .NET 10 or Windows App Runtime package.
 
@@ -125,49 +125,35 @@ Every release also publishes a matching `.sha256` sidecar for each installer. Th
 - Back up and restore settings, and export a privacy-filtered diagnostics package for troubleshooting.
 - Recover settings from resilient snapshots, flush pending changes during shutdown, and report save failures instead of silently reverting to defaults.
 
-## What's new in 1.5.0
+## What's new in 1.5.3
 
-- **Automatic data snapshots.** Backups now run on a configurable schedule (every 5 minutes to every 5 days) with 3–30 retained snapshots and an optional custom directory that falls back safely with a notification when unavailable.
-- **Redesigned Organize Desktop with Public Desktop support.** A desktop preview card with clear per-file selection, re-scans that keep your choices, resumable interrupted operations, and an optional shared Public Desktop source.
-- **Folder shortcuts navigate in place.** A `.lnk` pointing inside the widget's own tree opens inside the file widget instead of File Explorer.
-- **Sharper, correct icons.** Files, folders, and `desktop.ini` custom icons use 256-px Shell icons with overlays; `.url` icons (including Steam covers) resolve through the Shell.
-- **More control over text and menus.** Independent list/content text sizes for Quick Capture and Todo, a Glance clock 12/24-hour format option, and an optional native Windows context menu for single file tiles.
-- **Reliable rename and drag completion.** Inline rename fields receive typing reliably in every entry point, and internal reorders can no longer trigger Shell shortcut cleanup.
-- **Lower memory, faster Settings.** Settings sections load on demand and search works before sections are created; thumbnail payloads read zero-copy, and widget title bars are more compact.
+- **Choose how DeskBox starts with Windows.** Direct installations offer standard startup by default for new users and an optional scheduled task. Existing methods are preserved, failed task registration can fall back to verified standard startup, and Windows disable choices are respected.
+- **Enable scheduled startup with Unicode paths.** Task definitions are read directly as Unicode, avoiding the code-page mismatch that could reject Chinese account names and installation paths.
+- **Handle notification activation in the correct order.** Notifications are registered before activation arguments are read, and early input waits for the main instance to be ready. The Store version keeps Windows StartupTask.
+- **Improve startup recovery and diagnostics.** Tray creation retries while the desktop starts, fatal initialization failures release the instance by exiting, and boolean diagnostic checks remain readable without exposing private paths.
 
-## What's new in 1.4.9
+Read the complete [changelog](CHANGELOG.md) or the [1.5.3 release notes](docs/releases/v1.5.3.md).
 
-- **Reliable drag operations on Windows 10 and Windows 11.** A drag now advertises one preferred shell operation through `RequestedOperation`, avoiding the Windows 10 Copy/Move/Create-shortcut chooser without narrowing the destinations DeskBox supports.
-- **No more misplaced shortcuts.** Internal reorder feedback is separated from filesystem completion, so `.lnk` items can no longer be moved to the Recycle Bin during an in-grid or in-stack reorder.
-- **Explicit stack routes in both display modes.** Inline stacks and stack popovers support reorder, stack-to-parent-grid, grid-to-stack, other-grid, desktop, and File Explorer routes.
-- **Windows 10 Native AOT packaging is complete.** Direct packages include the required Windows App Runtime Insights resource, and the Native AOT audit verifies the retained binding and drag-surface contracts.
-- **Settings window no longer leaks.** The Settings window is reused, so repeated open/close cycles do not retain native XAML trees; idle deep cleanup and memory compression are reliable again.
-- **Safer file interactions.** File opening is gated and traced, extension-changing renames require confirmation, and stack popovers support in-place rename.
+## What's new in 1.5.2
 
-## What's new in 1.4.8
+- **File widgets show everything again.** Fixes a 1.5.1 regression where a file box displayed at most its first 30 items: folders up to the render threshold list every item, and larger folders extend the rendered window whenever the visible area is not yet filled.
 
-- **Safer managed-storage handoff.** DeskBox can keep a standalone `DeskBox Files.lnk` shortcut to the managed storage folder, and the uninstaller offers to create one for older users when managed files remain.
-- **Windows 10 corner compatibility.** Windows 10 uses square outer and capsule media corners while Windows 11 continues to follow the saved corner preferences.
-- **Simpler weather default.** New installations and restored defaults use the Standard weather skin; the richer skin remains selectable.
-- **More reliable search keyboard navigation.** Arrow keys keep the selected result and its highlight synchronized, while Ctrl+Tab changes search tabs without leaving arrow keys controlling only the scroll view.
-- **Cleaner search tabs.** Search tabs are text-only, content-sized, and use a taller indicator with consistent horizontal spacing.
-- **Safer Windows integration.** This release also includes junction/symbolic-link traversal fixes, Shell-owned confirmation dialogs, watcher backoff, virtual-display recovery, and high-DPI stack layout fixes.
+Read the complete [changelog](CHANGELOG.md) or the [1.5.2 release notes](docs/releases/v1.5.2.md).
 
-## What's new in 1.4.7
+## What's new in 1.5.1
 
-- **Safer More system operations.** Extended Windows Shell context menus now run in an isolated helper process, so a faulty third-party Shell extension cannot terminate DeskBox.
-- **Reliable high-DPI stack grids.** A 3×3 popover with five files keeps the expected 3+2 arrangement at fractional DPI scales instead of wrapping as 2+2+1.
-- **Stable desktop-layer transitions.** Hidden widgets remain hidden during Explorer drag and activation changes, while expanded capsules retain their peer ordering.
-- **Native AOT calendar bindings.** Glance calendar day decorations retain their binding metadata in Direct Native AOT builds.
-- **Fixed a serious shortcut loss.** Dragging a `.lnk` shortcut between widgets could delete the original on some systems. DeskBox now waits for a transfer to finish before reporting the operation result to Windows, so the source is never cleaned up early.
-- **Performance modes.** Balanced, Resource saver, and Custom modes under Settings → General control cache retention, transient-window release, and individual continuous animations. Hidden and inactive surfaces release recreatable UI, icons, and decoded images.
-- **Multi-display layout memory.** Each known monitor topology keeps its own layout, so positions, sizes, groups, and capsule placement return when you reconnect a display arrangement. New or differently scaled monitors get an in-bounds proportional layout.
-- **More ways to summon DeskBox.** F7, double Ctrl, Alt+Space, Win+Space, a Win-key tap, a custom shortcut, or an optional double-click on a blank desktop area, plus a Quick Reveal layer that temporarily raises widgets above other windows.
-- **File stacking 2.0.** Manual stacking and automatic grouping are now separate switches. A stack can open inline or in an Adaptive, 3×3, or 5×5 popover that shares the file grid's icon size, density, selection, and Ctrl+wheel behavior.
-- **Everything-powered file search.** DeskBox reads Everything's existing index over local IPC and merges it with notes, todos, and settings in one window, replacing the duplicate DeskBox-maintained index. Everything is not bundled.
-- **Native AOT Direct builds.** GitHub packages no longer need a separate .NET 10 runtime; Windows App Runtime moved to 2.4.
+- **Storage moves survive read-only files.** Changing the default storage location no longer fails when a folder contains read-only files; cleanup only deletes files that were verifiably copied, and a blocked cleanup finishes the move with an explicit recycle-the-leftovers choice instead of rolling the whole migration back.
+- **The search popup's app grid finally works with the mouse.** Single-click selects a card, double-click opens it, arrow keys plus Enter launch it, and icons now appear on the very first open instead of only after reopening the popup.
+- **Big folders no longer freeze widgets.** Folders with thousands of files render in a window and hydrate more rows as you scroll; the first launch after a fresh install is also faster thanks to batched shell-icon extraction.
+- **Open files by dropping them on a shortcut tile.** Drop files onto an application shortcut tile to open them with that application — from the desktop or between widgets.
+- **More ways to switch and launch.** Hover a dragged file over a group tab to switch members, use the new Copilot-key global hotkey preset, or click the title bar to collapse a widget in click-collapse mode.
+- **Capsule transitions fully fixed.** Expanding a capsule after collapsing no longer clips the title bar by a few pixels, and the very first expansion on a fresh install no longer leaves capsule icon and title ghosts over the expanded body.
+- **A snappier native context menu.** Clicking an item in the native Windows right-click menu no longer stalls the whole system; the menu hook now runs off the UI thread and unloads when the menu closes.
+- **Icons never shrink.** Associated icons whose artwork sits inside a larger transparent canvas keep their full size in file tiles.
+- **Harder Organize Desktop recovery.** Unrecoverable restores get an explicit abandon path with diagnostics, orphaned journals are cleaned up, and mapping conflicts auto-resolve or reveal the conflicting tiles.
+- **Leaner defaults.** New installations start on the Resource saver preset (5-minute visible maintenance, 30-second hidden cache release, small cache budget), and the experimental immediate working-set trim waits 3 seconds so quick hide/show round trips trim at most once. Upgrades never rewrite existing settings.
 
-Read the complete [changelog](CHANGELOG.md) or the [1.5.0 release notes](docs/releases/v1.5.0.md).
+Read the complete [changelog](CHANGELOG.md) or the [1.5.1 release notes](docs/releases/v1.5.1.md).
 
 ## Current interface
 

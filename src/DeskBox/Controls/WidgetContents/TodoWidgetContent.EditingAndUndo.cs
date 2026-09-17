@@ -286,16 +286,11 @@ public sealed partial class TodoWidgetContent
             return;
         }
 
-        bool isDark = (itemRoot as FrameworkElement)?.ActualTheme == ElementTheme.Dark;
-        var accentColor = App.Current.ThemeService?.GetEffectiveAccentColor() ?? AccentColorHelper.DefaultAccentColor;
-        var hoverBackground = WithAlpha(
-            BuildAccentSurfaceColor(
-                isDark,
-                accentColor,
-                isDark ? ColorHelper.FromArgb(0xFF, 0x25, 0x28, 0x2F) : ColorHelper.FromArgb(0xFF, 0xFF, 0xFF, 0xFF),
-                accentMix: isDark ? 0.24 : 0.12,
-                overlayMix: isDark ? 0.04 : 0.02),
-            isDark ? (byte)0x6A : (byte)0x86);
+        // Hover is a pointer state, so the list row uses the neutral hover
+        // surface - the same tone the XAML declares for it - instead of an
+        // accent tint.
+        var hoverBackground = NeutralInteractionBrush.Fill(
+            itemRoot as FrameworkElement);
 
         if (FindVisualChild<Border>(itemRoot, "TodoItemHoverBackground") is { } hoverBackgroundBorder)
         {
@@ -340,10 +335,12 @@ public sealed partial class TodoWidgetContent
             return;
         }
 
-        bool isDark = ActualTheme == ElementTheme.Dark;
-        var accentColor = App.Current.ThemeService?.GetEffectiveAccentColor() ?? AccentColorHelper.DefaultAccentColor;
-        TodoSelectionRectangle.Background = new SolidColorBrush(WithAlpha(accentColor, isDark ? (byte)0x2D : (byte)0x24));
-        TodoSelectionRectangle.BorderBrush = new SolidColorBrush(WithAlpha(accentColor, isDark ? (byte)0xD8 : (byte)0xCC));
+        // Marquee selection is a pointer state, so it uses the same neutral
+        // palette as every other transient interaction visual.
+        TodoSelectionRectangle.Background = SharedBrushCache.GetOrCreate(
+            NeutralInteractionBrush.Fill(TodoSelectionRectangle));
+        TodoSelectionRectangle.BorderBrush = SharedBrushCache.GetOrCreate(
+            NeutralInteractionBrush.Line(TodoSelectionRectangle));
     }
 
     private static Windows.UI.Color GetNeutralOverlaySurfaceColor(bool isDark)
@@ -396,40 +393,6 @@ public sealed partial class TodoWidgetContent
         }
 
         return new SolidColorBrush(fallbackColor);
-    }
-
-    private static Windows.UI.Color BuildAccentSurfaceColor(
-        bool isDark,
-        Windows.UI.Color accentColor,
-        Windows.UI.Color baseColor,
-        double accentMix,
-        double overlayMix)
-    {
-        var tintedColor = BlendColors(baseColor, accentColor, accentMix);
-        var overlayColor = isDark
-            ? ColorHelper.FromArgb(0xFF, 0x12, 0x14, 0x18)
-            : ColorHelper.FromArgb(0xFF, 0xFF, 0xFF, 0xFF);
-
-        return BlendColors(tintedColor, overlayColor, overlayMix);
-    }
-
-    private static Windows.UI.Color BlendColors(Windows.UI.Color fromColor, Windows.UI.Color toColor, double amount)
-    {
-        amount = Math.Clamp(amount, 0.0, 1.0);
-
-        static byte BlendChannel(byte from, byte to, double mix) =>
-            (byte)Math.Clamp(Math.Round(from + ((to - from) * mix)), 0, 255);
-
-        return ColorHelper.FromArgb(
-            BlendChannel(fromColor.A, toColor.A, amount),
-            BlendChannel(fromColor.R, toColor.R, amount),
-            BlendChannel(fromColor.G, toColor.G, amount),
-            BlendChannel(fromColor.B, toColor.B, amount));
-    }
-
-    private static Windows.UI.Color WithAlpha(Windows.UI.Color color, byte alpha)
-    {
-        return ColorHelper.FromArgb(alpha, color.R, color.G, color.B);
     }
 
     private static Windows.UI.Color ParseColor(string hex)

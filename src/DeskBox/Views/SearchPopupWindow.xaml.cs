@@ -156,6 +156,7 @@ public sealed partial class SearchPopupWindow : Window
         _viewModel.PropertyChanged += OnViewModelPropertyChanged;
         ResultsRepeater.ElementPrepared += OnResultsElementPrepared;
         RecommendedAppsRepeater.ElementPrepared += OnRecommendedAppsElementPrepared;
+        _viewModel.RecommendationIconsResolved += OnRecommendationIconsResolved;
         _settingsService.SettingsChanged += OnAppearanceSettingsChanged;
         _settingsService.AppearancePreviewChanged += OnAppearanceSettingsChanged;
         _localizationService.LanguageChanged += OnLanguageChanged;
@@ -268,7 +269,12 @@ public sealed partial class SearchPopupWindow : Window
         // Bring the popup above all windows (including desktop-level widgets) at the
         // moment it is invoked, but do NOT keep it always-on-top. After this, normal
         // z-order rules apply: clicking another window will cover the popup.
-        Win32Helper.BringWindowTemporarilyToFront(_hwnd);
+        // During a quick-reveal raised session the widget group is held topmost,
+        // so the manager routes this through the raised band instead of the
+        // normal-band pulse, which would land the popup below the widgets.
+        App.Current.WidgetManager?.BringAuxiliaryWindowToFront(
+            _hwnd,
+            "search-popup-shown");
 
         // This is an interactive search window, so it must be activatable again after
         // the user works in another app.
@@ -371,7 +377,9 @@ public sealed partial class SearchPopupWindow : Window
         PopupHideStoryboard.Stop();
         PopupHideStoryboard.Completed -= OnPopupHideCompleted;
         _appWindow?.Show();
-        Win32Helper.BringWindowTemporarilyToFront(_hwnd);
+        App.Current.WidgetManager?.BringAuxiliaryWindowToFront(
+            _hwnd,
+            "search-popup-reactivated");
         Activate();
         Win32Helper.SetForegroundWindow(_hwnd);
         SearchTextBox.Focus(FocusState.Programmatic);
@@ -424,6 +432,12 @@ public sealed partial class SearchPopupWindow : Window
         if (!IsPopupVisible)
         {
             _appWindow?.Hide();
+            // Leave the quick-reveal raised band at the actual hide moment, not at
+            // the hide request: releasing earlier would sink the fading window
+            // below the still-topmost widget group mid exit animation.
+            App.Current.WidgetManager?.ReleaseRaisedBandGuest(
+                _hwnd,
+                "search-popup-hidden");
             // Keep the initialized XAML shell and its material controllers warm.
             // Recreating these resources on the next hotkey press shifts memory
             // savings into a visible input delay and a transient material flash.
@@ -453,14 +467,7 @@ public sealed partial class SearchPopupWindow : Window
         }
 
         // Remove title bar
-        _appWindow.SetPresenter(AppWindowPresenterKind.Overlapped);
-        if (_appWindow.Presenter is OverlappedPresenter presenter)
-        {
-            presenter.IsResizable = false;
-            presenter.IsMaximizable = false;
-            presenter.IsMinimizable = false;
-            presenter.SetBorderAndTitleBar(false, false);
-        }
+        WindowShellState.TryApplyBorderlessOverlappedPresenter(_appWindow);
 
         _appWindow.Resize(new SizeInt32(PopupWidth, PopupHeight));
 
@@ -879,8 +886,12 @@ public sealed partial class SearchPopupWindow : Window
                 backdropType = Win32Helper.DWMSBT_NONE;
                 Win32Helper.TrySetDwmWindowAttribute(_hwnd, Win32Helper.DWMWA_SYSTEMBACKDROP_TYPE, ref backdropType);
                 Win32Helper.DisableAccentPolicy(_hwnd);
+                // The popup floats above other windows, so its solid material is
+                // fully opaque regardless of the widget surface opacity: a
+                // translucent surface here only reveals the black window
+                // surface underneath.
                 RootGrid.Background = new SolidColorBrush(
-                    BuildFrostedSurfaceColor(isDark, accentColor, surfaceOpacity, materialIntensity, materialType));
+                    BuildOpaquePopupSurfaceColor(isDark, accentColor, materialIntensity));
             }
             else
             {
@@ -1180,41 +1191,21 @@ public sealed partial class SearchPopupWindow : Window
         return (thickness, Windows.UI.Color.FromArgb(borderAlpha, red, green, blue));
     }
 
-    // Solid-mode surface color (mirrors the widget frosted surface).
-
-    private static Windows.UI.Color BuildFrostedSurfaceColor(
+    // Solid-mode surface color. Unlike the widget frosted surface, the popup
+    // blend never applies surface opacity: transparency is not supported for
+    // the popup's solid material.
+    internal static Windows.UI.Color BuildOpaquePopupSurfaceColor(
         bool isDark,
         Windows.UI.Color accentColor,
-        double surfaceOpacity,
-        double materialIntensity,
-        string materialType)
+        double materialIntensity)
     {
-        // Mica uses a slightly different base blend than Solid.
-        bool isMica = SettingsService.IsMicaMaterial(materialType);
-
         var baseColor = isDark
             ? Windows.UI.Color.FromArgb(0xFF, 0x21, 0x24, 0x2A)
             : Windows.UI.Color.FromArgb(0xFF, 0xFF, 0xFF, 0xFF);
 
         // Blend accent color into the base according to intensity.
-        double accentMix = (isMica ? 0.07 : 0.05) * materialIntensity;
-        var blended = BlendColors(baseColor, accentColor, accentMix);
-
-        // Apply surface opacity (alpha channel).
-        double materialOpacity = isDark
-            ? Math.Clamp(surfaceOpacity * 0.78, 0.10, 0.82)
-            : Math.Clamp(surfaceOpacity * 0.78, 0.0, 0.78);
-
-        return ApplySurfaceOpacity(blended, materialOpacity);
-    }
-
-    private static Windows.UI.Color ApplySurfaceOpacity(Windows.UI.Color color, double opacity)
-    {
-        return Windows.UI.Color.FromArgb(
-            (byte)Math.Clamp(Math.Round(opacity * 255), 0, 255),
-            color.R,
-            color.G,
-            color.B);
+        double accentMix = 0.05 * materialIntensity;
+        return BlendColors(baseColor, accentColor, accentMix);
     }
 
     private static Windows.UI.Color BlendColors(Windows.UI.Color from, Windows.UI.Color to, double amount)
@@ -1578,12 +1569,25 @@ public sealed partial class SearchPopupWindow : Window
     /// </summary>
     private void OnRecommendedAppsElementPrepared(ItemsRepeater sender, ItemsRepeaterElementPreparedEventArgs args)
     {
-        if (args.Element is Button button &&
-            button.DataContext is SearchResultItem item &&
+        // The card template binds through x:Bind, which ItemsRepeater wires
+        // without assigning an inherited DataContext, so every DataContext-
+        // based card handler (select, double-tap open, keyboard selection,
+        // icon patch) silently no-ops unless the item is assigned explicitly
+        // from the repeater index — the same resolution the result rows use.
+        if (args.Element is FrameworkElement card &&
+            RecommendedAppsRepeater.ItemsSource is System.Collections.IList items &&
+            args.Index >= 0 &&
+            args.Index < items.Count)
+        {
+            card.DataContext = items[args.Index];
+        }
+
+        if (args.Element is FrameworkElement { DataContext: SearchResultItem item } preparedCard &&
             item.Icon is not null)
         {
-            // Find the Image inside the button template and refresh its source.
-            var image = FindDescendant<Image>(button);
+            // The card template binds Icon one-time, so a container realized
+            // before enrichment finished needs its Image patched explicitly.
+            var image = FindDescendant<Image>(preparedCard);
             if (image is not null && image.Source != item.Icon)
             {
                 image.Source = item.Icon;
@@ -1645,9 +1649,9 @@ public sealed partial class SearchPopupWindow : Window
         foreach (var dataItem in itemsSource)
         {
             if (dataItem is SearchResultItem item && item.Icon is not null &&
-                RecommendedAppsRepeater.TryGetElement(index) is Button button)
+                RecommendedAppsRepeater.TryGetElement(index) is FrameworkElement card)
             {
-                var image = FindDescendant<Image>(button);
+                var image = FindDescendant<Image>(card);
                 if (image is not null && image.Source != item.Icon)
                 {
                     image.Source = item.Icon;
@@ -1655,6 +1659,17 @@ public sealed partial class SearchPopupWindow : Window
             }
             index++;
         }
+    }
+
+    private void OnRecommendationIconsResolved()
+    {
+        if (!IsPopupVisible ||
+            RecommendedAppsPanel.Visibility != Visibility.Visible)
+        {
+            return;
+        }
+
+        RefreshRecommendedAppIcons();
     }
 
     private void UpdatePanelVisibility()
@@ -1748,9 +1763,10 @@ public sealed partial class SearchPopupWindow : Window
     private void SearchTextBox_GotFocus(object sender, RoutedEventArgs e)
     {
         HotkeyHintBadge.Opacity = 0.45;
+        // Focus is an input state, so the ring follows the inline-rename
+        // precedent and stays neutral.
         SearchBoxBorder.BorderBrush = new SolidColorBrush(
-            _themeService?.GetEffectiveAccentColor() ??
-            AccentColorHelper.DefaultAccentColor);
+            NeutralInteractionBrush.Line(SearchBoxBorder));
     }
 
     private void SearchTextBox_LostFocus(object sender, RoutedEventArgs e)
@@ -1982,10 +1998,11 @@ public sealed partial class SearchPopupWindow : Window
 
     private void RecommendedApp_PointerPressed(object sender, PointerRoutedEventArgs e)
     {
+        // Marking the press handled here would suppress the DoubleTapped
+        // gesture, so the card could never be opened with the mouse.
         if (sender is Grid card && card.DataContext is SearchResultItem item)
         {
             SelectRecommendedApp(card, item);
-            e.Handled = true;
         }
     }
 
@@ -4398,6 +4415,7 @@ public sealed partial class SearchPopupWindow : Window
         _viewModel.PropertyChanged -= OnViewModelPropertyChanged;
         ResultsRepeater.ElementPrepared -= OnResultsElementPrepared;
         RecommendedAppsRepeater.ElementPrepared -= OnRecommendedAppsElementPrepared;
+        _viewModel.RecommendationIconsResolved -= OnRecommendationIconsResolved;
         _settingsService.SettingsChanged -= OnAppearanceSettingsChanged;
         _settingsService.AppearancePreviewChanged -= OnAppearanceSettingsChanged;
         _localizationService.LanguageChanged -= OnLanguageChanged;

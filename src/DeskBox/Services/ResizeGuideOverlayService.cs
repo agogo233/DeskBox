@@ -381,10 +381,10 @@ public sealed class ResizeGuideOverlayService
         // Edge highlight color: bright at edge, slightly translucent
         var edgeColor = Windows.UI.Color.FromArgb(255, c.R, c.G, c.B);
 
-        // Mid-stop: accent color with transparency for both themes.
-        // Previously light theme used white here, which created a gray
+        // Mid-stop: the accent with transparency for both themes.
+        // Previously light theme used white here, which created a grey
         // transition band between the accent edge and the white mid-stop.
-        // Using accent color with alpha keeps the glow unified and clean.
+        // Using the accent with alpha keeps the glow unified and clean.
         var midColor = Windows.UI.Color.FromArgb(100, c.R, c.G, c.B);
 
         if (edge is SnapEdge.Left)
@@ -551,11 +551,14 @@ public sealed class ResizeGuideOverlayService
             _ => SnapEdge.Left
         };
 
-    private static Windows.UI.Color GetHighlightColor()
-    {
-        return App.Current?.ThemeService?.GetEffectiveAccentColor()
-            ?? AccentColorHelper.DefaultAccentColor;
-    }
+    /// <summary>
+    /// The tone a snap guide and its edge glow draw with: the effective DeskBox
+    /// accent. Resizing/drag-snap feedback is deliberately the one drag-time
+    /// visual that keeps the theme color (Simon, 2026-09-13).
+    /// </summary>
+    private static Windows.UI.Color GetHighlightColor() =>
+        App.Current?.ThemeService?.GetEffectiveAccentColor()
+        ?? AccentColorHelper.DefaultAccentColor;
 
     // ── Drag session state ──────────────────────────────────────────────
 

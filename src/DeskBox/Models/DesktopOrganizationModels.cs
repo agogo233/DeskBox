@@ -240,6 +240,21 @@ public sealed class DesktopOrganizationRecoveryJournal
     public List<string> CreatedWidgetIds { get; set; } = [];
 }
 
+/// <summary>
+/// Durable object identity of the destination object recorded when a
+/// physical move completed. Recovery may only move an item back while the
+/// object currently at the destination path still carries exactly this
+/// identity; a missing identity means no automatic restore authority.
+/// </summary>
+public sealed class DesktopOrganizationDestinationIdentity
+{
+    public ulong VolumeSerialNumber { get; set; }
+
+    public ulong FileIdHigh { get; set; }
+
+    public ulong FileIdLow { get; set; }
+}
+
 public sealed class DesktopOrganizationRecoveryItem
 {
     public string? RestorePath { get; set; }
@@ -257,6 +272,8 @@ public sealed class DesktopOrganizationRecoveryItem
     public string TargetWidgetId { get; set; } = string.Empty;
 
     public bool Completed { get; set; }
+
+    public DesktopOrganizationDestinationIdentity? DestinationIdentity { get; set; }
 }
 
 public sealed class DesktopOrganizationExecutionResult

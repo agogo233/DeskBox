@@ -10,6 +10,17 @@ internal static class IconBitmapQuality
 {
     private const int MinimumCanvasDimension = 96;
     private const double MaximumVisibleDimensionRatio = 0.35;
+    private const int MinimumSignificantAlpha = 32;
+
+    /// <summary>
+    /// Alpha at which a pixel counts as artwork rather than as paint the Shell
+    /// adds when it fills a canvas it has no artwork for. Measured Shell
+    /// payloads place that near-invisible border between alpha 32 and 95 while
+    /// the real glyph sits above 240, so half of the peak alpha separates them
+    /// without trimming the glyph's antialiased edge.
+    /// </summary>
+    internal static byte SignificantAlphaThreshold(byte peakAlpha) =>
+        (byte)Math.Max(MinimumSignificantAlpha, peakAlpha / 2);
 
     internal static bool IsLikelyPadded(
         int width,

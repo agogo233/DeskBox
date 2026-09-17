@@ -58,8 +58,8 @@ public sealed class IdleRuntimeLifecycleContractTests
             "private void OnFeatureStateChanged(FeatureStateChangedEventArgs e)",
             "internal void SetSearchFeatureEnabled");
 
-        Assert.Contains("RefreshQuickCaptureClipboardService();", launch, StringComparison.Ordinal);
-        Assert.Contains("RefreshTodoReminderService();", launch, StringComparison.Ordinal);
+        Assert.Contains("() => RefreshQuickCaptureClipboardService()", launch, StringComparison.Ordinal);
+        Assert.Contains("() => RefreshTodoReminderService()", launch, StringComparison.Ordinal);
         Assert.DoesNotContain("new QuickCaptureClipboardService", launch, StringComparison.Ordinal);
         Assert.DoesNotContain("StartTodoReminderService();", launch, StringComparison.Ordinal);
 

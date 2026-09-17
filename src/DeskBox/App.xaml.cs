@@ -1,7 +1,6 @@
 // Copyright (c) DeskBox. All rights reserved.
 
 using CommunityToolkit.Mvvm.Input;
-using DeskBox.Contracts;
 using DeskBox.Controls.WidgetContents;
 using DeskBox.Helpers;
 using DeskBox.Models;
@@ -91,6 +90,8 @@ public partial class App : Application
     internal event Action<int>? OnboardingFileImportCompleted;
     internal event Action<bool>? OnboardingWidgetsVisibilityChanged;
     private NativeAppNotificationService? _nativeNotificationService;
+    private NativeNotificationActivationBootstrap? _nativeNotificationBootstrap;
+    private bool _initialNotificationHandled;
     private TodoReminderService? _todoReminderService;
     private DisplayAreaWatcherService? _displayAreaWatcher;
     private DisplayTopologyTransitionCoordinator? _displayTopologyTransitionCoordinator;
@@ -155,15 +156,6 @@ public partial class App : Application
         _everythingSearchService?.CurrentSnapshot.State == EverythingConnectionState.Connected;
     internal int SearchMetaCacheCount => _fileMetaService?.CachedIconCount ?? 0;
     public WidgetManager? WidgetManager { get; private set; }
-
-    /// <summary>
-    /// Stage 3b capability-port views of the widget manager: callers depend
-    /// on these port types instead of the concrete manager (pluginization
-    /// roadmap stage 3, wire-first).
-    /// </summary>
-    public ITodoReminderPresenter? TodoReminderPresenter => WidgetManager;
-    public IFileWidgetImportTarget? FileWidgetImport => WidgetManager;
-
     public ResizeGuideOverlayService ResizeGuideOverlay { get; private set; } = null!;
     public NativeAppNotificationService? NativeNotificationService => _nativeNotificationService;
     public DisplayAreaWatcherService? DisplayAreaWatcher => _displayAreaWatcher;
@@ -183,8 +175,6 @@ public partial class App : Application
         _processStartupLaunchDetected = StartupLaunchPolicy.IsStartupLaunch(
             Environment.GetCommandLineArgs(),
             isStartupTaskActivation: IsStartupTaskActivation());
-        NativeAppNotificationActivation? nativeNotificationActivation =
-            TryGetCurrentNativeNotificationActivation();
         _activationEvent = new EventWaitHandle(
             false,
             EventResetMode.AutoReset,
@@ -193,6 +183,17 @@ public partial class App : Application
             true,
             DeskBoxDataPathService.Current.SingleInstanceMutexName,
             out bool createdNew);
+        bool notificationLaunch = NativeNotificationActivationBootstrap.IsNotificationLaunch(
+            Environment.GetCommandLineArgs());
+        if (createdNew || notificationLaunch)
+        {
+            s_startupLaunchQuietExit = _processStartupLaunchDetected || notificationLaunch;
+            // Cover constructor/COM initialization as well as OnLaunched.
+            StartStartupWatchdog();
+            EnsureNativeNotificationService();
+        }
+        NativeAppNotificationActivation? nativeNotificationActivation =
+            TryGetCurrentNativeNotificationActivation();
         if (!createdNew)
         {
             string? jumpListArg = nativeNotificationActivation is null &&
@@ -223,6 +224,13 @@ public partial class App : Application
                     $"userInput={writeResult.Envelope?.UserInput.Count ?? 0} " +
                     $"error={writeResult.Error ?? "none"}");
             }
+            else if (notificationLaunch)
+            {
+                Log("[Notification] Secondary notification activation unavailable; leaving the primary instance running");
+                _nativeNotificationService?.Dispose();
+                DrainLogQueue();
+                Environment.Exit(1);
+            }
             else if (_processStartupLaunchDetected)
             {
                 Log("Another instance running; startup launch exiting silently");
@@ -246,6 +254,8 @@ public partial class App : Application
                 Log($"Failed to signal existing instance: {ex}");
             }
 
+            _nativeNotificationService?.Dispose();
+            DrainLogQueue();
             Environment.Exit(0);
         }
 
@@ -271,18 +281,10 @@ public partial class App : Application
         QuickCaptureService = Services.GetRequiredService<QuickCaptureService>();
         ResizeGuideOverlay = Services.GetRequiredService<ResizeGuideOverlayService>();
 
-        StartupService.Configure(StartupServiceFactory.Create(DistributionService));
-        if (StartupService.Current is DirectStartupService directStartupService)
-        {
-            directStartupService.TryMigrateLegacyRegistration();
-        }
+        StartupService.Configure(StartupServiceFactory.Create(DistributionService, SettingsService));
         AppUpdateService.CheckCompleted += OnUpdateCheckCompleted;
         UnhandledException += OnUnhandledException;
         Log($"Distribution channel={DistributionService.ChannelName} packaged={DistributionService.IsPackaged}");
-        Log($"Process integrity {GetProcessIntegrityReport()} pid={Environment.ProcessId} processPath={Environment.ProcessPath ?? "unknown"} baseDir={AppContext.BaseDirectory}");
-        Log($"Process parent {GetParentProcessReport()} commandLine={Environment.CommandLine}");
-        Log($"UAC {GetUacPolicyReport()}");
-        Log($"AppCompat {GetAppCompatReport()}");
     }
 
     private static string GetProcessIntegrityReport()
@@ -822,10 +824,15 @@ public partial class App : Application
 
     private static bool IsStartupTaskActivation()
     {
+        if (!AppDistributionService.Current.IsPackaged)
+            return false;
         try
         {
-            return AppInstance.GetCurrent().GetActivatedEventArgs().Kind ==
-                   ExtendedActivationKind.StartupTask;
+            // The platform API does not enter Windows App SDK notification
+            // deserialization. Startup detection must also work if notifications
+            // cannot be registered on this machine.
+            return Windows.ApplicationModel.AppInstance.GetActivatedEventArgs()?.Kind ==
+                   Windows.ApplicationModel.Activation.ActivationKind.StartupTask;
         }
         catch (Exception ex)
         {
@@ -868,6 +875,30 @@ public partial class App : Application
 
     private bool _isLaunched;
 
+    private void ScheduleShellContextMenuPrewarm()
+    {
+        if (!SettingsService.Settings.FileItemSystemContextMenuEnabled)
+        {
+            return;
+        }
+
+        // Warm the native context-menu server in the background once startup
+        // work settles, so the first right-click in a widget does not pay the
+        // cold Shell handler-loading cost.
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(TimeSpan.FromSeconds(5));
+                ShellContextMenuProxy.Prewarm();
+            }
+            catch (Exception ex)
+            {
+                Log($"[ShellContextMenu] Prewarm failed: {ex.Message}");
+            }
+        });
+    }
+
     protected override async void OnLaunched(LaunchActivatedEventArgs args)
     {
         if (_isLaunched)
@@ -882,34 +913,53 @@ public partial class App : Application
             Environment.GetCommandLineArgs(),
             args.Arguments,
             startupTaskActivation);
+        // Set before the watchdog arms: a task-triggered launch has no user
+        // watching, so its fatal path must exit quietly and let the task's
+        // restart policy retry instead of parking a modal dialog on an
+        // unattended desktop while still holding the single-instance mutex.
+        s_startupLaunchQuietExit = isStartupLaunch;
         using var perfScope = PerformanceLogger.Measure(
             "App.OnLaunched",
             $"startup={isStartupLaunch}");
         Log("OnLaunched start");
+        // Armed before the try: a startup that stalls (rather than throwing)
+        // would otherwise hold the single-instance mutex with no UI at all.
+        StartStartupWatchdog();
 
         try
         {
-            // Official-package bindings (audit round 20 §18): one registration
-            // per official package — the generic pilot, data sync, and HostApi
-            // write-through resolve everything feature-specific through this
-            // registry, so adding a package never branches the plugin layer.
-            DeskBox.Services.Plugins.PackageBindingRegistry.Register(
-                new DeskBox.Services.Plugins.OfficialPackageBinding(
-                    DeskBox.Models.WidgetKind.Glance, "deskbox.glance", "glance",
-                    DeskBox.Services.GlanceInstanceMigration.Instance));
-
-            // Dev native package bootstrap: install through the B1 pipeline
-            // once at startup when DESKBOX_DEV_NATIVE_GLANCE points at a
-            // package directory. Compiled only with EnableDeskBoxNativeDevPilot.
-            DeskBox.Services.Plugins.NativeWidgetPilot.RunDevBootstrap();
-
             string? updateInstallOutcome = TryGetUpdateInstallOutcome(Environment.GetCommandLineArgs());
             IsStartupMode = _processStartupLaunchDetected || isStartupLaunch;
             UiDispatcherQueue = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
             WidgetSegmentedLayoutHelper.Initialize(UiDispatcherQueue);
 
+            // The diagnostic report walks a snapshot of every process on the
+            // machine plus several registry hives; none of it gates startup,
+            // so keep it off the UI thread's first-render path. The queued
+            // log writer is thread-safe.
+            _ = Task.Run(() =>
+            {
+                try
+                {
+                    Log($"Process integrity {GetProcessIntegrityReport()} pid={Environment.ProcessId} processPath={Environment.ProcessPath ?? "unknown"} baseDir={AppContext.BaseDirectory}");
+                    Log($"Process parent {GetParentProcessReport()} commandLine={Environment.CommandLine}");
+                    Log($"UAC {GetUacPolicyReport()}");
+                    Log($"AppCompat {GetAppCompatReport()}");
+                }
+                catch (Exception ex)
+                {
+                    Log($"Startup diagnostics failed: {ex.Message}");
+                }
+            });
+
             // A prepared restore is applied before any service reads or normalizes app data.
-            DeskBoxRestoreApplyResult restoreResult = await DataBackupService.ApplyPendingRestoreAsync();
+            // From here to the widget-restoration phase every step is a feature,
+            // not a lifeline: a failure must leave a usable app instead of
+            // blocking startup entirely.
+            DeskBoxRestoreApplyResult restoreResult = DeskBoxRestoreApplyResult.NoPendingRestore;
+            await RunOptionalStartupStepAsync(
+                "apply-pending-restore",
+                async () => restoreResult = await DataBackupService.ApplyPendingRestoreAsync());
             bool hadSettingsBeforeStartup = File.Exists(Path.Combine(
                 DeskBoxDataPathService.Current.DataDirectory,
                 "settings.json"));
@@ -918,16 +968,28 @@ public partial class App : Application
             // writes. Settings are not loaded yet, so the backup schedule and folder
             // are read from the raw settings file; unreadable values fall back to
             // the defaults, matching the pre-setting behavior.
-            DataBackupService.UpdateAutomaticBackupOptions(
-                DataBackupSettingsPolicy.ReadStartupOptions(
-                    Path.Combine(DeskBoxDataPathService.Current.DataDirectory, "settings.json")));
-            await DataBackupService.CreateAutomaticSnapshotIfDueAsync();
+            RunOptionalStartupStep("read-backup-options", () =>
+                DataBackupService.UpdateAutomaticBackupOptions(
+                    DataBackupSettingsPolicy.ReadStartupOptions(
+                        Path.Combine(DeskBoxDataPathService.Current.DataDirectory, "settings.json"))));
+            // The snapshot copy tolerates concurrent writers (per-file length
+            // and write-time stability checks with retries), so it runs
+            // alongside the early startup phases instead of gating the tray,
+            // theme, and settings load behind a full copy+zip of the data
+            // directory. It is awaited before the widget-restoration phase,
+            // whose normalization writes are the first bulk mutation of the
+            // session, so the captured snapshot still reflects the previous
+            // session.
+            Task startupAutomaticSnapshotTask = RunOptionalStartupStepAsync(
+                "automatic-snapshot",
+                async () => await DataBackupService.CreateAutomaticSnapshotIfDueAsync());
 
             // Phase 1: Load settings (must complete first)
+            MarkStartupProgress();
             await SettingsService.LoadAsync();
             RefreshAutomaticBackupOptionsFromSettings();
             SettingsService.SettingsChanged += OnBackupSettingsChanged;
-            StartAutomaticBackupTimer();
+            RunOptionalStartupStep("automatic-backup-timer", StartAutomaticBackupTimer);
             string requestedCornerPreference = SettingsService.Settings.WidgetCornerPreference;
             string effectiveCornerPreference =
                 WindowsCompatibilityService.ResolveEffectiveWidgetCornerPreference(
@@ -938,30 +1000,32 @@ public partial class App : Application
                 $"effective corners={effectiveCornerPreference}");
 
             // Sync widget move/resize snap settings.
-            ResizeGuideOverlay.IsSnapEnabled = SettingsService.Settings.ResizeSnapEnabled;
-            ResizeGuideOverlay.SnapSpacingDips = SettingsService.Settings.WidgetSnapSpacing;
+            RunOptionalStartupStep("resize-guide-settings", () =>
+            {
+                ResizeGuideOverlay.IsSnapEnabled = SettingsService.Settings.ResizeSnapEnabled;
+                ResizeGuideOverlay.SnapSpacingDips = SettingsService.Settings.WidgetSnapSpacing;
+            });
 
             // Phase 2: Initialize services that depend on settings (parallel)
             ThemeService = Services.GetRequiredService<ThemeService>();
             LocalizationService = Services.GetRequiredService<LocalizationService>();
             LocalizationService.LanguageChanged += OnLanguageChanged;
-            // Live config push to activated native packages (audit 20 §23):
-            // language changes re-fire every registered config-changed
-            // callback so native widgets rebuild on the new locale at once.
-            LocalizationService.LanguageChanged += static () =>
-                DeskBox.Services.Plugins.NativeHostApiBridge.PushConfigChanged();
 
             var quickCaptureService = QuickCaptureService;
             var themeService = ThemeService;
             var localizationService = LocalizationService;
 
             // Parallel: theme refresh only. Clipboard event subscription must stay on the UI thread.
-            var themeTask = Task.Run(() => themeService.RefreshAppearance());
-            RefreshQuickCaptureClipboardService();
+            Task themeTask = RunOptionalStartupStepAsync(
+                "theme-refresh",
+                () => Task.Run(() => themeService.RefreshAppearance()));
+            RunOptionalStartupStep("quick-capture-clipboard", () => RefreshQuickCaptureClipboardService());
 
-            // Parallel: independent UI setup
+            // Parallel: independent UI setup. The tray is the lifeline: once its
+            // icon is up the user can act on the process again.
+            MarkStartupProgress();
             CreateTrayIcon();
-            InitializeLifecycleRecoveryWatcher();
+            RunOptionalStartupStep("lifecycle-recovery-watcher", InitializeLifecycleRecoveryWatcher);
 
             await themeTask;
 
@@ -969,7 +1033,7 @@ public partial class App : Application
             {
                 // The search shell is lightweight. Everything owns the filename index;
                 // DeskBox does not scan, preload, or watch the filesystem at startup.
-                EnsureSearchServices();
+                RunOptionalStartupStep("search-shell", EnsureSearchServices);
             }
             else
             {
@@ -978,106 +1042,157 @@ public partial class App : Application
 
             WidgetManager = new WidgetManager(SettingsService, FileService, OrganizerService, themeService, quickCaptureService, localizationService);
             WidgetManager.TrayLayerStateChanged += UpdateTrayLayerStateText;
-            // Stage 3b, cut point 3: the App owns its services and reacts to
-            // feature enable-state changes through the port event instead of
-            // the manager reaching back into App.Current (host-lifetime
-            // subscription; the manager is created exactly once).
             WidgetManager.FeatureStateChanged += OnFeatureStateChanged;
-            DesktopDoubleClickActivationService = new DesktopDoubleClickActivationService(
-                SettingsService,
-                ToggleWidgetsFromDesktopDoubleClickAsync);
-            DesktopDoubleClickActivationService.RefreshRegistration();
-            _displayTopologyTransitionCoordinator = new DisplayTopologyTransitionCoordinator(
-                UiDispatcherQueue,
-                DisplayAreaWatcherService.CaptureCurrentSignature,
-                async (generation, reasons) =>
-                    WidgetManager is null ||
-                    await WidgetManager.RestoreWidgetPositionsAsync(generation, reasons));
+            MarkStartupProgress();
+            // Lets a quick-reveal raise promote already-open DeskBox surfaces
+            // (search popup, settings, desktop organization) above the raised
+            // widget group; the reverse order is handled per-window at show.
+            WidgetManager.AuxiliaryWindowProvider = GetRaisedBandAuxiliaryWindowHandles;
+            RunOptionalStartupStep("desktop-double-click-activation", () =>
+            {
+                DesktopDoubleClickActivationService = new DesktopDoubleClickActivationService(
+                    SettingsService,
+                    ToggleWidgetsFromDesktopDoubleClickAsync);
+                DesktopDoubleClickActivationService.RefreshRegistration();
+            });
+            RunOptionalStartupStep("display-topology-coordinator", () =>
+                _displayTopologyTransitionCoordinator = new DisplayTopologyTransitionCoordinator(
+                    UiDispatcherQueue,
+                    DisplayAreaWatcherService.CaptureCurrentSignature,
+                    async (generation, reasons) =>
+                        WidgetManager is null ||
+                        await WidgetManager.RestoreWidgetPositionsAsync(generation, reasons)));
 
-            // Phase 3: Restore widgets
-            int recoveredDesktopItems = await new DesktopOrganizationTransaction(
-                SettingsService,
-                FileService).RecoverPendingAsync();
+            // Phase 3: Restore widgets (the startup snapshot must finish
+            // before the restoration phase starts writing normalized state).
+            await startupAutomaticSnapshotTask;
+            int recoveredDesktopItems = 0;
+            await RunOptionalStartupStepAsync(
+                "desktop-organization-recovery",
+                async () => recoveredDesktopItems = await new DesktopOrganizationTransaction(
+                    SettingsService,
+                    FileService).RecoverPendingAsync());
             if (recoveredDesktopItems > 0)
             {
                 Log($"[DesktopOrganization] Recovered {recoveredDesktopItems} items from an interrupted transaction.");
             }
             // A detached storage drive must not abort widget restoration.
-            bool managedStorageRootUnavailable = !WidgetManager.SyncStorageFolderEntries();
+            bool managedStorageRootUnavailable = false;
+            RunOptionalStartupStep("storage-folder-entries", () =>
+                managedStorageRootUnavailable = !WidgetManager.SyncStorageFolderEntries());
             Task<bool>? startupDesktopLayerReadinessTask = null;
             if (IsStartupMode)
             {
-                WidgetLayerService.BeginStartupDesktopLayerAttachmentDeferral();
-                startupDesktopLayerReadinessTask =
-                    WidgetLayerService.WaitForDesktopIconViewReadyAsync();
+                RunOptionalStartupStep("desktop-layer-deferral", () =>
+                {
+                    WidgetLayerService.BeginStartupDesktopLayerAttachmentDeferral();
+                    startupDesktopLayerReadinessTask =
+                        WidgetLayerService.WaitForDesktopIconViewReadyAsync();
+                });
             }
 
             try
             {
                 await WidgetManager.RestoreWidgetsAsync();
             }
-            catch
+            catch (Exception ex)
             {
+                // Restoration is not the lifeline: the tray icon still gives the
+                // user a way back in, so a failure here degrades instead of
+                // blocking startup.
+                Log($"[Startup] Optional step 'restore-widgets' failed: {ex}");
                 if (startupDesktopLayerReadinessTask is not null)
                 {
+                    startupDesktopLayerReadinessTask = null;
                     WidgetLayerService.EndStartupDesktopLayerAttachmentDeferral();
                 }
-
-                throw;
             }
 
             if (startupDesktopLayerReadinessTask is not null)
             {
-                _ = CompleteStartupDesktopLayerInitializationAsync(
-                    startupDesktopLayerReadinessTask,
-                    WidgetManager);
+                SafeFireAndForget(
+                    () => CompleteStartupDesktopLayerInitializationAsync(
+                        startupDesktopLayerReadinessTask,
+                        WidgetManager),
+                    "startup-desktop-layer");
             }
 
-            InitializeGlobalHotkeyService(localizationService);
+            RunOptionalStartupStep("global-hotkey-service", () => InitializeGlobalHotkeyService(localizationService));
+            RunOptionalStartupStep("shell-context-menu-prewarm", ScheduleShellContextMenuPrewarm);
 
-            RefreshTodoReminderService();
-            StartNativeNotificationService();
-            await CompleteExternalActivationInitializationAsync();
-            ShowDataRestoreResultNotification(restoreResult);
-            ShowSettingsLoadRecoveryNotification();
+            RunOptionalStartupStep("todo-reminders", () => RefreshTodoReminderService());
+            RunOptionalStartupStep("native-notifications", StartNativeNotificationService);
+            await RunOptionalStartupStepAsync(
+                "external-activation-initialization",
+                CompleteExternalActivationInitializationAsync);
+            RunOptionalStartupStep("restore-result-notification", () => ShowDataRestoreResultNotification(restoreResult));
+            RunOptionalStartupStep("settings-recovery-notification", ShowSettingsLoadRecoveryNotification);
             if (managedStorageRootUnavailable)
             {
-                ShowManagedStorageUnavailableNotification();
+                RunOptionalStartupStep("storage-unavailable-notification", ShowManagedStorageUnavailableNotification);
             }
             if (!hadSettingsBeforeStartup ||
                 SettingsService.LastLoadRecoveryState == SettingsLoadRecoveryState.DefaultsAfterFailure)
             {
-                ShowRecoverySnapshotAvailableNotification(
-                    await DataBackupService.GetLatestRecoverySnapshotAsync());
+                await RunOptionalStartupStepAsync("recovery-snapshot-notification", async () =>
+                    ShowRecoverySnapshotAvailableNotification(
+                        await DataBackupService.GetLatestRecoverySnapshotAsync()));
             }
 
-            await EnsureInitialFileWidgetSetupAsync(isInteractiveLaunch: !IsStartupMode);
-            await ManagedStorageDesktopShortcutService.SyncAsync();
+            await RunOptionalStartupStepAsync(
+                "initial-file-widget-setup",
+                () => EnsureInitialFileWidgetSetupAsync(isInteractiveLaunch: !IsStartupMode));
+            await RunOptionalStartupStepAsync(
+                "managed-storage-desktop-shortcut",
+                () => ManagedStorageDesktopShortcutService.SyncAsync());
 
-            DesktopAutoOrganizationWatcher = new DesktopAutoOrganizationWatcher(
-                SettingsService,
-                OrganizerService,
-                WidgetManager);
-            DesktopAutoOrganizationWatcher.ItemOrganized += ShowDesktopAutoOrganizationNotification;
-            DesktopAutoOrganizationWatcher.Start();
+            RunOptionalStartupStep("desktop-auto-organization-watcher", () =>
+            {
+                DesktopAutoOrganizationWatcher = new DesktopAutoOrganizationWatcher(
+                    SettingsService,
+                    OrganizerService,
+                    WidgetManager);
+                DesktopAutoOrganizationWatcher.ItemOrganized += ShowDesktopAutoOrganizationNotification;
+                DesktopAutoOrganizationWatcher.Start();
+            });
 
-            await EnsureOnboardingAsync(isInteractiveLaunch: !IsStartupMode);
+            await RunOptionalStartupStepAsync(
+                "onboarding",
+                () => EnsureOnboardingAsync(isInteractiveLaunch: !IsStartupMode));
 
-            _diagnosticsService = new AppDiagnosticsService(UiDispatcherQueue);
-            _diagnosticsService.StartAll();
+            RunOptionalStartupStep("background-update-check", ScheduleBackgroundUpdateCheck);
+            RunOptionalStartupStep("diagnostics-service", () =>
+            {
+                _diagnosticsService = new AppDiagnosticsService(UiDispatcherQueue);
+                _diagnosticsService.StartAll();
+            });
 
             // Start display area watcher for hot-plug detection
-            _displayAreaWatcher = new DisplayAreaWatcherService(UiDispatcherQueue);
-            _displayAreaWatcher.DisplaysChanged += OnDisplaysChanged;
-            _displayAreaWatcher.Start();
-            VirtualDisplayAdvisor.WarnIfPrimaryDisplayIsVirtual(
-                (titleKey, bodyKey) => ShowSettingsNotification(
-                    titleKey,
-                    bodyKey,
-                    NotificationIcon.Warning));
+            RunOptionalStartupStep("display-area-watcher", () =>
+            {
+                _displayAreaWatcher = new DisplayAreaWatcherService(UiDispatcherQueue);
+                _displayAreaWatcher.DisplaysChanged += OnDisplaysChanged;
+                _displayAreaWatcher.Start();
+                if (_trayWindow is not null)
+                {
+                    // The tray window outlives every widget window, so subscribing
+                    // there is what retires the fallback poll. This runs after the
+                    // recovery watcher's own attach, which is earlier in startup.
+                    _displayAreaWatcher.AttachToMessageWindow(
+                        WindowNative.GetWindowHandle(_trayWindow));
+                }
+            });
+            RunOptionalStartupStep("virtual-display-advisor", () =>
+                VirtualDisplayAdvisor.WarnIfPrimaryDisplayIsVirtual(
+                    (titleKey, bodyKey) => ShowSettingsNotification(
+                        titleKey,
+                        bodyKey,
+                        NotificationIcon.Warning)));
 
             // Configure taskbar Jump List with quick actions
-            _ = JumpListService.ConfigureAsync(LocalizationService);
+            SafeFireAndForget(
+                () => JumpListService.ConfigureAsync(LocalizationService),
+                "jump-list-configure");
 
             // Handle Jump List activation on first launch (not second instance)
             string? firstLaunchJumpArg =
@@ -1086,17 +1201,38 @@ public partial class App : Application
                     string.Join(' ', Environment.GetCommandLineArgs()));
             if (firstLaunchJumpArg is not null)
             {
-                _ = JumpListService.HandleActivationAsync(firstLaunchJumpArg);
+                SafeFireAndForget(
+                    () => JumpListService.HandleActivationAsync(firstLaunchJumpArg),
+                    "jump-list-activation");
             }
 
-            StartVisibleIdleMemoryMaintenance();
+            RunOptionalStartupStep("idle-memory-maintenance", StartVisibleIdleMemoryMaintenance);
             if (!string.IsNullOrWhiteSpace(updateInstallOutcome))
             {
-                ShowSettings("About");
-                _settingsWindow?.QueueUpdateInstallResultDialog(updateInstallOutcome);
+                RunOptionalStartupStep("update-install-result", () =>
+                {
+                    ShowSettings("About");
+                    _settingsWindow?.QueueUpdateInstallResultDialog(updateInstallOutcome!);
+                });
             }
 
+            // The process must not keep running startup with nothing the user
+            // can act on: it would own the single-instance mutex and swallow
+            // every later launch.
+            await EnsureStartupProducedUsableSurfaceAsync();
+
             Log("OnLaunched completed successfully");
+            // Startup registration does not gate the first usable widgets.
+            // DirectStartupService serializes migration with user toggle changes.
+            _ = Task.Run(() =>
+            {
+                if (StartupService.Current is DirectStartupService directStartupService)
+                {
+                    directStartupService.TryMigrateLegacyRegistration();
+                }
+
+                ApplyDefaultAutoStartOnce();
+            });
 #if DESKBOX_NATIVE_AOT && DESKBOX_AOT_SMOKE_HARNESS
             StartAotShortcutSmokeIfRequested();
             StartAotShellSmokeIfRequested();
@@ -1116,7 +1252,60 @@ public partial class App : Application
         }
         catch (Exception ex)
         {
-            Log($"Exception in OnLaunched: {ex}");
+            // Anything reaching this point failed before the tray lifeline was
+            // established, so the process has nothing to offer and must not
+            // keep holding the single-instance mutex.
+            FailStartup("exception during startup", ex);
+        }
+    }
+
+    /// <summary>
+    /// Applies the one-time autostart default. Runs off the UI thread because
+    /// registering the logon task shells out to schtasks; only the settings
+    /// write returns to the dispatcher. Development data roots (portable runs,
+    /// smoke harnesses) never touch the machine's startup registration.
+    /// </summary>
+    private void ApplyDefaultAutoStartOnce()
+    {
+        try
+        {
+            if (DeskBoxDataPathService.Current.IsDevelopmentRoot ||
+                !AutoStartDefaultPolicy.ShouldApply(SettingsService.Settings))
+            {
+                return;
+            }
+
+            StartupRegistrationState initialState = StartupService.Current.GetState();
+            StartupRegistrationState effective =
+                AutoStartDefaultPolicy.Resolve(StartupService.Current);
+            bool enabled = AutoStartDefaultPolicy.IsEnabledState(effective);
+
+            void Commit()
+            {
+                SettingsService.Settings.AutoStart = enabled;
+                if (AutoStartDefaultPolicy.ShouldMarkApplied(effective))
+                {
+                    SettingsService.Settings.AutoStartDefaultApplied = true;
+                }
+
+                SettingsService.SaveDebounced();
+            }
+
+            if (UiDispatcherQueue is { } dispatcher && !dispatcher.HasThreadAccess)
+            {
+                dispatcher.TryEnqueue(Commit);
+            }
+            else
+            {
+                Commit();
+            }
+
+            Log(
+                $"[AutoStart] One-time default applied: initial={initialState} effective={effective} mirror={enabled}");
+        }
+        catch (Exception ex)
+        {
+            Log($"[AutoStart] One-time default failed: {ex.Message}");
         }
     }
 
@@ -1151,8 +1340,7 @@ public partial class App : Application
             $"[Startup] Applying deferred widget desktop layer " +
             $"explorerReady={explorerDesktopReady}");
         widgetManager.RefreshVisibleWidgetDesktopLayers(
-            "startup-explorer-desktop-ready",
-            absoluteDesktopBottom: true);
+            "startup-explorer-desktop-ready");
     }
 
     private void InitializeGlobalHotkeyService(LocalizationService localizationService)
@@ -1308,6 +1496,43 @@ public partial class App : Application
         }
     }
 
+    private void ScheduleBackgroundUpdateCheck()
+    {
+        if (DistributionService.IsMicrosoftStore)
+        {
+            return;
+        }
+
+        if (!SettingsService.Settings.AutoCheckForUpdates)
+        {
+            return;
+        }
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(IsStartupMode ? TimeSpan.FromSeconds(45) : TimeSpan.FromSeconds(12));
+                var result = await AppUpdateService.CheckForUpdatesAsync();
+                SettingsService.Settings.LastUpdateCheckAt = DateTimeOffset.Now;
+                SettingsService.SaveDebounced(notifySubscribers: false);
+
+                if (result.IsUpdateAvailable && result.Manifest is not null)
+                {
+                    Log($"[Update] New version available: {result.Manifest.Version}");
+                }
+                else if (result.Status == AppUpdateCheckStatus.Failed)
+                {
+                    Log($"[Update] Background check failed: {result.ErrorMessage}");
+                }
+            }
+            catch (Exception ex)
+            {
+                Log($"[Update] Background check crashed: {ex}");
+            }
+        });
+    }
+
     internal void RefreshQuickCaptureClipboardService(bool captureCurrent = false)
     {
         if (!UiDispatcherQueue.HasThreadAccess)
@@ -1436,21 +1661,47 @@ public partial class App : Application
 
     private void StartNativeNotificationService()
     {
-        _nativeNotificationService?.Dispose();
-        _nativeNotificationService = new NativeAppNotificationService(
-            HandleNativeNotificationActivation);
-        if (_nativeNotificationService.Register())
+        EnsureNativeNotificationService();
+        HandleCurrentNativeNotificationActivation();
+    }
+
+    private void EnsureNativeNotificationService()
+    {
+        // Keep the constructor's registration and wait handle alive. Replacing
+        // it here could lose a notification received before settings/widgets load.
+        NativeAppNotificationService service = _nativeNotificationService ??=
+            new NativeAppNotificationService(QueueNativeNotificationActivation);
+        _nativeNotificationBootstrap ??= new NativeNotificationActivationBootstrap(
+            () => service.Register(),
+            ReadCurrentNativeNotificationActivation,
+            ex => Log($"[Notification] Activation bootstrap unavailable: {ex}"));
+    }
+
+    private static void QueueNativeNotificationActivation(NativeAppNotificationActivation activation)
+    {
+        try
         {
-            HandleCurrentNativeNotificationActivation();
+            NativeNotificationActivationEnvelopeWriteResult result =
+                PendingNativeNotificationActivationStore.Store(activation);
+            Log($"[Notification] Queued activation disposition={result.Disposition} error={result.Error ?? "none"}");
+            if (result.Disposition == NativeNotificationActivationEnvelopeWriteDisposition.Stored)
+                _activationEvent?.Set();
+        }
+        catch (Exception ex)
+        {
+            Log($"[Notification] Activation queue failed: {ex}");
         }
     }
 
     private void HandleCurrentNativeNotificationActivation()
     {
+        if (_initialNotificationHandled)
+            return;
         NativeAppNotificationActivation? activation = TryGetCurrentNativeNotificationActivation();
         if (activation is not null)
         {
-            HandleNativeNotificationActivation(activation);
+            _initialNotificationHandled = true;
+            QueueNativeNotificationActivation(activation);
         }
     }
 
@@ -1632,15 +1883,22 @@ public partial class App : Application
         string? itemId = null,
         bool preferTodayFilter = false)
     {
-        if (TodoReminderPresenter is not { } presenter)
+        if (WidgetManager is null)
         {
             return false;
         }
 
-        TodoReminderPresentationResult presentation = await presenter.PresentReminderTargetAsync(
-            widgetId,
-            itemId,
-            preferTodayFilter);
+        TodoReminderTargetPresentationResult presentation =
+            await WidgetManager.ShowTodoReminderTargetAsync(
+                widgetId,
+                itemId,
+                preferTodayFilter);
+        Log(
+            $"[Notification] Todo target presentation widget={presentation.WidgetId} " +
+            $"item={presentation.ItemId ?? "none"} hwnd={presentation.WindowHandle} " +
+            $"visible={presentation.Visible} xamlRoot={presentation.HasXamlRoot} " +
+            $"itemPresented={presentation.ItemPresented} " +
+            $"targetPresented={presentation.TargetPresented}");
         return presentation.TargetPresented;
     }
 
@@ -1883,7 +2141,7 @@ public partial class App : Application
         return parsed;
     }
 
-    private static NativeAppNotificationActivation? TryGetCurrentNativeNotificationActivation()
+    private NativeAppNotificationActivation? TryGetCurrentNativeNotificationActivation()
     {
 #if DESKBOX_NATIVE_AOT && DESKBOX_AOT_SMOKE_HARNESS
         NativeAppNotificationActivation? controlledActivation =
@@ -1894,36 +2152,11 @@ public partial class App : Application
         }
 #endif
 
-        try
-        {
-            var activatedArgs = AppInstance.GetCurrent().GetActivatedEventArgs();
-            if (activatedArgs.Kind == ExtendedActivationKind.AppNotification &&
-                activatedArgs.Data is AppNotificationActivatedEventArgs notificationArgs)
-            {
-                var userInput = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-                foreach (var input in notificationArgs.UserInput)
-                {
-                    if (!string.IsNullOrWhiteSpace(input.Key))
-                    {
-                        userInput[input.Key] = input.Value ?? string.Empty;
-                    }
-                }
-
-                return new NativeAppNotificationActivation(
-                    notificationArgs.Argument,
-                    userInput,
-                    NativeAppNotificationActivationSource.CurrentAppInstance,
-                    DateTimeOffset.UtcNow,
-                    Environment.ProcessId);
-            }
-        }
-        catch (Exception ex)
-        {
-            Log($"[Notification] Failed to read native notification activation args: {ex.Message}");
-        }
-
-        return null;
+        return _nativeNotificationBootstrap?.Capture();
     }
+
+    private NativeAppNotificationActivation? ReadCurrentNativeNotificationActivation() =>
+        _nativeNotificationService?.ReadCurrentActivation();
 
     private static void StorePendingJumpListArgument(string argument)
     {
@@ -2032,7 +2265,9 @@ public partial class App : Application
             {
                 App.UiDispatcherQueue?.TryEnqueue(() =>
                 {
-                    _ = Current.HandleExternalActivationAsync();
+                    SafeFireAndForget(
+                        () => Current.HandleExternalActivationAsync(),
+                        "external-activation");
                 });
             },
             null,
@@ -4170,6 +4405,24 @@ public partial class App : Application
 
     private async Task ShutdownApplicationAsync()
     {
+        try
+        {
+            await ShutdownCoreAsync();
+        }
+        catch (Exception ex)
+        {
+            Log($"[Shutdown] Teardown failed: {ex}");
+        }
+        finally
+        {
+            // Teardown must never leave a tray-less process holding the
+            // single-instance mutex, so the exit is unconditional.
+            Exit();
+        }
+    }
+
+    private async Task ShutdownCoreAsync()
+    {
         StopVisibleIdleMemoryMaintenance();
 
         // Stop the display area watcher FIRST, before closing any widgets,
@@ -4238,13 +4491,22 @@ public partial class App : Application
         _onboardingWindow = null;
         _trayWindow?.Close();
         _trayWindow = null;
-        Exit();
     }
 
     private void OnUnhandledException(object sender, Microsoft.UI.Xaml.UnhandledExceptionEventArgs e)
     {
         Log($"Unhandled exception: {e.Exception}");
+        // Handled first: the runtime must not tear the process down while the
+        // fatal path reports the failure to the user.
         e.Handled = true;
+
+        if (!IsStartupLifelineEstablished)
+        {
+            // Before the tray exists the process has nothing to fall back on,
+            // and swallowing the exception would leave it holding the
+            // single-instance mutex without any UI.
+            FailStartup("unhandled exception before the startup lifeline was established", e.Exception);
+        }
     }
 
     // ─── Search Services ─────────────────────────────────────────────
@@ -4268,6 +4530,7 @@ public partial class App : Application
             {
                 _searchHotkeyService = new SearchHotkeyService(
                     SettingsService,
+                    LocalizationService,
                     ToggleSearchPopupAsync);
                 if (_trayWindow is not null)
                 {
@@ -4337,27 +4600,6 @@ public partial class App : Application
 
         EnsureSearchServices();
         return _searchEngineService;
-    }
-
-    /// <summary>
-    /// Stage 3b, cut point 3: reacts to feature enable-state changes raised
-    /// through IFeatureStateEvents. Mirrors the service refreshes that the
-    /// WidgetManager used to call directly via App.Current.
-    /// </summary>
-    private void OnFeatureStateChanged(FeatureStateChangedEventArgs e)
-    {
-        if (e.FeatureId == DeskBoxFeatureIds.Search)
-        {
-            SetSearchFeatureEnabled(e.Enabled);
-        }
-        else if (e.FeatureId == DeskBoxFeatureIds.QuickCapture)
-        {
-            RefreshQuickCaptureClipboardService();
-        }
-        else if (e.FeatureId == DeskBoxFeatureIds.Todo)
-        {
-            RefreshTodoReminderService();
-        }
     }
 
     internal void SetSearchFeatureEnabled(bool enabled)
@@ -4507,6 +4749,27 @@ public partial class App : Application
         // Everything is queried only after the user types and has explicitly enabled it.
     }
 
+    private IReadOnlyList<IntPtr> GetRaisedBandAuxiliaryWindowHandles()
+    {
+        List<IntPtr> handles = new(3);
+        if (_settingsWindow is { IsVisibleToUser: true } settings)
+        {
+            handles.Add(WindowNative.GetWindowHandle(settings));
+        }
+
+        if (_searchPopupWindow is { IsPopupVisible: true } popup)
+        {
+            handles.Add(popup.WindowHandle);
+        }
+
+        if (_desktopOrganizationWindow is { } organize)
+        {
+            handles.Add(organize.WindowHandle);
+        }
+
+        return handles;
+    }
+
     private void CreateSearchPopupWindow()
     {
         if (_searchEngineService is null || _searchHistoryService is null)
@@ -4570,7 +4833,7 @@ public partial class App : Application
 
     private async Task HandleSearchContentAsync(Models.SearchResultItem item)
     {
-        if (WidgetManager is null || TodoReminderPresenter is not { } presenter)
+        if (WidgetManager is null)
         {
             return;
         }
@@ -4578,7 +4841,7 @@ public partial class App : Application
         switch (item.Kind)
         {
             case Models.SearchResultKind.Todo:
-                await presenter.PresentReminderTargetAsync(
+                await WidgetManager.ShowTodoReminderTargetAsync(
                     item.TodoWidgetId,
                     item.TodoItemId,
                     preferTodayFilter: false);

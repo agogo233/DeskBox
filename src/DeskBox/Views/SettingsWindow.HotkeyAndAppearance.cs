@@ -128,6 +128,7 @@ public sealed partial class SettingsWindow
             "WindowsTap" => new GlobalHotkeyActivation(
                 HotkeyActivationKind.WindowsTap,
                 fallbackGesture),
+            "CopilotKey" => GlobalHotkeyActivation.FromChord(GlobalHotkeyService.CopilotKeyGesture),
             _ => default
         };
         if (!GlobalHotkeyService.IsValidActivation(activation))
@@ -411,6 +412,9 @@ public sealed partial class SettingsWindow
                 activation.Gesture.VirtualKey == (int)VirtualKey.Space;
             GlobalHotkeyPresetWindowsTapButton.IsChecked =
                 activation.Kind == HotkeyActivationKind.WindowsTap;
+            GlobalHotkeyPresetCopilotKeyButton.IsChecked =
+                activation.Kind == HotkeyActivationKind.Chord &&
+                activation.Gesture.Equals(GlobalHotkeyService.CopilotKeyGesture);
             DesktopDoubleClickToggle.IsOn =
                 _settingsService.Settings.DesktopDoubleClickEnabled;
         }

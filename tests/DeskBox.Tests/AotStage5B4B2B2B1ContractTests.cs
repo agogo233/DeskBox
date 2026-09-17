@@ -264,8 +264,8 @@ public sealed class AotStage5B4B2B2B1ContractTests
         string baseline = ReadRepositoryFile(
             "tests/DeskBox.Tests/JsonSerializationBaselineContractTests.cs");
 
-        Assert.Contains("Assert.Equal(29, actual.Count);", baseline, StringComparison.Ordinal);
-        Assert.Contains("Assert.Equal(67, actual.Values.Sum());", baseline, StringComparison.Ordinal);
+        Assert.Contains("Assert.Equal(30, actual.Count);", baseline, StringComparison.Ordinal);
+        Assert.Contains("Assert.Equal(70, actual.Values.Sum());", baseline, StringComparison.Ordinal);
         Assert.Contains("Assert.Equal(27, actualContextOwners.Length);", baseline, StringComparison.Ordinal);
     }
 
@@ -276,10 +276,10 @@ public sealed class AotStage5B4B2B2B1ContractTests
         string launcher = ReadRepositoryFile("scripts/start-aot-preview.ps1");
         string project = ReadRepositoryFile("src/DeskBox/DeskBox.csproj");
 
-        Assert.Contains("$auditProfileVersion = 62", audit, StringComparison.Ordinal);
+        Assert.Contains("$auditProfileVersion = 58", audit, StringComparison.Ordinal);
         Assert.Contains("schemaVersion = 55", audit, StringComparison.Ordinal);
         Assert.Contains("stage5B4B2B2B1", audit, StringComparison.Ordinal);
-        Assert.Contains("$RequiredAuditProfileVersion = 62", launcher, StringComparison.Ordinal);
+        Assert.Contains("$RequiredAuditProfileVersion = 58", launcher, StringComparison.Ordinal);
         Assert.Contains("$RequiredSummarySchemaVersion = 55", launcher, StringComparison.Ordinal);
         Assert.Contains("stage 5B-4C3B2B1", project, StringComparison.Ordinal);
         Assert.Contains("Todo steps", project, StringComparison.Ordinal);

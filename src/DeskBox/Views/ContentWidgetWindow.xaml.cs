@@ -121,6 +121,11 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
             IsStackPopoverBlockingSurfaceOpen: true
         };
 
+    protected override void OnCompactBoundsTransitionActiveChanged(bool isActive)
+    {
+        CurrentContent?.OnCompactBoundsTransitionActiveChanged(isActive);
+    }
+
     protected override void OnResizeStart()
     {
         if (CurrentContent is IWidgetInteractiveResizeContent resizeContent)

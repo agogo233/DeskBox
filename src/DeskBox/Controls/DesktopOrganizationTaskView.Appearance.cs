@@ -1,3 +1,4 @@
+using DeskBox.Helpers;
 using DeskBox.Services;
 using Microsoft.UI.Xaml;
 
@@ -34,6 +35,10 @@ public sealed partial class DesktopOrganizationTaskView
         ReleasePreviewCards();
         ReleaseRetainedCards();
         ReleaseCompletedCards();
+        // The preview cards share one icon cache scope; the tiles are gone
+        // now, so their decoded bitmaps and thumbnails can be released
+        // instead of occupying the cache until the idle trim.
+        IconHelper.ClearCacheScope(DesktopOrganizationPreviewCard.PreviewIconCacheScope);
     }
 
     private void QueueAppearanceRefresh()

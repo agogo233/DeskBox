@@ -100,6 +100,53 @@ public sealed class ShellThumbnailProxyContractTests
     }
 
     [Fact]
+    public void ShortcutIconPayload_CropsCanvasWithFaintShellBorder()
+    {
+        // Measured shape of an icon whose registered resource is gone (an
+        // uninstalled app that left its file association behind): the Shell
+        // centers the 48 px artwork in the requested canvas and paints a
+        // near-invisible border around it. Counting that border as content used
+        // to make the padding gate miss the canvas and render a tiny glyph.
+        byte[] payload = CreateBitmapPayload(
+            width: 256,
+            height: 256,
+            visibleLeft: 111,
+            visibleTop: 106,
+            visibleWidth: 34,
+            visibleHeight: 44,
+            alpha: 0xFF,
+            faintCanvasBorder: true);
+
+        Assert.True(ShellThumbnailProxy.IsLikelyPaddedIconPayload(payload));
+
+        byte[] normalized = Assert.IsType<byte[]>(
+            ShellThumbnailProxy.NormalizeIconPayload(payload));
+        Assert.True(ShellThumbnailProxy.IsVisibleBitmapPayload(normalized));
+        Assert.False(ShellThumbnailProxy.IsLikelyPaddedIconPayload(normalized));
+        Assert.Equal(34, BitConverter.ToInt32(normalized, 18));
+        Assert.Equal(-44, BitConverter.ToInt32(normalized, 22));
+    }
+
+    [Fact]
+    public void ArtworkBelowSignificantAlpha_KeepsNonTransparentBounds()
+    {
+        // A payload whose every pixel is that faint has no artwork to frame, so
+        // the measurement must fall back to the non-transparent bounds instead
+        // of collapsing to nothing.
+        byte[] payload = CreateBitmapPayload(
+            width: 256,
+            height: 256,
+            visibleLeft: 104,
+            visibleTop: 104,
+            visibleWidth: 48,
+            visibleHeight: 48,
+            alpha: 20);
+
+        Assert.Equal(32, IconBitmapQuality.SignificantAlphaThreshold(20));
+        Assert.True(ShellThumbnailProxy.IsLikelyPaddedIconPayload(payload));
+    }
+
+    [Fact]
     public async Task IconOnlyProxy_ReturnsVisiblePixelsForPidlShortcut()
     {
         string temporaryDirectory = Path.Combine(
@@ -331,7 +378,8 @@ public sealed class ShellThumbnailProxyContractTests
         int visibleTop,
         int visibleWidth,
         int visibleHeight,
-        byte alpha)
+        byte alpha,
+        bool faintCanvasBorder = false)
     {
         const int pixelOffset = 138;
         byte[] payload = new byte[pixelOffset + (width * height * 4)];
@@ -344,6 +392,11 @@ public sealed class ShellThumbnailProxyContractTests
         BitConverter.GetBytes(-height).CopyTo(payload, 22);
         BitConverter.GetBytes((ushort)1).CopyTo(payload, 26);
         BitConverter.GetBytes((ushort)32).CopyTo(payload, 28);
+        if (faintCanvasBorder)
+        {
+            PaintFaintCanvasBorder(payload, width, height, pixelOffset);
+        }
+
         for (int y = visibleTop; y < visibleTop + visibleHeight; y++)
         {
             for (int x = visibleLeft; x < visibleLeft + visibleWidth; x++)
@@ -357,5 +410,39 @@ public sealed class ShellThumbnailProxyContractTests
         }
 
         return payload;
+    }
+
+    /// <summary>
+    /// Reproduces the border the Shell paints when it centers a small icon frame
+    /// inside a canvas it has no artwork for: a dark outer edge plus a light
+    /// inner edge whose alpha stays far below the artwork's.
+    /// </summary>
+    private static void PaintFaintCanvasBorder(
+        byte[] payload,
+        int width,
+        int height,
+        int pixelOffset)
+    {
+        for (int y = 0; y < height; y++)
+        {
+            for (int x = 0; x < width; x++)
+            {
+                int distanceToEdge = Math.Min(
+                    Math.Min(x, width - 1 - x),
+                    Math.Min(y, height - 1 - y));
+                if (distanceToEdge > 4)
+                {
+                    continue;
+                }
+
+                bool isOuterEdge = distanceToEdge <= 1;
+                int offset = pixelOffset + ((y * width + x) * 4);
+                byte value = isOuterEdge ? (byte)0x00 : (byte)0xFF;
+                payload[offset] = value;
+                payload[offset + 1] = value;
+                payload[offset + 2] = value;
+                payload[offset + 3] = isOuterEdge ? (byte)38 : (byte)90;
+            }
+        }
     }
 }

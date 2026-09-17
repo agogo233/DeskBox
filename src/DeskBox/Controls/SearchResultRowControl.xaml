@@ -27,12 +27,14 @@
             <ColumnDefinition x:Name="SizeColumn" Width="90"/>
             <ColumnDefinition x:Name="DateColumn" Width="110"/>
         </Grid.ColumnDefinitions>
+        <!-- Selection chrome is neutral: the row is selected, which is a
+             pointer-driven state, not a semantic emphasis. -->
         <Rectangle x:Name="SelectionBar" Grid.Column="0" Width="3" RadiusX="1.5" RadiusY="1.5"
-                   Fill="{ThemeResource AccentFillColorDefaultBrush}"
+                   Fill="{ThemeResource ControlStrongStrokeColorDefaultBrush}"
                    Visibility="Collapsed" VerticalAlignment="Stretch"
                    HorizontalAlignment="Left" Margin="0,7,0,7"/>
         <Border x:Name="MultiSelectedIcon" Grid.Column="0" Width="16" Height="16" CornerRadius="8"
-                Background="{ThemeResource AccentFillColorDefaultBrush}"
+                Background="{ThemeResource ControlStrongStrokeColorDefaultBrush}"
                 HorizontalAlignment="Center" VerticalAlignment="Center"
                 Visibility="Collapsed" IsHitTestVisible="False">
             <FontIcon Glyph="&#xE73E;" FontSize="9"

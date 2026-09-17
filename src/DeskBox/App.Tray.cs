@@ -122,9 +122,19 @@ public partial class App
         PrepareTrayContextMenu(contextMenu);
 
         _trayWindow = new Window();
-        _trayWindow.AppWindow.IsShownInSwitchers = false;
         AppBranding.ApplyWindowIcon(_trayWindow.AppWindow);
-        _trayWindow.AppWindow.Resize(new Windows.Graphics.SizeInt32(1, 1));
+        // Early-logon sessions can reject these windowing calls (E_NOTIMPL is
+        // observed on IsShownInSwitchers); a 1x1 host window that leaks into
+        // Alt+Tab is the acceptable degraded state, failing startup is not.
+        WindowShellState.TryHideFromSwitchers(_trayWindow.AppWindow);
+        try
+        {
+            _trayWindow.AppWindow.Resize(new Windows.Graphics.SizeInt32(1, 1));
+        }
+        catch (Exception ex)
+        {
+            Log($"[Tray] Tray window resize not applied: {ex.Message}");
+        }
 
         _trayIcon = new TaskbarIcon
         {
@@ -168,15 +178,27 @@ public partial class App
             panel.Children.Add(_trayIcon);
         }
 
-        ThemeService.TrackWindow(_trayWindow);
-        _trayWindow.Activate();
-
-        if (!_trayIcon.IsCreated)
+        try
         {
-            // Keep the process at normal QoS. Tray creation must never opt the
-            // whole application into a lower-priority efficiency mode.
-            _trayIcon.ForceCreate(enablesEfficiencyMode: false);
+            ThemeService.TrackWindow(_trayWindow);
         }
+        catch (Exception ex)
+        {
+            Log($"[Tray] Tray window theme tracking not applied: {ex.Message}");
+        }
+
+        try
+        {
+            // The tray icon is created independently of this window, so a
+            // failed activation only costs the hidden host window's state.
+            _trayWindow.Activate();
+        }
+        catch (Exception ex)
+        {
+            Log($"[Tray] Tray window activation not applied: {ex.Message}");
+        }
+
+        StartTrayIconCreationWithRetry();
 
         try
         {
@@ -201,6 +223,92 @@ public partial class App
         });
 
         ThemeService.AppearanceChanged += UpdateTrayIconAppearance;
+    }
+
+    /// <summary>Attempts per tray creation pass through the early-logon window
+    /// where the taskbar may not exist yet (roughly the first 30 seconds after
+    /// logon in the field reports).</summary>
+    private const int TrayCreationMaxAttempts = 15;
+
+    private static readonly TimeSpan TrayCreationRetryDelay = TimeSpan.FromSeconds(2);
+
+    private Task<bool>? _trayIconCreationTask;
+
+    /// <summary>
+    /// Creates the tray icon, retrying through the early-logon race that makes
+    /// the first attempt fail (H.NotifyIcon TryCreate failures and E_NOTIMPL
+    /// windowing calls both recover once the shell finishes starting). The
+    /// first attempt runs inline so the normal path is unchanged; later
+    /// attempts continue on the UI thread while the rest of startup proceeds.
+    /// </summary>
+    private Task<bool> StartTrayIconCreationWithRetry()
+    {
+        _trayIconCreationTask ??= CreateTrayIconSurfaceWithRetryAsync();
+        return _trayIconCreationTask;
+    }
+
+    private async Task<bool> CreateTrayIconSurfaceWithRetryAsync()
+    {
+        for (int attempt = 1; ; attempt++)
+        {
+            try
+            {
+                if (_trayIcon is { IsCreated: false })
+                {
+                    // Keep the process at normal QoS. Tray creation must never
+                    // opt the whole application into a lower-priority
+                    // efficiency mode.
+                    _trayIcon.ForceCreate(enablesEfficiencyMode: false);
+                }
+
+                if (IsTraySurfaceUsable())
+                {
+                    MarkStartupLifelineEstablished();
+                    if (attempt > 1)
+                    {
+                        Log($"[Tray] Tray surface created on retry attempt {attempt}");
+                    }
+
+                    return true;
+                }
+            }
+            catch (Exception ex)
+            {
+                Log($"[Tray] Tray creation attempt {attempt} failed: {ex.Message}");
+            }
+
+            if (attempt >= TrayCreationMaxAttempts)
+            {
+                Log(
+                    "[Tray] Tray surface was not created after " +
+                    $"{attempt} attempts; continuing without the tray icon");
+                return false;
+            }
+
+            await Task.Delay(TrayCreationRetryDelay);
+        }
+    }
+
+    /// <summary>
+    /// Mirrors the tray surface checks the AOT smoke harness pins: the icon
+    /// must exist, own a message window, and have a real host window. Once this
+    /// holds, startup has something the user can act on and exceptions stop
+    /// being fatal.
+    /// </summary>
+    private bool IsTraySurfaceUsable()
+    {
+        try
+        {
+            return _trayIcon is { IsCreated: true } trayIcon &&
+                trayIcon.TrayIcon.WindowHandle != IntPtr.Zero &&
+                _trayWindow is not null &&
+                WindowNative.GetWindowHandle(_trayWindow) != IntPtr.Zero;
+        }
+        catch (Exception ex)
+        {
+            Log($"[Tray] Tray surface probe failed: {ex.Message}");
+            return false;
+        }
     }
 
     private MenuFlyoutItem CreateTrayCreateWidgetItem(
@@ -749,45 +857,92 @@ public partial class App
 
     internal async Task CreateFolderWidgetFromPickerAsync()
     {
-        if (WidgetManager is null)
-        {
-            return;
-        }
-
         string? folderPath = await FolderPickerService.PickFolderAsync(
             GetFolderPickerOwnerWindowHandle());
         if (!string.IsNullOrWhiteSpace(folderPath))
         {
+            await TryCreateFolderWidgetAsync(folderPath);
+        }
+    }
+
+    /// <summary>
+    /// Creates a mapped widget, or resolves a path conflict visibly: the
+    /// conflicting widget is revealed, or the storage settings open. A toast
+    /// alone was easy to miss and left users thinking mapping was broken.
+    /// </summary>
+    internal async Task TryCreateFolderWidgetAsync(string folderPath)
+    {
+        if (WidgetManager is not { } widgetManager)
+        {
+            return;
+        }
+
+        if (widgetManager.TryGetFileWidgetPathConflict(folderPath, out FileWidgetPathConflict? conflict) &&
+            conflict is not null)
+        {
+            await HandleFolderMappingConflictAsync(conflict);
+            return;
+        }
+
+        try
+        {
+            await widgetManager.CreateFolderWidgetAsync(folderPath);
+        }
+        catch (Exception ex)
+        {
+            ShowFolderMappingFailure(ex.Message);
+        }
+    }
+
+    private async Task HandleFolderMappingConflictAsync(FileWidgetPathConflict conflict)
+    {
+        if (conflict.Kind == FileWidgetPathConflictKind.ExistingWidget &&
+            conflict.ConflictingWidget is { } existing &&
+            WidgetManager is { } widgetManager)
+        {
+            ShowFolderMappingFailure(LocalizationService.Format(
+                "Widget.MapFolder.ConflictWidgetHint",
+                existing.Name));
             try
             {
-                await WidgetManager.CreateFolderWidgetAsync(folderPath);
+                await widgetManager.ShowWidgetAsync(existing.Id, reveal: true);
             }
             catch (Exception ex)
             {
-                string title = LocalizationService.T("Common.NewFolderMapping");
-                if (_nativeNotificationService?.TryShow(title, ex.Message) == true || _trayIcon is null)
-                {
-                    return;
-                }
-
-                try
-                {
-                    _trayIcon.ShowNotification(
-                        title,
-                        ex.Message,
-                        NotificationIcon.Info,
-                        customIconHandle: null,
-                        largeIcon: false,
-                        sound: false,
-                        respectQuietTime: true,
-                        realtime: false,
-                        timeout: TimeSpan.FromSeconds(7));
-                }
-                catch (Exception notificationException)
-                {
-                    Log($"[WidgetMapping] Failed to show path conflict: {notificationException.Message}");
-                }
+                Log($"[WidgetMapping] Could not reveal the conflicting widget: {ex.Message}");
             }
+
+            return;
+        }
+
+        ShowFolderMappingFailure(LocalizationService.T("Widget.MapFolder.ConflictRootHint"));
+        ShowSettings("FileStorageSettings");
+    }
+
+    private void ShowFolderMappingFailure(string message)
+    {
+        string title = LocalizationService.T("Common.NewFolderMapping");
+        if (_nativeNotificationService?.TryShow(title, message) == true || _trayIcon is null)
+        {
+            return;
+        }
+
+        try
+        {
+            _trayIcon.ShowNotification(
+                title,
+                message,
+                NotificationIcon.Info,
+                customIconHandle: null,
+                largeIcon: false,
+                sound: false,
+                respectQuietTime: true,
+                realtime: false,
+                timeout: TimeSpan.FromSeconds(7));
+        }
+        catch (Exception notificationException)
+        {
+            Log($"[WidgetMapping] Failed to show path conflict: {notificationException.Message}");
         }
     }
 

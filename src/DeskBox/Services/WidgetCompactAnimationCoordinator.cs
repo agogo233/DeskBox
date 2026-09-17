@@ -23,6 +23,14 @@ internal static class WidgetCompactAnimationCoordinator
     // serializing transitions.
     internal const int MaximumConcurrentBoundsTransitions = int.MaxValue;
 
+    /// <summary>
+    /// How long a hover-pre-armed idle clock stays up without a real
+    /// registration. Hover intent precedes every capsule expansion, so a
+    /// short window keeps repeated hover/expand cycles warm without holding
+    /// the compositor clock boost at rest.
+    /// </summary>
+    internal const double PreArmLingerSeconds = 5;
+
     private static readonly Dictionary<long, Action> FrameCallbacks = [];
     private static readonly Dictionary<long, FrameTarget> FrameTargets = [];
     private static KeyValuePair<long, Action>[] s_frameCallbackSnapshot = [];
@@ -33,6 +41,9 @@ internal static class WidgetCompactAnimationCoordinator
     private static bool s_isRenderingSubscribed;
     private static bool s_isDispatchingFrame;
     private static IDisposable? s_clockBoostLease;
+    private static bool s_isClockPreArmed;
+    private static DispatcherQueue? s_preArmLingerDispatcher;
+    private static DispatcherQueueTimer? s_preArmLingerTimer;
     private static DispatcherQueue? s_windows10FrameDispatcher;
     private static DispatcherQueueTimer? s_windows10FrameTimer;
     private static Windows10ClockRun? s_windows10ClockRun;
@@ -43,6 +54,14 @@ internal static class WidgetCompactAnimationCoordinator
     private static long s_lastFrameTickTimestamp;
     private static double s_frameTickBudgetMs;
     private static long s_recentOverrunMask;
+
+    // Diagnostics for that same mask. The interaction-backdrop policy reads it,
+    // but its only log site sits inside the Win10-only downgrade path, so on
+    // Win11 frame overruns are unobservable. Throttled to one line per second
+    // and silent while frames keep their budget.
+    private static long s_lastOverrunLogTimestamp;
+    private static int s_overrunsSinceLog;
+    private static int s_framesSinceLog;
 
     private enum Windows10FrameClockSource
     {
@@ -128,6 +147,70 @@ internal static class WidgetCompactAnimationCoordinator
     }
 
     /// <summary>
+    /// Starts the shared frame clock before the first real registration. The
+    /// first capsule expansion of a session otherwise pays clock startup —
+    /// boost lease, Win10 DwmFlush thread, display-timing cache — inside its
+    /// opening frames. Pointer-entered hover intent is the caller. The linger
+    /// timer tears an unused clock back down.
+    /// </summary>
+    internal static void PreArmFrameClock(IntPtr windowHandle)
+    {
+        if (s_isRenderingSubscribed)
+        {
+            return;
+        }
+
+        DispatcherQueue? dispatcher = DispatcherQueue.GetForCurrentThread();
+        if (windowHandle != IntPtr.Zero)
+        {
+            // Populate this monitor's budget and start the background topology
+            // query away from the animation's first frame.
+            _ = GetFrameBudgetMilliseconds(windowHandle);
+        }
+
+        if (dispatcher is null)
+        {
+            // Without a dispatcher there is no Win10 pacer and no linger
+            // teardown owner; leave the clock cold instead of subscribing an
+            // unowned frame source.
+            return;
+        }
+
+        s_isClockPreArmed = true;
+        s_clockBoostLease ??= CompositorClockBoostCoordinator.Acquire();
+        s_isRenderingSubscribed = true;
+        StartFrameClock();
+        if (s_preArmLingerTimer is null ||
+            !ReferenceEquals(s_preArmLingerDispatcher, dispatcher))
+        {
+            s_preArmLingerDispatcher = dispatcher;
+            s_preArmLingerTimer = dispatcher.CreateTimer();
+            s_preArmLingerTimer.IsRepeating = false;
+            s_preArmLingerTimer.Tick += OnPreArmLingerTick;
+        }
+
+        s_preArmLingerTimer.Interval = TimeSpan.FromSeconds(PreArmLingerSeconds);
+        s_preArmLingerTimer.Start();
+    }
+
+    private static void OnPreArmLingerTick(DispatcherQueueTimer sender, object args)
+    {
+        sender.Stop();
+        if (!s_isClockPreArmed || FrameCallbacks.Count > 0 || !s_isRenderingSubscribed)
+        {
+            return;
+        }
+
+        s_isClockPreArmed = false;
+        s_isRenderingSubscribed = false;
+        StopFrameClock();
+        s_clockBoostLease?.Dispose();
+        s_clockBoostLease = null;
+        WidgetAnimationDisplayTiming.Clear();
+        s_lastFrameTickTimestamp = 0;
+    }
+
+    /// <summary>
     /// Queues one real HWND bounds update for the current compositor tick. All
     /// concurrent capsule transitions are committed atomically after their
     /// callbacks finish, avoiding N independent DWM commits without changing
@@ -174,6 +257,19 @@ internal static class WidgetCompactAnimationCoordinator
             s_clockBoostLease = CompositorClockBoostCoordinator.Acquire();
             StartFrameClock();
         }
+        else if (s_isClockPreArmed && FrameCallbacks.Count == 1)
+        {
+            // The first real registration adopts a running pre-armed clock.
+            // Idle-linger ticks must not seed the overrun mask that the
+            // interaction-backdrop simplification policy reads.
+            s_recentOverrunMask = 0;
+            s_lastFrameTickTimestamp = 0;
+        }
+
+        // Real registrations now own the clock; the last unregister tears it
+        // down, so the pre-arm linger no longer applies.
+        s_isClockPreArmed = false;
+        s_preArmLingerTimer?.Stop();
 
         return new Registration(registrationId);
     }
@@ -359,10 +455,54 @@ internal static class WidgetCompactAnimationCoordinator
                 bool overrun = intervalMs > s_frameTickBudgetMs *
                     WidgetCompactFrameSkipPolicy.OverrunBudgetFactor;
                 s_recentOverrunMask = (s_recentOverrunMask << 1) | (overrun ? 1L : 0L);
+                if (overrun)
+                {
+                    s_overrunsSinceLog++;
+                }
             }
         }
 
         s_lastFrameTickTimestamp = now;
+        s_framesSinceLog++;
+        MaybeLogFrameOverruns(now);
+    }
+
+    /// <summary>
+    /// Surfaces the frame-overrun mask, which is otherwise read only by the
+    /// Win10 interaction-backdrop path. Verbose-gated, silent while frames keep
+    /// their budget, at most one line per second.
+    /// </summary>
+    private static void MaybeLogFrameOverruns(long now)
+    {
+        if (!App.IsVerboseLoggingEnabled)
+        {
+            return;
+        }
+
+        bool firstTick = s_lastOverrunLogTimestamp == 0;
+        if (!firstTick &&
+            Stopwatch.GetElapsedTime(s_lastOverrunLogTimestamp, now).TotalSeconds < 1.0)
+        {
+            return;
+        }
+
+        if (firstTick)
+        {
+            App.LogVerbose(
+                "[AnimationClock] frame-overrun monitor active: at most one line " +
+                "per second, and only when frames miss the budget");
+        }
+        else if (s_overrunsSinceLog > 0)
+        {
+            App.LogVerbose(
+                $"[AnimationClock] frame overruns={s_overrunsSinceLog}/{s_framesSinceLog} " +
+                $"recent={System.Numerics.BitOperations.PopCount((ulong)s_recentOverrunMask)}/64 " +
+                $"budgetMs={s_frameTickBudgetMs:F1}");
+        }
+
+        s_overrunsSinceLog = 0;
+        s_framesSinceLog = 0;
+        s_lastOverrunLogTimestamp = now;
     }
 
     private static void ResetFrameTickBudget(TimeSpan expectedInterval)
@@ -374,6 +514,9 @@ internal static class WidgetCompactAnimationCoordinator
     private static void OnRendering(object? sender, object args)
     {
         if (!s_isRenderingSubscribed || s_isDispatchingFrame) return;
+        // A pre-armed idle clock has no callbacks to dispatch, and its ticks
+        // carry no evidence about real animation cadence.
+        if (FrameCallbacks.Count == 0) return;
         RefreshFrameBudgets();
         RecordFrameTickCadence();
         PendingBoundsMoves.Clear();
@@ -466,7 +609,11 @@ internal static class WidgetCompactAnimationCoordinator
                         if (!moved) move.Fallback();
                         succeeded[i] = true;
                     }
-                    catch (Exception ex) { App.Log($"[CompactBoundsBatch] Window commit failed: {ex.Message}"); }
+                    catch (Exception ex)
+                    {
+                        App.Log(
+                            "[CompactBoundsBatch] Window commit failed: " + ex);
+                    }
                 }
             }
         }
@@ -475,7 +622,11 @@ internal static class WidgetCompactAnimationCoordinator
             for (int i = 0; i < moves.Length; i++)
             {
                 try { moves[i].AfterCommit(succeeded[i]); }
-                catch (Exception ex) { App.Log($"[CompactBoundsBatch] Completion failed: {ex.Message}"); }
+                catch (Exception ex)
+                {
+                    App.Log(
+                        "[CompactBoundsBatch] Completion failed: " + ex);
+                }
             }
 
             double elapsedMs = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
@@ -535,6 +686,8 @@ internal static class WidgetCompactAnimationCoordinator
 
         StopFrameClock();
         s_isRenderingSubscribed = false;
+        s_isClockPreArmed = false;
+        s_preArmLingerTimer?.Stop();
         s_frameCallbackSnapshot = [];
         s_frameCallbackSnapshotDirty = false;
         s_clockBoostLease?.Dispose();

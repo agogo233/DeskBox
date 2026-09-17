@@ -21,7 +21,10 @@ public sealed class WidgetContentFactory
         _contentProviders = CreateContentProviders();
     }
 
-    private static readonly IReadOnlyList<WidgetContentDescriptor> DescriptorList =
+    // Single source of truth for the widget kind inventory. Declaration order
+    // is meaningful: FeatureWidgetSettings derives its ordered feature-kind
+    // list from it, and the settings normalizer walks that list.
+    internal static readonly IReadOnlyList<WidgetContentDescriptor> DescriptorList =
     [
         new(
             WidgetKind.File,
@@ -43,6 +46,7 @@ public sealed class WidgetContentFactory
             "WidgetContent.QuickCapture.StatusLabel",
             "WidgetContent.QuickCapture.StatusDescription",
             HasSettingsPage: true,
+            IsFeatureWidget: true,
             SettingsSectionTag: "QuickCaptureSettings"),
         new(
             WidgetKind.Todo,
@@ -55,6 +59,7 @@ public sealed class WidgetContentFactory
             "WidgetContent.Todo.StatusDescription",
             "Todo.NewWidget",
             HasSettingsPage: true,
+            IsFeatureWidget: true,
             SettingsSectionTag: "TodoSettings"),
         new(
             WidgetKind.Music,
@@ -66,6 +71,7 @@ public sealed class WidgetContentFactory
             "WidgetContent.Music.StatusLabel",
             "WidgetContent.Music.StatusDescription",
             HasSettingsPage: true,
+            IsFeatureWidget: true,
             SettingsSectionTag: "MusicSettings",
             ChromeCategory: WidgetChromeCategory.Display,
             DefaultChromeMode: WidgetChromeMode.Overlay),
@@ -79,6 +85,7 @@ public sealed class WidgetContentFactory
             "WidgetContent.Weather.StatusLabel",
             "WidgetContent.Weather.StatusDescription",
             HasSettingsPage: true,
+            IsFeatureWidget: true,
             SettingsSectionTag: "WeatherSettings",
             ChromeCategory: WidgetChromeCategory.Display,
             DefaultChromeMode: WidgetChromeMode.Overlay),
@@ -112,6 +119,7 @@ public sealed class WidgetContentFactory
             "WidgetContent.Search.StatusLabel",
             "WidgetContent.Search.StatusDescription",
             HasSettingsPage: true,
+            IsFeatureWidget: true,
             SettingsSectionTag: "SearchSettings",
             DefaultChromeMode: WidgetChromeMode.Standard),
         new(
@@ -124,6 +132,7 @@ public sealed class WidgetContentFactory
             "WidgetContent.Glance.StatusLabel",
             "WidgetContent.Glance.StatusDescription",
             HasSettingsPage: true,
+            IsFeatureWidget: true,
             SettingsSectionTag: "GlanceSettings",
             ChromeCategory: WidgetChromeCategory.Display,
             DefaultChromeMode: WidgetChromeMode.Overlay)

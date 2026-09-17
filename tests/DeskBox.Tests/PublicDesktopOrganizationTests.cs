@@ -120,12 +120,16 @@ public sealed class PublicDesktopOrganizationTests : IDisposable
             string dest = Path.Combine(Storage, Path.GetFileName(source));
             Directory.CreateDirectory(Storage);
             File.Move(source, dest);
-            journal.Items.Add(new DesktopOrganizationRecoveryItem
+            var recoveryItem = new DesktopOrganizationRecoveryItem
             {
                 SourcePath = source, DestinationPath = dest, Completed = true,
                 SourceScope = source == shared ? DesktopOrganizationSourceScope.Public : DesktopOrganizationSourceScope.Personal,
                 Size = new FileInfo(dest).Length, LastWriteTimeUtc = File.GetLastWriteTimeUtc(dest)
-            });
+            };
+            // A real interrupted transaction records the destination object
+            // identity alongside the receipt.
+            DesktopOrganizationTransaction.RecordDestinationIdentity(recoveryItem, dest);
+            journal.Items.Add(recoveryItem);
         }
         await Recovery.SaveAsync(journal);
         var transfer = new FakeTransfer();

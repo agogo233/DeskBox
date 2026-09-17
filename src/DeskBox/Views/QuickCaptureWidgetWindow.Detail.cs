@@ -595,10 +595,10 @@ public sealed partial class QuickCaptureWidgetWindow
         foreach (Button button in GetMaterialButtons())
         {
             bool isSelected = string.Equals(button.Tag as string, _detailAppearance.ToString(), StringComparison.Ordinal);
+            // A selected swatch ring is a selection state, so it uses the
+            // neutral strong stroke rather than the accent.
             button.BorderBrush = isSelected
-                ? new SolidColorBrush(
-                    App.Current.ThemeService?.GetEffectiveAccentColor() ??
-                    AccentColorHelper.DefaultAccentColor)
+                ? new SolidColorBrush(NeutralInteractionBrush.Line(button))
                 : new SolidColorBrush(Colors.Transparent);
             button.BorderThickness = new Thickness(isSelected ? 1.5 : 1);
         }

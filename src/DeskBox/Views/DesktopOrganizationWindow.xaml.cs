@@ -65,6 +65,7 @@ public sealed partial class DesktopOrganizationWindow : Window
         TaskView.OrganizationUndone += TaskView_OrganizationUndone;
         _appWindow.Closing += AppWindow_Closing;
         AppTitleBar.ActualThemeChanged += AppTitleBar_ActualThemeChanged;
+        Closed += DesktopOrganizationWindow_ClosedInternal;
         Closed += DesktopOrganizationWindow_Closed;
         ResizeAndCenter(windowId);
         ApplyTitleBarColors();
@@ -73,6 +74,8 @@ public sealed partial class DesktopOrganizationWindow : Window
     public event EventHandler? OrganizationCompleted;
 
     public event EventHandler? OrganizationUndone;
+
+    public IntPtr WindowHandle => _hWnd;
 
     public void SetOwner(IntPtr ownerHwnd)
     {
@@ -98,7 +101,12 @@ public sealed partial class DesktopOrganizationWindow : Window
         }
 
         _appWindow.Show();
-        Win32Helper.BringWindowTemporarilyToFront(_hWnd);
+        // Route through the manager so a quick-reveal raised session (widget
+        // group held topmost) lifts this window above the widgets instead of
+        // leaving it in the normal band below them.
+        App.Current.WidgetManager?.BringAuxiliaryWindowToFront(
+            _hWnd,
+            "desktop-organization-shown");
         Activate();
         _ = Win32Helper.SetForegroundWindow(_hWnd);
     }
@@ -296,5 +304,17 @@ public sealed partial class DesktopOrganizationWindow : Window
         _appWindow.Closing -= AppWindow_Closing;
         AppTitleBar.ActualThemeChanged -= AppTitleBar_ActualThemeChanged;
         Closed -= DesktopOrganizationWindow_Closed;
+    }
+
+    private void DesktopOrganizationWindow_ClosedInternal(object sender, WindowEventArgs args)
+    {
+        // This window closes for real (no hide-and-reuse), so leaving the
+        // quick-reveal raised band happens on teardown; the manager skips
+        // destroyed handles either way, but releasing keeps the guest
+        // registry exact for the sweep logs.
+        App.Current.WidgetManager?.ReleaseRaisedBandGuest(
+            _hWnd,
+            "desktop-organization-closed");
+        Closed -= DesktopOrganizationWindow_ClosedInternal;
     }
 }

@@ -517,14 +517,14 @@
                                     Style="{StaticResource WidgetRowHoverBackgroundStyle}" />
                                 <Border
                                     Grid.ColumnSpan="2"
-                                    Background="{ThemeResource AccentFillColorDefaultBrush}"
+                                    Background="{ThemeResource SubtleFillColorTertiaryBrush}"
                                     CornerRadius="4"
                                     Margin="{Binding ElementName=ItemsListView, Path=DataContext.ItemChromeMargin}"
                                     Opacity="0.18"
                                     Visibility="{Binding CopySelectionVisibility}" />
                                 <Border
                                     Grid.ColumnSpan="2"
-                                    Background="{ThemeResource AccentFillColorDefaultBrush}"
+                                    Background="{ThemeResource SubtleFillColorSecondaryBrush}"
                                     CornerRadius="4"
                                     Margin="{Binding ElementName=ItemsListView, Path=DataContext.ItemChromeMargin}"
                                     Opacity="0.10"
@@ -533,7 +533,7 @@
                                     Width="2"
                                     Margin="{Binding ElementName=ItemsListView, Path=DataContext.ItemChromeMargin}"
                                     HorizontalAlignment="Left"
-                                    Background="{ThemeResource AccentFillColorDefaultBrush}"
+                                    Background="{ThemeResource ControlStrongStrokeColorDefaultBrush}"
                                     CornerRadius="1"
                                     Visibility="{Binding DetailSelectionVisibility}" />
                                     <StackPanel

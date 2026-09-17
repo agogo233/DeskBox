@@ -679,6 +679,68 @@ public sealed class WidgetManagerStorageCleanupTests : IDisposable
         Assert.StartsWith("race", Path.GetFileName(finalPath), StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void TryGetFileWidgetPathConflict_ReportsManagedStorageRootOverlap()
+    {
+        Assert.True(_widgetManager.TryGetFileWidgetPathConflict(
+            Path.Combine(_storageRoot, "new-folder"),
+            out FileWidgetPathConflict? rootConflict));
+        Assert.Equal(FileWidgetPathConflictKind.ManagedStorageRoot, rootConflict!.Kind);
+        Assert.Null(rootConflict.ConflictingWidget);
+    }
+
+    [Fact]
+    public void TryGetFileWidgetPathConflict_ReportsTheConflictingWidget()
+    {
+        string mappedFolder = Directory.CreateDirectory(Path.Combine(_tempRoot, "mapped-conflict")).FullName;
+        var widget = new WidgetConfig
+        {
+            Id = "mapped-widget",
+            Name = "Mapped",
+            WidgetKind = WidgetKind.File,
+            MappedFolderPath = mappedFolder,
+            FollowsDefaultStoragePath = false
+        };
+        _settingsService.Settings.Widgets.Add(widget);
+
+        Assert.True(_widgetManager.TryGetFileWidgetPathConflict(
+            mappedFolder,
+            out FileWidgetPathConflict? conflict));
+        Assert.Equal(FileWidgetPathConflictKind.ExistingWidget, conflict!.Kind);
+        Assert.Equal("mapped-widget", conflict.ConflictingWidget!.Id);
+    }
+
+    [Fact]
+    public void TryGetFileWidgetPathConflict_HonorsExclusionAndReportsNoConflict()
+    {
+        string mappedFolder = Directory.CreateDirectory(Path.Combine(_tempRoot, "mapped-excluded")).FullName;
+        var widget = new WidgetConfig
+        {
+            Id = "excluded-widget",
+            Name = "Mapped",
+            WidgetKind = WidgetKind.File,
+            MappedFolderPath = mappedFolder,
+            FollowsDefaultStoragePath = false
+        };
+        _settingsService.Settings.Widgets.Add(widget);
+        string freeFolder = Directory.CreateDirectory(Path.Combine(_tempRoot, "free")).FullName;
+
+        Assert.True(_widgetManager.TryGetFileWidgetPathConflict(
+            mappedFolder,
+            out _,
+            excludedWidgetId: "another-widget"));
+        Assert.True(_widgetManager.TryGetFileWidgetPathConflict(mappedFolder, out _));
+        Assert.False(_widgetManager.TryGetFileWidgetPathConflict(
+            mappedFolder,
+            out FileWidgetPathConflict? excluded,
+            excludedWidgetId: widget.Id));
+        Assert.Null(excluded);
+        Assert.False(_widgetManager.TryGetFileWidgetPathConflict(
+            freeFolder,
+            out FileWidgetPathConflict? none));
+        Assert.Null(none);
+    }
+
     private static WidgetConfig CreateManagedWidget(string name, string folderPath)
     {
         return new WidgetConfig

@@ -115,6 +115,7 @@ public sealed partial class WidgetShell : UserControl
 
     private const double MoreMenuPointerOffsetDips = 4;
     private const long MoreMenuPointerMaximumAgeMilliseconds = 1000;
+    private const double TitleBarClickDragThresholdSquared = 25;
     private const double CompactMarqueeGap = 32;
     private const double CompactMarqueeStartDelayMs = 900;
     private const double CompactMarqueeSpeedPixelsPerSecond = 50;
@@ -299,6 +300,11 @@ public sealed partial class WidgetShell : UserControl
     private DragHandleClickAction _pendingDragHandleClickAction;
     private bool _hasDragHandlePressMoved;
     private Windows.Foundation.Point _dragHandlePressPoint;
+    private bool _isTitleBarPressTrackingClick;
+    private bool _hasTitleBarPressMoved;
+    private bool _suppressNextTitleBarClickCollapse;
+    private Windows.Foundation.Point _titleBarPressPoint;
+    private DispatcherQueueTimer? _titleBarClickCollapseTimer;
     private double _compactOuterCornerRadius = 16;
     private double _compactInnerCornerRadius = 8;
     private double _compactMediaCornerRadius = 8;
@@ -431,6 +437,8 @@ public sealed partial class WidgetShell : UserControl
             }
         };
         ActualThemeChanged += (_, _) => ApplyFullBleedOverlayTheme();
+        ActualThemeChanged += (_, _) =>
+            UpdateCompactGroupPositionRail(_groupPresentation);
         Unloaded += (_, _) =>
         {
             StopCompactMarquee();
@@ -801,7 +809,11 @@ public sealed partial class WidgetShell : UserControl
             WidgetGroupNavigationInteractionPolicy.ResolvePositionRailSlots(
                 activeIndex,
                 presentation.Members.Count);
-        var accentBrush = SharedBrushCache.GetOrCreate(TitleIconAccentColor);
+        // The compact pager dots are a selected-position indicator, so they
+        // draw the neutral interaction tone; the theme-flip subscription
+        // re-resolves it because the color is copied at paint time.
+        var railBrush = SharedBrushCache.GetOrCreate(
+            NeutralInteractionBrush.Line(this));
         foreach (WidgetGroupPositionRailSlot slot in slots)
         {
             bool active = slot.IsActive;
@@ -810,7 +822,7 @@ public sealed partial class WidgetShell : UserControl
                 Width = 3,
                 Height = active ? 7 : 3,
                 HorizontalAlignment = HorizontalAlignment.Center,
-                Background = accentBrush,
+                Background = railBrush,
                 CornerRadius = new CornerRadius(1.5),
                 IsHitTestVisible = false,
                 Opacity = active ? 0.94 : 0.3
@@ -836,6 +848,16 @@ public sealed partial class WidgetShell : UserControl
     public void SetGroupMemberLoading(string? widgetId, bool isLoading)
     {
         GroupTitleSwitcher.SetMemberLoading(widgetId, isLoading);
+    }
+
+    internal void ObserveGroupTabDragHover(TabViewItem? tab)
+    {
+        GroupTitleSwitcher.ObserveNativeDragHoverTab(tab);
+    }
+
+    internal void CancelGroupTabDragHover()
+    {
+        GroupTitleSwitcher.CancelDragHoverSwitch();
     }
 
     public void SetGroupDropPreview(
@@ -888,21 +910,22 @@ public sealed partial class WidgetShell : UserControl
 
     private void ApplyGroupDropPreviewAppearance(bool ready, bool blocked)
     {
-        Color accent =
-            App.Current?.ThemeService?.GetEffectiveAccentColor() ??
-            AccentColorHelper.DefaultAccentColor;
-        byte borderAlpha = ready ? (byte)0xF0 : blocked ? (byte)0xA8 : (byte)0xD0;
+        // Where a dragged widget group would land is a drag state, so the
+        // preview outline and its icon draw the neutral interaction tone; ready
+        // and blocked still read differently through opacity.
+        Color neutral = NeutralInteractionBrush.Line(this);
+        byte toneAlpha = ready ? (byte)0xF0 : blocked ? (byte)0xA8 : (byte)0xD0;
         GroupDropPreview.Background = SharedBrushCache.GetOrCreate(Colors.Transparent);
         GroupDropPreview.BorderBrush = SharedBrushCache.GetOrCreate(Color.FromArgb(
-            borderAlpha,
-            accent.R,
-            accent.G,
-            accent.B));
+            (byte)(neutral.A * toneAlpha / 255),
+            neutral.R,
+            neutral.G,
+            neutral.B));
         GroupDropPreviewIcon.Foreground = SharedBrushCache.GetOrCreate(Color.FromArgb(
             0xFF,
-            accent.R,
-            accent.G,
-            accent.B));
+            neutral.R,
+            neutral.G,
+            neutral.B));
 
         if (WindowsCompatibilityService.IsHighContrast)
         {
@@ -1680,6 +1703,15 @@ public sealed partial class WidgetShell : UserControl
         }
     }
 
+    /// <summary>
+    /// Forwards the host window's bounds-transition activity to the hosted
+    /// content so incremental visual work can hold during the animation.
+    /// </summary>
+    internal void NotifyCompactBoundsTransitionActive(bool isActive)
+    {
+        _hostedContent?.OnCompactBoundsTransitionActiveChanged(isActive);
+    }
+
     public bool WarmCompactExpansionLayout(
         double targetWindowWidth,
         double targetWindowHeight,
@@ -1758,6 +1790,7 @@ public sealed partial class WidgetShell : UserControl
             // Reaching this point without an exception is the readiness signal;
             // treating host-clipped ActualSize as failure caused the same hidden
             // layout to repeat every retry interval until the user expanded it.
+            PrewarmCompactTransitionCompositionResources();
             return true;
         }
         finally
@@ -1921,33 +1954,47 @@ public sealed partial class WidgetShell : UserControl
         {
             // Real HWND resizing remains on the UI thread. These independent
             // visual properties run on Composition on both Windows 10 and 11.
-            StartCompactOpacityAnimation(
-                CollapsedChromeLayer,
-                progress => _compactTransitionProfile.GetCompactSurfaceOpacity(collapsed, progress));
-            StartCompactOpacityAnimation(
-                TitleBarGrid,
-                progress => _compactTransitionProfile.GetLiveContentOpacity(collapsed, progress));
-            StartCompactOpacityAnimation(
-                ShellContentPresenter,
-                progress => _compactTransitionProfile.GetLiveContentOpacity(collapsed, progress));
-            StartCompactTranslationAnimation(
-                TitleBarGrid,
-                progress => _compactTransitionProfile.GetLiveContentTranslationY(collapsed, progress));
-            StartCompactTranslationAnimation(
-                ShellContentPresenter,
-                progress => _compactTransitionProfile.GetLiveContentTranslationY(collapsed, progress));
-            StartCompactOpacityAnimation(
-                CompactIdentityHost,
-                progress => _compactTransitionProfile.GetCompactIdentityOpacity(collapsed, progress));
-            StartCompactOpacityAnimation(
-                CompactTextContainer,
-                progress => _compactTransitionProfile.GetCompactTextOpacity(collapsed, progress));
-            StartCompactOpacityAnimation(
-                CompactBadge,
-                progress => _compactTransitionProfile.GetCompactTextOpacity(collapsed, progress));
-            StartCompactOpacityAnimation(
-                CompactLiveIndicatorHost,
-                progress => _compactTransitionProfile.GetCompactTextOpacity(collapsed, progress));
+            // Each direction only animates the properties the visual profile
+            // actually changes: expanding holds the live tree and compact
+            // identity at their final values (opacity 1, no offset) while the
+            // capsule surface fades out; collapsing keeps the capsule surface
+            // opaque while the live tree fades and rises. Constant key-frame
+            // animations only added start/stop cost to the opening frames;
+            // the skipped elements already sit at their base values.
+            if (collapsed)
+            {
+                StartCompactOpacityAnimation(
+                    TitleBarGrid,
+                    progress => _compactTransitionProfile.GetLiveContentOpacity(collapsed, progress));
+                StartCompactOpacityAnimation(
+                    ShellContentPresenter,
+                    progress => _compactTransitionProfile.GetLiveContentOpacity(collapsed, progress));
+                StartCompactTranslationAnimation(
+                    TitleBarGrid,
+                    progress => _compactTransitionProfile.GetLiveContentTranslationY(collapsed, progress));
+                StartCompactTranslationAnimation(
+                    ShellContentPresenter,
+                    progress => _compactTransitionProfile.GetLiveContentTranslationY(collapsed, progress));
+                StartCompactOpacityAnimation(
+                    CompactIdentityHost,
+                    progress => _compactTransitionProfile.GetCompactIdentityOpacity(collapsed, progress));
+                StartCompactOpacityAnimation(
+                    CompactTextContainer,
+                    progress => _compactTransitionProfile.GetCompactTextOpacity(collapsed, progress));
+                StartCompactOpacityAnimation(
+                    CompactBadge,
+                    progress => _compactTransitionProfile.GetCompactTextOpacity(collapsed, progress));
+                StartCompactOpacityAnimation(
+                    CompactLiveIndicatorHost,
+                    progress => _compactTransitionProfile.GetCompactTextOpacity(collapsed, progress));
+            }
+            else
+            {
+                StartCompactOpacityAnimation(
+                    CollapsedChromeLayer,
+                    progress => _compactTransitionProfile.GetCompactSurfaceOpacity(collapsed, progress));
+            }
+
             bool hasFullBleed = _compactPresentation?.UseFullBleedBackground == true &&
                 _compactPresentation.Thumbnail is not null;
             if (hasFullBleed)
@@ -2086,7 +2133,22 @@ public sealed partial class WidgetShell : UserControl
             if (hasTranslationAnimation &&
                 (element == TitleBarGrid || element == ShellContentPresenter))
             {
+                // StopAnimation throws ArgumentException for a property that
+                // was never created, which happens when an expansion completes
+                // without any animated collapse ever having run (a capsule
+                // restored straight from launch). Enabling translation is
+                // idempotent and guarantees the property exists; the crash
+                // otherwise aborts the completion chain and leaves the capsule
+                // layer visible over the expanded body.
+                ElementCompositionPreview.SetIsTranslationEnabled(element, true);
                 visual.StopAnimation("Translation");
+                // The collapse curve ends at a non-zero rise (-4), and stopping
+                // a Composition animation leaves the property at its last key
+                // frame. Without an explicit reset the next expansion keeps
+                // the offset and the title renders clipped at the window top.
+                visual.Properties.InsertVector3(
+                    "Translation",
+                    System.Numerics.Vector3.Zero);
             }
             // The image scrim is a separate sibling of the image. Making every
             // visual opaque exposes its black gradient even on non-image capsules.
@@ -5104,24 +5166,119 @@ public sealed partial class WidgetShell : UserControl
 
     private void TitleBarGrid_PointerPressed(object sender, PointerRoutedEventArgs e)
     {
+        if (CanCollapseFromTitleBarClick &&
+            e.GetCurrentPoint(TitleBarGrid).Properties.IsLeftButtonPressed)
+        {
+            if (_titleBarClickCollapseTimer is { IsRunning: true })
+            {
+                // A second press inside the double-click window opens the
+                // rename editor, not another collapse.
+                StopTitleBarClickCollapse();
+                _suppressNextTitleBarClickCollapse = true;
+            }
+            else
+            {
+                _suppressNextTitleBarClickCollapse = false;
+            }
+
+            _isTitleBarPressTrackingClick = true;
+            _hasTitleBarPressMoved = false;
+            _titleBarPressPoint = e.GetCurrentPoint(TitleBarGrid).Position;
+        }
+        else
+        {
+            _isTitleBarPressTrackingClick = false;
+        }
+
         TitlePointerPressed?.Invoke(this, e);
     }
 
     private void TitleBarGrid_PointerMoved(object sender, PointerRoutedEventArgs e)
     {
+        if (_isTitleBarPressTrackingClick && !_hasTitleBarPressMoved)
+        {
+            Windows.Foundation.Point current = e.GetCurrentPoint(TitleBarGrid).Position;
+            double deltaX = current.X - _titleBarPressPoint.X;
+            double deltaY = current.Y - _titleBarPressPoint.Y;
+            _hasTitleBarPressMoved =
+                (deltaX * deltaX) + (deltaY * deltaY) >= TitleBarClickDragThresholdSquared;
+        }
+
         TitlePointerMoved?.Invoke(this, e);
     }
 
     private void TitleBarGrid_PointerReleased(object sender, PointerRoutedEventArgs e)
     {
+        bool isTitleBarClick = _isTitleBarPressTrackingClick && !_hasTitleBarPressMoved;
+        _isTitleBarPressTrackingClick = false;
         TitlePointerReleased?.Invoke(this, e);
+        if (isTitleBarClick && CanCollapseFromTitleBarClick)
+        {
+            RaiseTitleBarClickCollapse(e);
+        }
     }
 
     private void TitleBarGrid_PointerCaptureLost(object sender, PointerRoutedEventArgs e)
     {
+        // A press whose capture is lost (alt-tab, UAC) is a drag abort, not
+        // a click. The deferred collapse timer intentionally keeps running:
+        // it is only armed after a completed release.
+        _isTitleBarPressTrackingClick = false;
         // When pointer capture is lost mid-drag (e.g., alt-tab, UAC),
         // notify the parent window so it can call EndWindowDragCore.
         TitlePointerReleased?.Invoke(this, e);
+    }
+
+    private bool CanCollapseFromTitleBarClick =>
+        !_isCollapsed &&
+        _isCollapseActionAvailable &&
+        !_usesSmartCompactBehavior &&
+        // A click that lands outside the rename editor while editing commits
+        // the rename; it must not also collapse the widget.
+        TitleEditorContent is null;
+
+    private void RaiseTitleBarClickCollapse(PointerRoutedEventArgs e)
+    {
+        if (_suppressNextTitleBarClickCollapse)
+        {
+            _suppressNextTitleBarClickCollapse = false;
+            return;
+        }
+
+        if (e.OriginalSource is DependencyObject source && IsWithin(source, TitleIdentityHost))
+        {
+            // The identity strip also owns double-click rename. Wait out the
+            // system double-click window so the first tap of a rename cannot
+            // collapse the widget out from under the second tap.
+            uint delayMs = Win32Helper.GetDoubleClickTime();
+            if (delayMs == 0)
+            {
+                delayMs = 500;
+            }
+
+            _titleBarClickCollapseTimer ??= DispatcherQueue.CreateTimer();
+            _titleBarClickCollapseTimer.Tick -= TitleBarClickCollapseTimer_Tick;
+            _titleBarClickCollapseTimer.Tick += TitleBarClickCollapseTimer_Tick;
+            _titleBarClickCollapseTimer.Interval = TimeSpan.FromMilliseconds(delayMs);
+            _titleBarClickCollapseTimer.Start();
+            return;
+        }
+
+        CollapseRequested?.Invoke(this, e);
+    }
+
+    private void TitleBarClickCollapseTimer_Tick(DispatcherQueueTimer sender, object args)
+    {
+        StopTitleBarClickCollapse();
+        if (CanCollapseFromTitleBarClick)
+        {
+            CollapseRequested?.Invoke(this, new RoutedEventArgs());
+        }
+    }
+
+    private void StopTitleBarClickCollapse()
+    {
+        _titleBarClickCollapseTimer?.Stop();
     }
 
     private void OverlayDragHandle_PointerPressed(object sender, PointerRoutedEventArgs e)

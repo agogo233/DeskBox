@@ -123,21 +123,21 @@ public sealed class HiddenWorkingSetTrimTrackerTests
     }
 
     [Fact]
-    public void ExistingSettings_DefaultOffAndEnabledChoiceSurvivesGeneratedJsonRoundTrip()
+    public void ExistingSettings_DefaultAndEnabledChoiceSurviveGeneratedJsonRoundTrip()
     {
         AppSettings settings = JsonSerializer.Deserialize(
             "{\"idleWorkingSetTrimEnabled\":true,\"hiddenCacheCleanupDelaySeconds\":30}",
             SettingsJsonContext.Default.AppSettings)!;
-        Assert.False(settings.ImmediateHiddenWorkingSetTrimEnabled);
+        Assert.True(settings.ImmediateHiddenWorkingSetTrimEnabled);
 
-        settings.ImmediateHiddenWorkingSetTrimEnabled = true;
+        settings.ImmediateHiddenWorkingSetTrimEnabled = false;
         string json = JsonSerializer.Serialize(settings, SettingsJsonContext.Default.AppSettings);
         AppSettings reloaded = JsonSerializer.Deserialize(json, SettingsJsonContext.Default.AppSettings)!;
-        Assert.True(reloaded.ImmediateHiddenWorkingSetTrimEnabled);
+        Assert.False(reloaded.ImmediateHiddenWorkingSetTrimEnabled);
         Assert.True(reloaded.IdleWorkingSetTrimEnabled);
         Assert.Equal(30, reloaded.HiddenCacheCleanupDelaySeconds);
 
         SettingsService.ApplyDefaultPreferences(reloaded);
-        Assert.False(reloaded.ImmediateHiddenWorkingSetTrimEnabled);
+        Assert.True(reloaded.ImmediateHiddenWorkingSetTrimEnabled);
     }
 }

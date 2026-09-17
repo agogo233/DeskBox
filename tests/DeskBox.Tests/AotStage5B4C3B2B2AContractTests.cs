@@ -79,7 +79,7 @@ public sealed class AotStage5B4C3B2B2AContractTests
 
         foreach (string token in new[]
                  {
-                     "$requiredAuditProfileVersion = 62",
+                     "$requiredAuditProfileVersion = 58",
                      "$requiredSummarySchemaVersion = 55",
                      "[Guid]::NewGuid().ToString(\"N\")",
                      "-AllowEarlyExit",
@@ -118,8 +118,8 @@ public sealed class AotStage5B4C3B2B2AContractTests
             "AotTodoNotificationSurfaceEvidence? TodoNotificationSurface",
             managed,
             StringComparison.Ordinal);
-        Assert.Contains("Assert.Equal(29, actual.Count)", baseline, StringComparison.Ordinal);
-        Assert.Contains("Assert.Equal(67, actual.Values.Sum())", baseline, StringComparison.Ordinal);
+        Assert.Contains("Assert.Equal(30, actual.Count)", baseline, StringComparison.Ordinal);
+        Assert.Contains("Assert.Equal(70, actual.Values.Sum())", baseline, StringComparison.Ordinal);
         Assert.Contains(
             "Assert.Equal(27, actualContextOwners.Length)",
             baseline,
@@ -135,7 +135,7 @@ public sealed class AotStage5B4C3B2B2AContractTests
             "docs/architecture/stage-reports/aot-stage-5b-4c3b2b2a-report.md");
         string roadmap = Read("docs/architecture/rust-native-aot-roadmap.md");
 
-        Assert.Contains("$auditProfileVersion = 62", audit, StringComparison.Ordinal);
+        Assert.Contains("$auditProfileVersion = 58", audit, StringComparison.Ordinal);
         Assert.Contains("schemaVersion = 55", audit, StringComparison.Ordinal);
         Assert.Contains("stage5B4C3B2B2AMissingScenarioPatterns", audit, StringComparison.Ordinal);
         Assert.Contains("stage5B4C3B2B2AMissingProductPatterns", audit, StringComparison.Ordinal);
@@ -157,5 +157,5 @@ public sealed class AotStage5B4C3B2B2AContractTests
     }
 
     private static string Read(string relativePath) =>
-        File.ReadAllText(TestPaths.SourceFile(relativePath));
+        File.ReadAllText(TestPaths.FromRepository(relativePath));
 }

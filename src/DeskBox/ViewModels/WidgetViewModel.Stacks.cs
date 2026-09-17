@@ -1512,6 +1512,16 @@ public partial class WidgetViewModel
             return;
         }
 
+        if (_itemMutationBatchDepth > 0)
+        {
+            // A bulk import defers the rebuild to the batch finalization;
+            // per-insert rebuilds would regroup the whole display list once
+            // per dispatcher pass. The staleness flag above stays set so
+            // mid-batch readers know the projection is behind.
+            MarkItemMutationBatchDirty();
+            return;
+        }
+
         _stackRebuildQueued = true;
         if (!_dispatcherQueue.TryEnqueue(() =>
         {
