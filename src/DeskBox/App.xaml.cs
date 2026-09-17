@@ -1,6 +1,7 @@
 // Copyright (c) DeskBox. All rights reserved.
 
 using CommunityToolkit.Mvvm.Input;
+using DeskBox.Contracts;
 using DeskBox.Controls.WidgetContents;
 using DeskBox.Helpers;
 using DeskBox.Models;
