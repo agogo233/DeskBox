@@ -156,6 +156,7 @@ public partial class App : Application
         _everythingSearchService?.CurrentSnapshot.State == EverythingConnectionState.Connected;
     internal int SearchMetaCacheCount => _fileMetaService?.CachedIconCount ?? 0;
     public WidgetManager? WidgetManager { get; private set; }
+    public IFileWidgetImportTarget? FileWidgetImport => WidgetManager;
     public ResizeGuideOverlayService ResizeGuideOverlay { get; private set; } = null!;
     public NativeAppNotificationService? NativeNotificationService => _nativeNotificationService;
     public DisplayAreaWatcherService? DisplayAreaWatcher => _displayAreaWatcher;
@@ -4600,6 +4601,22 @@ public partial class App : Application
 
         EnsureSearchServices();
         return _searchEngineService;
+    }
+
+    private void OnFeatureStateChanged(FeatureStateChangedEventArgs e)
+    {
+        if (e.FeatureId == DeskBoxFeatureIds.Search)
+        {
+            SetSearchFeatureEnabled(e.Enabled);
+        }
+        else if (e.FeatureId == DeskBoxFeatureIds.QuickCapture)
+        {
+            RefreshQuickCaptureClipboardService();
+        }
+        else if (e.FeatureId == DeskBoxFeatureIds.Todo)
+        {
+            RefreshTodoReminderService();
+        }
     }
 
     internal void SetSearchFeatureEnabled(bool enabled)
