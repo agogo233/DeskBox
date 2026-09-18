@@ -827,29 +827,9 @@ settings.FocusClickedWidgetOnRaise = false;
         await _fileWriteLock.WaitAsync();
         try
         {
-            byte[] utf8Json;
-            lock (_lock)
-            {
-                PerformanceSettingsPolicy.Normalize(_settings);
-                NormalizePresentationSettings(_settings);
-                NormalizeAppearanceSettings(_settings);
-                NormalizeFeatureWidgetSettings(_settings);
-                NormalizeWidgetContentSettings(_settings);
-                NormalizeWidgetTopologyLayouts(_settings);
-                NormalizeOrganizerSettings(_settings);
-                NormalizeHotkeySettings(_settings);
-                NormalizeSearchSettings(_settings);
-                NormalizeQuickCaptureSettings(_settings);
-                NormalizeTodoSettings(_settings);
-                NormalizeWeatherSettings(_settings);
-                // Keep the locked snapshot in its on-disk encoding instead of
-                // allocating a large UTF-16 string and encoding it again on save.
-                utf8Json = JsonSerializer.SerializeToUtf8Bytes(
-                    _settings,
-                    SettingsJsonContext.Default.AppSettings);
-            }
-
-            await ResilientJsonStore.SaveAsync(_settingsPath, utf8Json);
+            await ResilientJsonStore.SaveAsync(
+                _settingsPath,
+                WriteSettingsTempFileAsync);
             LastPersistenceFailure = null;
             return true;
         }
@@ -878,6 +858,51 @@ settings.FocusClickedWidgetOnRaise = false;
             _fileWriteLock.Release();
         }
     }
+
+    /// <summary>
+    /// Streams the locked settings snapshot straight into the store's temp
+    /// file. Serializing directly to the stream replaces the previous
+    /// SerializeToUtf8Bytes materialization of the whole document - with the
+    /// file-count-backed settings graphs of a large import that buffer was
+    /// the multi-megabyte large-object garbage measured in the 2026-09-17
+    /// memory investigation. The snapshot consistency contract is
+    /// deliberately unchanged from the buffered path: every normalization
+    /// pass and the serialization itself run under <c>_lock</c>, so one
+    /// save still corresponds to exactly one coherent snapshot; only the
+    /// destination of the encoder changed. The synchronous encode runs on a
+    /// pool thread (the caller already holds _fileWriteLock) so UI-thread
+    /// savers pay the same lock time as before, not the encode.
+    /// </summary>
+    private Task WriteSettingsTempFileAsync(string tempPath) => Task.Run(() =>
+    {
+        using var stream = new FileStream(
+            tempPath,
+            FileMode.Create,
+            FileAccess.Write,
+            FileShare.None,
+            bufferSize: 64 * 1024);
+        lock (_lock)
+        {
+            PerformanceSettingsPolicy.Normalize(_settings);
+            NormalizePresentationSettings(_settings);
+            NormalizeAppearanceSettings(_settings);
+            NormalizeFeatureWidgetSettings(_settings);
+            NormalizeWidgetContentSettings(_settings);
+            NormalizeWidgetTopologyLayouts(_settings);
+            NormalizeOrganizerSettings(_settings);
+            NormalizeHotkeySettings(_settings);
+            NormalizeSearchSettings(_settings);
+            NormalizeQuickCaptureSettings(_settings);
+            NormalizeTodoSettings(_settings);
+            NormalizeWeatherSettings(_settings);
+            JsonSerializer.Serialize(
+                stream,
+                _settings,
+                SettingsJsonContext.Default.AppSettings);
+        }
+
+        stream.Flush();
+    });
 
     /// <summary>
     /// Save settings with debouncing (waits 1 second after last call before actually saving).
@@ -2475,16 +2500,14 @@ settings.FocusClickedWidgetOnRaise = false;
         }
 
         settings.RecentOrganizationHistory ??= [];
-        int originalHistoryCount = settings.RecentOrganizationHistory.Count;
+        // Order only: the entry cap belongs to OrganizationHistoryPolicy
+        // (single source), which also knows about active undos and journal
+        // protected entries. Capping here, before startup recovery, could
+        // trim an entry whose receipts are still transaction state.
         settings.RecentOrganizationHistory = settings.RecentOrganizationHistory
             .Where(entry => entry is not null)
             .OrderByDescending(entry => entry.TimestampUtc)
-            .Take(MaxRecentOrganizationHistoryCount)
             .ToList();
-        if (settings.RecentOrganizationHistory.Count != originalHistoryCount)
-        {
-            changed = true;
-        }
 
         foreach (var entry in settings.RecentOrganizationHistory)
         {

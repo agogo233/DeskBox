@@ -182,9 +182,9 @@ public sealed partial class DesktopOrganizationTaskView
         UpdateRetainedSelection();
     }
 
-    private void RenderExecutionResult(OrganizationHistoryEntry history)
+    private void RenderExecutionResult(IEnumerable<OrganizationHistoryItem> completedItems)
     {
-        foreach (var item in history.Items)
+        foreach (var item in completedItems)
         {
             if (item.IsRestored)
             {

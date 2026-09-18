@@ -139,6 +139,30 @@ internal static class ResilientJsonStore
             Task.Delay);
     }
 
+    /// <summary>
+    /// Saves a store whose payload is produced directly by
+    /// <paramref name="writeTempAsync"/> into the store's temp file. The
+    /// store still owns the whole commit protocol - unique temp name,
+    /// atomic replace, backup, the verified in-place fallback, and temp
+    /// cleanup - exactly as for the buffered overloads. Callers that would
+    /// otherwise materialize a multi-megabyte byte[] (full settings
+    /// serialization) stream into the temp file instead and never allocate
+    /// the buffer.
+    /// </summary>
+    public static Task SaveAsync(string storePath, Func<string, Task> writeTempAsync)
+    {
+        return SaveAsync(
+            storePath,
+            writeTempAsync,
+            static (sourcePath, destinationPath, backupPath, ignoreMetadataErrors) =>
+                File.Replace(
+                    sourcePath,
+                    destinationPath,
+                    backupPath,
+                    ignoreMetadataErrors),
+            Task.Delay);
+    }
+
     internal static Task SaveAsync(
         string storePath,
         string json,
@@ -146,7 +170,7 @@ internal static class ResilientJsonStore
         Func<TimeSpan, Task> delayAsync)
     {
         ArgumentNullException.ThrowIfNull(json);
-        return SaveCoreAsync(storePath, json, default, replaceFile, delayAsync);
+        return SaveCoreAsync(storePath, json, default, writeTempAsync: null, replaceFile, delayAsync);
     }
 
     internal static Task SaveAsync(
@@ -154,12 +178,23 @@ internal static class ResilientJsonStore
         ReadOnlyMemory<byte> utf8Json,
         Action<string, string, string?, bool> replaceFile,
         Func<TimeSpan, Task> delayAsync) =>
-        SaveCoreAsync(storePath, null, utf8Json, replaceFile, delayAsync);
+        SaveCoreAsync(storePath, null, utf8Json, writeTempAsync: null, replaceFile, delayAsync);
+
+    internal static Task SaveAsync(
+        string storePath,
+        Func<string, Task> writeTempAsync,
+        Action<string, string, string?, bool> replaceFile,
+        Func<TimeSpan, Task> delayAsync)
+    {
+        ArgumentNullException.ThrowIfNull(writeTempAsync);
+        return SaveCoreAsync(storePath, null, default, writeTempAsync, replaceFile, delayAsync);
+    }
 
     private static async Task SaveCoreAsync(
         string storePath,
         string? json,
         ReadOnlyMemory<byte> utf8Json,
+        Func<string, Task>? writeTempAsync,
         Action<string, string, string?, bool> replaceFile,
         Func<TimeSpan, Task> delayAsync)
     {
@@ -171,7 +206,11 @@ internal static class ResilientJsonStore
         string tempPath = $"{storePath}.{Guid.NewGuid():N}.tmp";
         try
         {
-            if (json is not null)
+            if (writeTempAsync is not null)
+            {
+                await writeTempAsync(tempPath);
+            }
+            else if (json is not null)
             {
                 await File.WriteAllTextAsync(tempPath, json);
             }

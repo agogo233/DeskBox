@@ -608,7 +608,7 @@ public partial class WidgetViewModel
             _showImageFilesAsIcons,
             resetTransientFailures: true);
 
-        int existingIndex = FindItemIndexByPath(path);
+        int existingIndex = FindItemIndexForManagedMutation(path);
         if (Config.SortMode == WidgetSortMode.Manual && existingIndex >= 0)
         {
             AssignAddedAt(item);
@@ -640,6 +640,7 @@ public partial class WidgetViewModel
                 Items[existingIndex] = item;
             }
 
+            TrackManagedItemByPath(path, item);
             FinishItemUpsert();
             return true;
         }
@@ -656,6 +657,7 @@ public partial class WidgetViewModel
             : GetSortedInsertIndex(item);
         item.SortOrder = insertIndex;
         Items.Insert(insertIndex, item);
+        TrackManagedItemByPath(path, item);
         FinishItemUpsert();
         return true;
     }
@@ -681,7 +683,7 @@ public partial class WidgetViewModel
 
     private void RemoveItemByPath(string path, bool persistManualOrder = true)
     {
-        int index = FindItemIndexByPath(path);
+        int index = FindItemIndexForManagedMutation(path);
         if (index < 0)
         {
             return;
@@ -693,6 +695,7 @@ public partial class WidgetViewModel
             _showImageFilesAsIcons,
             resetTransientFailures: true);
         Items.RemoveAt(index);
+        UntrackManagedItemByPath(path);
         RemoveFileAddedAt(path);
         if (_itemMutationBatchDepth > 0)
         {
@@ -728,15 +731,44 @@ public partial class WidgetViewModel
             return Items.Count;
         }
 
-        for (int index = 0; index < Items.Count; index++)
+        // Items is kept sorted under the active sort mode, so the linear
+        // first-strictly-greater scan is an upper-bound search: a 2000-file
+        // import pays ~11 comparisons per insert instead of ~1000.
+        return BinarySearchSortedInsertIndex(
+            Items.Count,
+            index => Items[index],
+            candidate,
+            CompareItems);
+    }
+
+    /// <summary>
+    /// Upper-bound insert search shared with behavior tests: the first index
+    /// whose item compares strictly greater than the candidate (equal keys
+    /// land after the equal run), mirroring the linear scan it replaced.
+    /// Requires the sequence to be sorted under the same comparison.
+    /// </summary>
+    internal static int BinarySearchSortedInsertIndex(
+        int count,
+        Func<int, WidgetItem> itemAt,
+        WidgetItem candidate,
+        Comparison<WidgetItem> compare)
+    {
+        int low = 0;
+        int high = count;
+        while (low < high)
         {
-            if (CompareItems(candidate, Items[index]) < 0)
+            int middle = low + ((high - low) / 2);
+            if (compare(candidate, itemAt(middle)) < 0)
             {
-                return index;
+                high = middle;
+            }
+            else
+            {
+                low = middle + 1;
             }
         }
 
-        return Items.Count;
+        return low;
     }
 
     private void NormalizeSortOrder()

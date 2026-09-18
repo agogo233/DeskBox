@@ -6,6 +6,10 @@ public sealed class OrganizerService
 {
     private readonly SettingsService _settingsService;
     private readonly FileService _fileService;
+
+    // Read-only view of the default-path desktop organization journal used
+    // to protect a pending transaction's receipts from retention.
+    private readonly DesktopOrganizationRecoveryStore _sharedRecoveryStore;
     private readonly Func<string> _desktopPathProvider;
     private readonly DesktopAutoOrganizationSuppressionRegistry _autoOrganizationSuppressions;
     private sealed record DropPreparation(
@@ -28,12 +32,17 @@ public sealed class OrganizerService
         SettingsService settingsService,
         FileService fileService,
         Func<string>? desktopPathProvider,
-        DesktopAutoOrganizationSuppressionRegistry autoOrganizationSuppressions)
+        DesktopAutoOrganizationSuppressionRegistry autoOrganizationSuppressions,
+        string? recoveryJournalPath = null)
     {
         _settingsService = settingsService;
         _fileService = fileService;
         _desktopPathProvider = desktopPathProvider ?? GetDefaultDesktopPath;
         _autoOrganizationSuppressions = autoOrganizationSuppressions;
+        // Read-only view of the desktop organization journal used to protect
+        // a pending transaction's receipts from retention. The path is
+        // injectable so tests never touch the real data directory.
+        _sharedRecoveryStore = new DesktopOrganizationRecoveryStore(recoveryJournalPath);
     }
 
     internal DesktopAutoOrganizationSuppressionRegistry AutoOrganizationSuppressions =>
@@ -55,7 +64,7 @@ public sealed class OrganizerService
             .FirstOrDefault();
     }
 
-    public async Task<OrganizationHistoryEntry> OrganizeDropAsync(
+    public async Task<OrganizerOperationResult> OrganizeDropAsync(
         WidgetConfig widget,
         string widgetName,
         IEnumerable<string> sourcePaths,
@@ -96,13 +105,16 @@ public sealed class OrganizerService
 
             if (plans.Count == 0)
             {
-                return CreateHistoryEntry(
-                    widget.Id,
-                    widgetName,
-                    OrganizationActionType.ManagedDrop,
-                    move,
-                    [],
-                    canUndo: false);
+                return new OrganizerOperationResult
+                {
+                    History = CreateHistoryEntry(
+                        widget.Id,
+                        widgetName,
+                        OrganizationActionType.ManagedDrop,
+                        move,
+                        [],
+                        canUndo: false)
+                };
             }
 
             var results = await _fileService.ExecuteTransferPlanAsync(
@@ -138,8 +150,15 @@ public sealed class OrganizerService
                 }).ToList(),
                 canUndo: move);
 
+            // Snapshot before the retention policy may compact the same
+            // entry: callers render per-run results from this list.
+            var completedItems = historyEntry.Items.ToList();
             await AddHistoryEntryAsync(historyEntry);
-            return historyEntry;
+            return new OrganizerOperationResult
+            {
+                History = historyEntry,
+                CompletedItems = completedItems
+            };
         }
         catch (Exception ex) when (
             ex is FileService.IFileTransferWithCompletedResults partial)
@@ -243,7 +262,7 @@ public sealed class OrganizerService
             .ToArray();
     }
 
-    public async Task<OrganizationHistoryEntry> MoveItemBackToDesktopAsync(
+    public async Task<OrganizerOperationResult> MoveItemBackToDesktopAsync(
         WidgetConfig widget,
         string widgetName,
         WidgetItem item,
@@ -258,7 +277,7 @@ public sealed class OrganizerService
             ownerWindowHandle);
     }
 
-    public async Task<OrganizationHistoryEntry> MoveItemsBackToDesktopAsync(
+    public async Task<OrganizerOperationResult> MoveItemsBackToDesktopAsync(
         WidgetConfig widget,
         string widgetName,
         IEnumerable<string> sourcePaths,
@@ -319,8 +338,15 @@ public sealed class OrganizerService
                 }).ToList(),
                 canUndo: true);
 
+            // Snapshot before the retention policy may compact the same
+            // entry: callers render per-run results from this list.
+            var completedItems = historyEntry.Items.ToList();
             await AddHistoryEntryAsync(historyEntry);
-            return historyEntry;
+            return new OrganizerOperationResult
+            {
+                History = historyEntry,
+                CompletedItems = completedItems
+            };
         }
         catch (Exception ex)
         {
@@ -505,8 +531,62 @@ public sealed class OrganizerService
 
     private async Task AddHistoryEntryAsync(OrganizationHistoryEntry entry)
     {
-        _settingsService.Settings.RecentOrganizationHistory.Insert(0, entry);
+        var history = _settingsService.Settings.RecentOrganizationHistory;
+        history.Insert(0, entry);
+
+        // The global budget and entry cap run here too, so a long session of
+        // ordinary imports cannot grow the history without bound between
+        // compaction passes — but never at the cost of the file operation
+        // that already physically completed. When the journal state cannot
+        // be established, only the brand-new entry is capped and older
+        // entries wait for the next safe compaction pass.
+        bool journalStateKnown = await TryRunRetentionPolicyAsync(history, entry);
+        if (!journalStateKnown)
+        {
+            OrganizationHistoryPolicy.CapEntryReceipts(entry);
+        }
+
         await _settingsService.SaveAsync(notifySubscribers: false);
+    }
+
+    /// <summary>
+    /// Runs the full retention policy when the recovery journal state is
+    /// reliably known (absent, or read with its protected transaction id).
+    /// Returns false when the journal exists but cannot be read right now —
+    /// a replace race or a corrupt file must not fail an ordinary import —
+    /// and the caller falls back to capping only the new entry.
+    /// </summary>
+    private async Task<bool> TryRunRetentionPolicyAsync(
+        List<OrganizationHistoryEntry> history,
+        OrganizationHistoryEntry newEntry)
+    {
+        try
+        {
+            if (!_sharedRecoveryStore.HasPendingJournal)
+            {
+                OrganizationHistoryPolicy.ApplyRetentionPolicy(history);
+                return true;
+            }
+
+            var journal = await _sharedRecoveryStore.LoadAsync();
+            if (journal is null)
+            {
+                // The journal vanished between the check and the read; no
+                // transaction needs protection.
+                OrganizationHistoryPolicy.ApplyRetentionPolicy(history);
+                return true;
+            }
+
+            OrganizationHistoryPolicy.ApplyRetentionPolicy(history, journal.TransactionId);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            App.Log(
+                $"[Organizer] Recovery journal could not be read for retention; " +
+                $"only the new entry is capped this round: {ex.Message}");
+            return false;
+        }
     }
 
     /// <summary>

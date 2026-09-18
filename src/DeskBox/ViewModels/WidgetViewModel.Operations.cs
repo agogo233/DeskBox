@@ -113,10 +113,10 @@ public partial class WidgetViewModel
         bool shouldMove = moveWhenMapped ?? ShouldMoveManagedItems(
             displayablePaths,
             destinationFolderPath);
-        OrganizationHistoryEntry historyEntry;
+        OrganizerOperationResult operation;
         try
         {
-            historyEntry = await _organizerService.OrganizeDropAsync(
+            operation = await _organizerService.OrganizeDropAsync(
                 Config,
                 Name,
                 displayablePaths,
@@ -140,8 +140,11 @@ public partial class WidgetViewModel
             throw;
         }
 
+        // CompletedItems (not the persisted History entry) carries this
+        // run's receipts: oversized batches are compacted to a summary
+        // before the entry is returned.
         await ApplyImportedTransferResultsAsync(
-            historyEntry.Items.Select(item => new FileService.FileTransferResult(
+            operation.CompletedItems.Select(item => new FileService.FileTransferResult(
                 item.SourcePath,
                 item.DestinationPath)),
             shouldMove,
@@ -150,7 +153,7 @@ public partial class WidgetViewModel
             activateManualSortOnSuccess,
             preferredStackAnchor);
 
-        return historyEntry.Items
+        return operation.CompletedItems
             .Select(item => Path.GetFullPath(item.SourcePath))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
@@ -490,13 +493,13 @@ public partial class WidgetViewModel
             return 0;
         }
 
-        var historyEntry = await _organizerService.MoveItemBackToDesktopAsync(
+        var operation = await _organizerService.MoveItemBackToDesktopAsync(
             Config,
             Name,
             item,
             useShellProgress,
             ownerWindowHandle);
-        if (historyEntry.Items.Any(entry => string.Equals(entry.SourcePath, item.Path, StringComparison.OrdinalIgnoreCase)))
+        if (operation.CompletedItems.Any(entry => string.Equals(entry.SourcePath, item.Path, StringComparison.OrdinalIgnoreCase)))
         {
             RemoveItemByPath(item.Path);
             RemoveStackMemberOverridePaths([item.Path]);
@@ -525,14 +528,17 @@ public partial class WidgetViewModel
             return 0;
         }
 
-        var historyEntry = await _organizerService.MoveItemsBackToDesktopAsync(
+        var operation = await _organizerService.MoveItemsBackToDesktopAsync(
             Config,
             Name,
             targets.Select(item => item.Path),
             useShellProgress,
             ownerWindowHandle);
 
-        var movedSourcePaths = historyEntry.Items
+        // CompletedItems (not the persisted History entry) carries this
+        // run's receipts: oversized batches are compacted to a summary
+        // before the entry is returned.
+        var movedSourcePaths = operation.CompletedItems
             .Select(item => item.SourcePath)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
@@ -730,12 +736,22 @@ public partial class WidgetViewModel
             return Task.CompletedTask;
         }
 
-        foreach (var path in normalizedPaths)
+        // The mirror of the import batch: an external drag-out of 2000 files
+        // used to pay the per-removal derived work 2000 times - most
+        // visibly one UpdateWidget/SaveDebounced reschedule per departing
+        // item through the AddedAt persistence (convicted by allocation
+        // tracing in the 2026-09-17 memory investigation). The mutation
+        // scope folds them into one end-of-batch finalization; each real
+        // departure still runs RemoveItemByPath itself.
+        using (EnterItemMutationScope())
         {
-            RemoveItemByPath(path);
-        }
+            foreach (var path in normalizedPaths)
+            {
+                RemoveItemByPath(path);
+            }
 
-        RemoveStackMemberOverridePaths(normalizedPaths);
+            RemoveStackMemberOverridePaths(normalizedPaths);
+        }
 
         return Task.CompletedTask;
     }

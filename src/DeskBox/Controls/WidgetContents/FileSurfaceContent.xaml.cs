@@ -109,6 +109,7 @@ public sealed partial class FileSurfaceContent :
     private DateTimeOffset? _importBusyStartedAtUtc;
     private bool _isDisposed;
     private bool _emptyStateUpdateQueued;
+    private bool _cutStateReconcileQueued;
     private bool _isReadyForReuse;
     private bool _hasBeenWindowVisible;
     private bool _isWindowVisible;
@@ -722,17 +723,45 @@ public sealed partial class FileSurfaceContent :
             }
         }
 
-        // The per-item sweep below costs O(items) and fires a property change
-        // per entry; running it on every one of the thousands of collection
-        // events a large folder load raises made folder entry take seconds
-        // (measured 2026-09-14: ~1.7 s in Items sync for 2088 items). With no
-        // active cut, every item — including newly inserted ones — is already
-        // in the default (not cut) state, so the sweep is only needed while a
-        // cut is pending.
+        // The sweep behind ApplyCutState costs O(items) plus a full
+        // realized-container visual pass (native lookups and visual-state
+        // applications). Running it on every one of the thousands of
+        // collection events a bulk sync raises turned a 2000-item folder
+        // change into millions of native visual applications - the
+        // single-core spin and runaway native XAML growth captured in the
+        // 2026-09-17 hang dump (SyncFolderItems RemoveAt storm while a cut
+        // was pending). The departed-path pruning above already ran
+        // synchronously, so the sweep coalesces to one dispatcher pass; the
+        // callback re-checks the clipboard because the final departures may
+        // have drained it.
         if (_cutClipboardPaths.Length > 0)
         {
-            ApplyCutState();
+            QueueCutStateReconciliation();
         }
+    }
+
+    /// <summary>
+    /// Coalesces the post-change cut-state sweep to one dispatcher pass.
+    /// Bulk item syncs raise one collection change per item; the sweep costs
+    /// O(items) plus a realized-container visual pass, so a 2000-item sync
+    /// with a pending cut used to pay it once per departing item.
+    /// </summary>
+    private void QueueCutStateReconciliation()
+    {
+        if (_isDisposed || _cutStateReconcileQueued)
+        {
+            return;
+        }
+
+        _cutStateReconcileQueued = true;
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            _cutStateReconcileQueued = false;
+            if (!_isDisposed && _cutClipboardPaths.Length > 0)
+            {
+                ApplyCutState();
+            }
+        });
     }
 
     private void UpdateEmptyState()

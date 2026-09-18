@@ -56,6 +56,11 @@ public sealed partial class DesktopOrganizationTransaction
             var retainedItems = new List<DesktopOrganizationRetainedItem>();
             var createdWidgets = CreateCandidateWidgets(plan, settings);
             var journal = BuildJournal(plan);
+            // Flips exactly once the durable commit lands and the journal is
+            // cleared; past that point the catch below must never roll the
+            // in-memory settings back — the physical moves are committed and
+            // no journal remains to reconcile them.
+            bool committed = false;
 
             try
             {
@@ -188,7 +193,7 @@ public sealed partial class DesktopOrganizationTransaction
                     var previous = settings.RecentOrganizationHistory.FirstOrDefault(entry => entry.Id == history.Id);
                     if (previous is not null)
                     {
-                        history.Items.InsertRange(0, previous.Items);
+                        OrganizationHistoryPolicy.MergeRetryHistory(history, previous);
                         foreach (var target in previous.Targets)
                         {
                             history.Targets.RemoveAll(candidate => candidate.WidgetId == target.WidgetId);
@@ -197,29 +202,66 @@ public sealed partial class DesktopOrganizationTransaction
                         settings.RecentOrganizationHistory.Remove(previous);
                     }
                     settings.RecentOrganizationHistory.Insert(0, history);
-                    if (settings.RecentOrganizationHistory.Count > SettingsService.MaxRecentOrganizationHistoryCount)
-                    {
-                        settings.RecentOrganizationHistory.RemoveRange(
-                            SettingsService.MaxRecentOrganizationHistoryCount,
-                            settings.RecentOrganizationHistory.Count - SettingsService.MaxRecentOrganizationHistoryCount);
-                    }
+                    // The entry cap is enforced by the retention policy in
+                    // the compaction below (single source), which also knows
+                    // about active undos and journal-protected entries.
                 }
 
                 if (history.Items.Count == 0)
                     history = settings.RecentOrganizationHistory.FirstOrDefault(entry => entry.Id == plan.Id) ?? history;
-                await _settingsService.SaveAsync(notifySubscribers: false);
+
+                // The result page renders this run's completed receipts; the
+                // persisted entry may be compacted to a summary right after
+                // the journal is cleared below.
+                var completedItems = history.Items.ToList();
+
+                // Saving settings is the commit point: full receipts must be
+                // on disk while the recovery journal still exists. Compacting
+                // before this save would let a crash between save and journal
+                // clear make RecoverPendingAsync treat committed moves as
+                // pending and restore them back to the desktop. SaveChecked
+                // is load-bearing here: a silent save failure would clear the
+                // journal with no durable commit anywhere.
+                if (!await _settingsService.SaveCheckedAsync(notifySubscribers: false))
+                {
+                    throw new IOException(
+                        "Persisting the desktop organization commit failed; the recovery journal is kept for the next launch.");
+                }
+
                 _recoveryStore.Clear();
+                committed = true;
+
+                // Post-commit maintenance: compaction and directory cleanup
+                // are best effort. A failure here must surface to the caller
+                // but never rolls back — the transaction is durable and the
+                // journal is gone; at worst a larger settings file survives
+                // for the next compaction pass.
+                if (OrganizationHistoryPolicy.ApplyRetentionPolicy(settings.RecentOrganizationHistory))
+                {
+                    await _settingsService.SaveAsync(notifySubscribers: false);
+                }
+
                 RemoveEmptyCreatedDirectories(createdDirectories);
 
                 return new DesktopOrganizationExecutionResult
                 {
                     History = history,
+                    CompletedItems = completedItems,
                     CreatedWidgets = createdWidgets,
                     RetainedItems = retainedItems
                 };
             }
             catch
             {
+                if (committed)
+                {
+                    // The durable commit (settings save + journal clear) is
+                    // done. Restoring the original in-memory graphs here
+                    // would desynchronize settings from the already-moved
+                    // files with no journal left to reconcile them.
+                    throw;
+                }
+
                 settings.Widgets = originalWidgets;
                 settings.DesktopOrganizationRules = originalRules;
                 settings.RecentOrganizationHistory = originalHistory;

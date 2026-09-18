@@ -96,18 +96,22 @@ public sealed partial class DesktopOrganizationTaskView
                 ? InfoBarSeverity.Warning
                 : InfoBarSeverity.Success;
             ResultInfo.Title = retainedCount > 0
-                ? Format("DesktopOrganization.Layout.PartialResult", result.History.Items.Count(item => !item.IsRestored), retainedCount)
+                // ItemCount reports the transaction's cumulative total
+                // (TotalItemCount survives summary compaction), not just
+                // this run's receipts — a retry after a compacted first
+                // run must still count the whole transaction.
+                ? Format("DesktopOrganization.Layout.PartialResult", result.History.ItemCount, retainedCount)
                 : T("DesktopOrganization.Result.SuccessTitle");
             ResultInfo.Message = string.Join("\n", new[]
             {
-                BuildSourceResult(result.History, DesktopOrganizationSourceScope.Personal),
-                BuildSourceResult(result.History, DesktopOrganizationSourceScope.Public)
+                BuildSourceResult(result.CompletedItems, DesktopOrganizationSourceScope.Personal),
+                BuildSourceResult(result.CompletedItems, DesktopOrganizationSourceScope.Public)
             }.Where(text => !string.IsNullOrWhiteSpace(text)));
             ResultInfo.IsOpen = true;
             ExecutionProgressPanel.Visibility = Visibility.Collapsed;
             _hasCompletedExecution = true;
             _optionalIncludedPaths.Clear();
-            RenderExecutionResult(result.History);
+            RenderExecutionResult(result.CompletedItems);
             RetryPublicButton.Visibility = _runtimeRetainedItems.Any(item => item.Reason != DesktopOrganizationRetentionReason.SourceChanged)
                 ? Visibility.Visible : Visibility.Collapsed;
             RefreshButton.Visibility = Visibility.Visible;
@@ -230,7 +234,7 @@ public sealed partial class DesktopOrganizationTaskView
             AbandonUndoButton.Visibility = Visibility.Visible;
             var history = App.Current.SettingsService.Settings.RecentOrganizationHistory
                 .FirstOrDefault(entry => entry.Id == _lastHistoryId);
-            if (_hasCompletedExecution && history is not null) RenderExecutionResult(history);
+            if (_hasCompletedExecution && history is not null) RenderExecutionResult(history.Items);
         }
         catch (Exception ex)
         {

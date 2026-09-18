@@ -31,19 +31,19 @@ public sealed class OrganizerServiceTests : IDisposable
         File.WriteAllText(sourcePath, "content");
         var widget = CreateWidget(targetDirectory);
 
-        var history = await _organizerService.OrganizeDropAsync(widget, "Widget", [sourcePath], move: true);
+        var operation = await _organizerService.OrganizeDropAsync(widget, "Widget", [sourcePath], move: true);
 
         string destinationPath = Path.Combine(targetDirectory, "note.txt");
         Assert.False(File.Exists(sourcePath));
         Assert.True(File.Exists(destinationPath));
-        Assert.True(history.CanUndo);
-        Assert.False(history.IsFailed);
-        Assert.Equal(OrganizationActionType.ManagedDrop, history.ActionType);
-        Assert.Equal("Move", history.TransferMode);
-        var item = Assert.Single(history.Items);
+        Assert.True(operation.History.CanUndo);
+        Assert.False(operation.History.IsFailed);
+        Assert.Equal(OrganizationActionType.ManagedDrop, operation.History.ActionType);
+        Assert.Equal("Move", operation.History.TransferMode);
+        var item = Assert.Single(operation.CompletedItems);
         Assert.Equal(sourcePath, item.SourcePath);
         Assert.Equal(destinationPath, item.DestinationPath);
-        Assert.Same(history, Assert.Single(_settingsService.Settings.RecentOrganizationHistory));
+        Assert.Same(operation.History, Assert.Single(_settingsService.Settings.RecentOrganizationHistory));
     }
 
     [Fact]
@@ -55,12 +55,12 @@ public sealed class OrganizerServiceTests : IDisposable
         File.WriteAllText(sourcePath, "content");
         var widget = CreateWidget(targetDirectory);
 
-        var history = await _organizerService.OrganizeDropAsync(widget, "Widget", [sourcePath], move: false);
+        var operation = await _organizerService.OrganizeDropAsync(widget, "Widget", [sourcePath], move: false);
 
         Assert.True(File.Exists(sourcePath));
         Assert.True(File.Exists(Path.Combine(targetDirectory, "note.txt")));
-        Assert.False(history.CanUndo);
-        Assert.Equal("Copy", history.TransferMode);
+        Assert.False(operation.History.CanUndo);
+        Assert.Equal("Copy", operation.History.TransferMode);
     }
 
     [Theory]
@@ -75,15 +75,15 @@ public sealed class OrganizerServiceTests : IDisposable
         File.WriteAllText(sourcePath, "content");
         WidgetConfig widget = CreateWidget(targetDirectory);
 
-        OrganizationHistoryEntry history =
+        var operation =
             await _organizerService.OrganizeDropAsync(
                 widget,
                 "Widget",
                 [sourcePath],
                 move);
 
-        Assert.Empty(history.Items);
-        Assert.False(history.CanUndo);
+        Assert.Empty(operation.CompletedItems);
+        Assert.False(operation.History.CanUndo);
         Assert.True(File.Exists(sourcePath));
         Assert.False(File.Exists(Path.Combine(targetDirectory, "note (2).txt")));
         Assert.Empty(_settingsService.Settings.RecentOrganizationHistory);
@@ -119,7 +119,7 @@ public sealed class OrganizerServiceTests : IDisposable
         File.WriteAllText(sourcePath, "content");
         WidgetConfig widget = CreateWidget(mappedRoot);
 
-        OrganizationHistoryEntry history =
+        var operation =
             await _organizerService.OrganizeDropAsync(
                 widget,
                 "Widget",
@@ -130,7 +130,7 @@ public sealed class OrganizerServiceTests : IDisposable
         Assert.True(File.Exists(Path.Combine(childFolder, "note.txt")));
         Assert.Equal(
             childFolder,
-            Path.GetDirectoryName(history.Items.Single().DestinationPath));
+            Path.GetDirectoryName(operation.CompletedItems.Single().DestinationPath));
     }
 
     [Fact]
@@ -163,15 +163,15 @@ public sealed class OrganizerServiceTests : IDisposable
         string sourcePath = Path.Combine(sourceDirectory, "note.txt");
         File.WriteAllText(sourcePath, "content");
         var widget = CreateWidget(targetDirectory);
-        var history = await _organizerService.OrganizeDropAsync(widget, "Widget", [sourcePath], move: true);
+        var operation = await _organizerService.OrganizeDropAsync(widget, "Widget", [sourcePath], move: true);
 
         bool undone = await _organizerService.UndoLatestAsync();
 
         Assert.True(undone);
         Assert.True(File.Exists(sourcePath));
         Assert.False(File.Exists(Path.Combine(targetDirectory, "note.txt")));
-        Assert.True(history.IsUndone);
-        Assert.False(history.CanUndo);
+        Assert.True(operation.History.IsUndone);
+        Assert.False(operation.History.CanUndo);
     }
 
     [Fact]
@@ -201,13 +201,13 @@ public sealed class OrganizerServiceTests : IDisposable
             Name = "mapped-note"
         };
 
-        var history = await _organizerService.MoveItemBackToDesktopAsync(widget, "Widget", item);
+        var operation = await _organizerService.MoveItemBackToDesktopAsync(widget, "Widget", item);
 
         Assert.False(File.Exists(sourcePath));
-        Assert.True(File.Exists(history.Items.Single().DestinationPath));
-        Assert.Equal(_desktopRoot, Path.GetDirectoryName(history.Items.Single().DestinationPath));
+        Assert.True(File.Exists(operation.CompletedItems.Single().DestinationPath));
+        Assert.Equal(_desktopRoot, Path.GetDirectoryName(operation.CompletedItems.Single().DestinationPath));
         Assert.True(_organizerService.AutoOrganizationSuppressions.TryConsume(
-            history.Items.Single().DestinationPath));
+            operation.CompletedItems.Single().DestinationPath));
     }
 
     private static WidgetConfig CreateWidget(string folderPath, bool followsDefaultStoragePath = true)

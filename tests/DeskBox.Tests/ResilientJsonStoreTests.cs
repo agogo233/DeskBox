@@ -154,6 +154,119 @@ public sealed class ResilientJsonStoreTests : IDisposable
         Assert.Empty(Directory.EnumerateFiles(_tempRoot, "*.tmp"));
     }
 
+    [Fact]
+    public async Task SaveAsync_StreamedTemp_RoundTripsAndPreservesPreviousVersionAsBackup()
+    {
+        string storePath = Path.Combine(_tempRoot, "streamed.json");
+        const string originalJson = "{\"value\":\"原始 📁\"}";
+        const string updatedJson = "{\"value\":\"更新 🌏\"}";
+        await File.WriteAllTextAsync(storePath, originalJson);
+
+        await ResilientJsonStore.SaveAsync(
+            storePath,
+            tempPath => File.WriteAllTextAsync(tempPath, updatedJson));
+
+        Assert.Equal(updatedJson, await File.ReadAllTextAsync(storePath));
+        Assert.Equal(
+            originalJson,
+            await File.ReadAllTextAsync(ResilientJsonStore.GetBackupPath(storePath)));
+        Assert.Empty(Directory.EnumerateFiles(_tempRoot, "*.tmp"));
+    }
+
+    [Fact]
+    public async Task SaveAsync_StreamedTemp_FirstSaveMovesIntoPlace()
+    {
+        string storePath = Path.Combine(_tempRoot, "nested", "streamed-first.json");
+        const string json = "{\"value\":\"中文、é、📁\"}";
+
+        await ResilientJsonStore.SaveAsync(
+            storePath,
+            tempPath => File.WriteAllTextAsync(tempPath, json));
+
+        Assert.Equal(json, await File.ReadAllTextAsync(storePath));
+        Assert.False(File.Exists(ResilientJsonStore.GetBackupPath(storePath)));
+        Assert.Empty(Directory.EnumerateFiles(_tempRoot, "*.tmp", SearchOption.AllDirectories));
+    }
+
+    [Fact]
+    public async Task SaveAsync_StreamedTemp_WriterThrows_PropagatesAndKeepsOldSettingsRecoverable()
+    {
+        string storePath = Path.Combine(_tempRoot, "streamed-fail.json");
+        const string originalJson = "{\"value\":\"original\"}";
+        await File.WriteAllTextAsync(storePath, originalJson);
+
+        IOException actual = await Assert.ThrowsAsync<IOException>(() =>
+            ResilientJsonStore.SaveAsync(
+                storePath,
+                _ => throw new IOException("disk full while encoding")));
+
+        Assert.Equal("disk full while encoding", actual.Message);
+        // The old settings survive untouched: same primary, no backup
+        // change, and no temp residue - a failed streamed save leaves the
+        // store exactly as it was.
+        Assert.Equal(originalJson, await File.ReadAllTextAsync(storePath));
+        Assert.False(File.Exists(ResilientJsonStore.GetBackupPath(storePath)));
+        Assert.Empty(Directory.EnumerateFiles(_tempRoot, "*.tmp"));
+    }
+
+    [Fact]
+    public async Task SaveAsync_StreamedTemp_UnableToRemoveReplacedFile_UsesVerifiedInPlaceFallback()
+    {
+        string storePath = Path.Combine(_tempRoot, "streamed-1175.json");
+        const string originalJson = "{\"value\":\"original\"}";
+        const string updatedJson = "{\"value\":\"更新 🌏\"}";
+        await File.WriteAllTextAsync(storePath, originalJson);
+        int replaceAttempts = 0;
+
+        await ResilientJsonStore.SaveAsync(
+            storePath,
+            tempPath => File.WriteAllTextAsync(tempPath, updatedJson),
+            (_, _, _, _) =>
+            {
+                replaceAttempts++;
+                throw CreateUnableToRemoveReplacedFileException();
+            },
+            _ => Task.CompletedTask);
+
+        // The exceptional in-place path must re-read the streamed temp file:
+        // with the buffer overloads it read the pending bytes directly.
+        Assert.Equal(3, replaceAttempts);
+        Assert.Equal(updatedJson, await File.ReadAllTextAsync(storePath));
+        Assert.Equal(
+            originalJson,
+            await File.ReadAllTextAsync(ResilientJsonStore.GetBackupPath(storePath)));
+        Assert.Empty(Directory.EnumerateFiles(_tempRoot, "*.tmp"));
+    }
+
+    [Fact]
+    public async Task SaveAsync_StreamedTemp_BackupCanRecoverCorruptPrimary()
+    {
+        string storePath = Path.Combine(_tempRoot, "streamed-recovery.json");
+        const string firstJson = "{\"value\":\"第一次 📁\"}";
+        const string secondJson = "{\"value\":\"第二次 🌏\"}";
+        await ResilientJsonStore.SaveAsync(
+            storePath,
+            tempPath => File.WriteAllTextAsync(tempPath, firstJson));
+        await ResilientJsonStore.SaveAsync(
+            storePath,
+            tempPath => File.WriteAllTextAsync(tempPath, secondJson));
+        await File.WriteAllTextAsync(storePath, "{invalid");
+
+        var result = await ResilientJsonStore.LoadWithResultAsync(
+            storePath,
+            json =>
+            {
+                using var document = JsonDocument.Parse(json);
+                return document.RootElement.GetProperty("value").GetString()!;
+            },
+            () => "default",
+            "ResilientJsonStoreTests");
+
+        Assert.Equal(ResilientJsonLoadSource.Backup, result.Source);
+        Assert.Equal("第一次 📁", result.Value);
+        Assert.Empty(Directory.EnumerateFiles(_tempRoot, "*.tmp"));
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_tempRoot))

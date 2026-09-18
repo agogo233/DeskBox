@@ -35,9 +35,11 @@ public sealed class DesktopOrganizationRecoveryAbandonTests : IDisposable
 
         await transaction.AbandonUndoAsync(historyId);
 
-        // The UI execute gate is "UndoStarted && CanUndo"; flipping CanUndo
-        // unblocks organization while the receipts stay untouched.
-        Assert.True(stuck.UndoStarted);
+        // The UI execute gate is "UndoStarted && CanUndo"; abandon is a
+        // lifecycle endpoint, so both flip and unblock organization. The
+        // small entry's receipts stay (only oversized entries compact);
+        // oversized ones are summarized by the post-abandon retention pass.
+        Assert.False(stuck.UndoStarted);
         Assert.False(stuck.CanUndo);
         Assert.False(stuck.Items.Single().IsRestored);
         Assert.False(recovery.HasPendingJournal);

@@ -647,7 +647,7 @@ public sealed class DesktopAutoOrganizationWatcher : IDisposable
                     return;
                 }
 
-                OrganizationHistoryEntry history = await _organizerService.OrganizeDropAsync(
+                OrganizerOperationResult operation = await _organizerService.OrganizeDropAsync(
                     target,
                     target.Name,
                     [workItem.Path],
@@ -674,7 +674,7 @@ public sealed class DesktopAutoOrganizationWatcher : IDisposable
                 try
                 {
                     ItemOrganized?.Invoke(new DesktopAutoOrganizationCompleted(
-                        history.Id,
+                        operation.History.Id,
                         Path.GetFileName(workItem.Path),
                         target.Id,
                         target.Name));

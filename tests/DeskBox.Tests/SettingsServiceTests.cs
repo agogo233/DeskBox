@@ -41,6 +41,58 @@ public sealed class SettingsServiceTests : IDisposable
             service.Settings.DefaultManagedStorageRootPath);
     }
 
+    [Fact]
+    public async Task SaveAsync_StreamsLockedSnapshotAndStaysReloadable()
+    {
+        // The streamed persistence path (serialize straight into the store
+        // temp file under _lock) must round-trip exactly like the buffered
+        // path it replaced: save, reload in a fresh service, same values.
+        var service = new SettingsService(_settingsRoot);
+        await service.LoadAsync();
+        service.Settings.SearchMaxResults = 100;
+
+        await service.SaveAsync();
+
+        var reloaded = new SettingsService(_settingsRoot);
+        await reloaded.LoadAsync();
+        Assert.Equal(
+            SettingsLoadRecoveryState.Primary,
+            reloaded.LastLoadRecoveryState);
+        Assert.Equal(100, reloaded.Settings.SearchMaxResults);
+    }
+
+    [Fact]
+    public async Task SaveCheckedAsync_FailureDuringSaveReportsFailureAndKeepsLastGoodStoreUsable()
+    {
+        var service = new SettingsService(_settingsRoot);
+        await service.LoadAsync();
+        service.Settings.SearchMaxResults = 100;
+        await service.SaveAsync();
+
+        // Sabotage: replace the settings directory with a file so the next
+        // save cannot even stage its temp file.
+        string movedAside = _settingsRoot + "-moved";
+        Directory.Move(_settingsRoot, movedAside);
+        File.WriteAllText(_settingsRoot, "not a directory");
+
+        bool saved = await service.SaveCheckedAsync();
+
+        Assert.False(saved);
+        Assert.NotNull(service.LastPersistenceFailure);
+        Assert.Equal("save", service.LastPersistenceFailure!.Operation);
+
+        // The last good store is untouched and fully recoverable: restore
+        // the directory and a fresh service must load it from primary.
+        File.Delete(_settingsRoot);
+        Directory.Move(movedAside, _settingsRoot);
+        var recovered = new SettingsService(_settingsRoot);
+        await recovered.LoadAsync();
+        Assert.Equal(
+            SettingsLoadRecoveryState.Primary,
+            recovered.LastLoadRecoveryState);
+        Assert.Equal(100, recovered.Settings.SearchMaxResults);
+    }
+
     [Theory]
     [InlineData(50)]
     [InlineData(100)]
