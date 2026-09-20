@@ -13,7 +13,7 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
         Guid.NewGuid().ToString("N"));
 
     [Fact]
-    public void ProductionInventory_IsFrozenAtThirtyOneFilesAndSeventyTwoCalls()
+    public void ProductionInventory_IsFrozenAtThirtyTwoFilesAndSeventyFourCalls()
     {
         var expected = new Dictionary<string, int>(StringComparer.Ordinal)
         {
@@ -94,13 +94,15 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
             "src/DeskBox/Services/GlanceImageService.cs",
             "src/DeskBox/Services/GlanceWidgetStore.cs",
             "src/DeskBox/Services/LocalizationService.cs",
+            "src/DeskBox/Services/MusicSettingsStore.cs",
             "src/DeskBox/Services/NativeNotificationActivationEnvelopeStore.cs",
             "src/DeskBox/Services/QuickCaptureStore.cs",
             "src/DeskBox/Services/SearchHistoryService.cs",
             "src/DeskBox/Services/SettingsService.cs",
             "src/DeskBox/Services/TodoWidgetStore.cs",
             "src/DeskBox/Services/WeatherService.cs",
-            "src/DeskBox/Services/WidgetFileStackSettings.cs"
+            "src/DeskBox/Services/WidgetFileStackSettings.cs",
+            "src/DeskBox/Services/WidgetStyleBackupProjection.cs"
         ];
         string[] actualContextOwners = ProductionSourceFiles()
             .Where(path => File.ReadAllText(path).Contains(
@@ -110,7 +112,7 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
             .Order()
             .ToArray();
 
-        Assert.Equal(28, actualContextOwners.Length);
+        Assert.Equal(30, actualContextOwners.Length);
         Assert.Equal(expectedContextOwners, actualContextOwners);
     }
 

@@ -1,8 +1,18 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.Json.Serialization;
 using DeskBox.Models;
 
 namespace DeskBox.Services;
+
+[JsonSourceGenerationOptions(
+    GenerationMode = JsonSourceGenerationMode.Metadata,
+    PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
+    WriteIndented = true)]
+[JsonSerializable(typeof(JsonObject), TypeInfoPropertyName = "JsonObject")]
+internal sealed partial class WidgetStyleBackupJsonContext : JsonSerializerContext
+{
+}
 
 /// <summary>
 /// Projects widget STYLE settings into a portable backup document and
@@ -144,7 +154,7 @@ internal static class WidgetStyleBackupProjection
             ["shell"] = shell,
             ["widgets"] = widgets
         };
-        return JsonSerializer.SerializeToUtf8Bytes(document);
+        return JsonSerializer.SerializeToUtf8Bytes(document, WidgetStyleBackupJsonContext.Default.JsonObject);
     }
 
     /// <summary>
@@ -258,7 +268,7 @@ internal static class WidgetStyleBackupProjection
             }
         }
 
-        string patched = settingsDom.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
+        string patched = settingsDom.ToJsonString(WidgetStyleBackupJsonContext.Default.JsonObject.Options);
         await ResilientJsonStore.SaveAsync(settingsPath, patched);
         return new ApplyResult(true, shellPatched, widgetsPatched, null);
     }
