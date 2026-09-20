@@ -17,6 +17,18 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Commit message attribution check
+        if: github.event_name == 'pull_request'
+        shell: pwsh
+        run: |
+          $messages = git log --format=%B "${{ github.event.pull_request.base.sha }}..HEAD"
+          if ($messages -match '(?im)^\s*(co-authored-by|generated[ -]with|generated-by)\s*[: ]') {
+            Write-Host 'Forbidden attribution trailer (Co-Authored-By / Generated with) found in commit messages.'
+            exit 1
+          }
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4

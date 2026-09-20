@@ -191,7 +191,7 @@ public sealed class AotStage5B4B1ContractTests
             "ItemsSource=\"{x:Bind FileStackCustomRules, Mode=OneWay}\"",
             xaml,
             StringComparison.Ordinal);
-        Assert.Equal(329, CountOccurrences(bindableViewModel, "nameof("));
+        Assert.Equal(349, CountOccurrences(bindableViewModel, "nameof("));
         Assert.Contains("nameof(AvailableAutoStartModeOptions)", bindableViewModel, StringComparison.Ordinal);
         Assert.Contains("nameof(ImmediateHiddenWorkingSetTrimEnabled)", bindableViewModel, StringComparison.Ordinal);
         Assert.DoesNotContain("nameof(WidgetCapsuleModeEnabled)", bindableViewModel, StringComparison.Ordinal);
@@ -302,8 +302,8 @@ public sealed class AotStage5B4B1ContractTests
         string baseline = ReadRepositoryFile("tests/DeskBox.Tests/JsonSerializationBaselineContractTests.cs");
         string source = ReadRepositoryFile("src/DeskBox/App.AotManagedUiSmoke.cs");
 
-        Assert.Contains("Assert.Equal(30, actual.Count);", baseline, StringComparison.Ordinal);
-        Assert.Contains("Assert.Equal(70, actual.Values.Sum());", baseline, StringComparison.Ordinal);
+        Assert.Contains("Assert.Equal(32, actual.Count);", baseline, StringComparison.Ordinal);
+        Assert.Contains("Assert.Equal(74, actual.Values.Sum());", baseline, StringComparison.Ordinal);
         Assert.Contains("\"src/DeskBox/App.AotManagedUiSmoke.cs\"", baseline, StringComparison.Ordinal);
         Assert.Equal(1, CountOccurrences(source, "JsonSerializer.Serialize("));
     }

@@ -1,4 +1,4 @@
-; DeskBox 安装脚本
+﻿; DeskBox 安装脚本
 ; 零售安装包由 scripts\build-stage-7c1-distribution.ps1 产出（Full Native AOT 载荷）。
 ; 载荷必须由 ..\scripts\publish-aot-retail.ps1 -Platform x64 生成，
 ; 以便同时生成 DeskBox.InstallManifest.txt。

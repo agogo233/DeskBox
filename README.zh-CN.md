@@ -7,7 +7,7 @@
 > 目前暂不接受外部 PR 合并——欢迎通过 Issue / Discussion 提交 Bug、功能建议与技术讨论，详见 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
 [![CI](https://github.com/Tianyu199509/DeskBox/actions/workflows/ci.yml/badge.svg)](https://github.com/Tianyu199509/DeskBox/actions/workflows/ci.yml)
-[![1.5.3 版本](https://img.shields.io/badge/release-1.5.3-2563EB.svg)](https://github.com/Tianyu199509/DeskBox/releases/tag/v1.5.3)
+[![1.5.4 版本](https://img.shields.io/badge/release-1.5.4-2563EB.svg)](https://github.com/Tianyu199509/DeskBox/releases/tag/v1.5.4)
 [![Windows 10/11](https://img.shields.io/badge/Windows-10%2F11-0078D4.svg)](#环境要求)
 [![x64 and ARM64](https://img.shields.io/badge/architecture-x64%20%7C%20ARM64-5C2D91.svg)](#下载)
 [![License: GPL v3](https://img.shields.io/badge/license-GPLv3-blue.svg)](LICENSE)
@@ -40,10 +40,10 @@ DeskBox 使用贴近 Windows 原生体验的材质，同时保留普通桌面文
 
 ## 下载
 
-DeskBox 1.5.3 已进入发版准备阶段。下方 [GitHub Releases](https://github.com/Tianyu199509/DeskBox/releases/tag/v1.5.3) 下载链接会在正式发布后生效。
+DeskBox 1.5.4 已进入发版准备阶段。下方 [GitHub Releases](https://github.com/Tianyu199509/DeskBox/releases/tag/v1.5.4) 下载链接会在正式发布后生效。
 
-- [DeskBox 1.5.3 x64 安装包](https://github.com/Tianyu199509/DeskBox/releases/download/v1.5.3/DeskBox_Setup_1.5.3_x64.exe)，推荐大多数 Intel 和 AMD 电脑使用。
-- [DeskBox 1.5.3 ARM64 安装包](https://github.com/Tianyu199509/DeskBox/releases/download/v1.5.3/DeskBox_Setup_1.5.3_arm64.exe)，推荐骁龙、Surface Pro X 等 Windows on ARM 电脑使用。
+- [DeskBox 1.5.4 x64 安装包](https://github.com/Tianyu199509/DeskBox/releases/download/v1.5.4/DeskBox_Setup_1.5.4_x64.exe)，推荐大多数 Intel 和 AMD 电脑使用。
+- [DeskBox 1.5.4 ARM64 安装包](https://github.com/Tianyu199509/DeskBox/releases/download/v1.5.4/DeskBox_Setup_1.5.4_arm64.exe)，推荐骁龙、Surface Pro X 等 Windows on ARM 电脑使用。
 
 两个安装包都是 Full Native AOT 构建，并内置对应架构的私有 Windows App Runtime 2.4，可离线安装，不需要另外下载 .NET 10 或 Windows App Runtime。
 
@@ -124,6 +124,14 @@ DeskBox 1.5.3 已进入发版准备阶段。下方 [GitHub Releases](https://git
 - DeskBox 关闭后会显示安装界面；升级会复用并锁定原安装路径，避免生成第二份应用。
 - 支持设置备份与恢复，并可导出经过隐私过滤的一键诊断包用于排查问题。
 - 设置使用可恢复快照，退出时刷新待保存内容；保存失败会明确记录和提示，不再静默恢复默认配置。
+
+## 1.5.4 更新亮点
+
+- **大批量操作后内存不再高居不下。** 导入、整理或剪切数千文件不再让私有内存逼近 1 GB 直到重启：设置改为流式写盘、移出批处理不再触发数千次冗余保存、剪切状态清扫合并为每批一次，不再逐项卡住格子。
+- **为 settings.json 中的撤销历史设置上限。** 超大批次保留摘要式历史条目（真实数量、绝不部分撤销），settings.json 不再无限膨胀——膨胀到近 20 MB 的配置在升级后首次启动自动瘦身到 100 KB 以内。
+- **大批量格子操作更快。** 导入与监视器重载改用批内路径索引和二分插入，替代逐文件列表扫描。
+
+完整内容见 [更新日志](CHANGELOG.md) 和 [1.5.4 发布说明](docs/releases/v1.5.4.md)。
 
 ## 1.5.3 更新亮点
 

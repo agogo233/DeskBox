@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.5.4 - 2026-09-18
+
+### English
+
+#### Fixes
+
+- Fix memory climbing and staying high after large batch operations in file widgets (importing, organizing, or cutting thousands of files could leave private memory near 1 GB with no recovery until restart). Settings persistence now streams to disk instead of materializing multi-megabyte buffers, and move-out batches no longer trigger thousands of redundant saves.
+- Stop the visible freeze when cutting a large selection out of a widget: the cut-state sweep now runs once per batch instead of once per collection event.
+- Bound the undo history retained inside settings.json. Batches beyond the receipt limits keep their history entry as a summary (real item count, no partial undo), so settings.json can no longer grow unboundedly after repeated large operations; existing bloated profiles shrink automatically on the first launch after updating.
+- Speed up large widget operations by replacing per-file list scans with a scoped path index and binary insertion during imports and watcher reloads.
+
+### 中文
+
+#### 修复
+
+- 修复文件格子大批量操作（导入、整理、剪切数千文件）后内存攀升且高居不下、需重启才能恢复的问题。设置持久化改为流式写盘，不再生成数 MB 的临时缓冲；移出批处理不再触发数千次冗余保存。
+- 修复从格子剪切大量文件时的可见卡顿：剪切状态清扫从每个集合事件一次合并为每批一次。
+- 为 settings.json 中的撤销历史设置上限。超出限额的批次保留为摘要条目（真实数量、不做部分撤销），settings.json 不再因反复大批量操作无限膨胀；已膨胀的配置在升级后首次启动时自动瘦身。
+- 导入与监视器重载期间用批内路径索引和二分插入替代逐文件列表扫描，大批量操作更快。
+
 ## 1.5.3 - 2026-09-16
 
 ### English

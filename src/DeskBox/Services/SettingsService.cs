@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Runtime.CompilerServices;
+using DeskBox.FileSafety;
 using DeskBox.Helpers;
 using DeskBox.Models;
 
@@ -372,6 +373,14 @@ public const int DefaultSearchMaxResults = 100;
                 [nameof(AppSettings.DesktopAutoOrganizationBaselineUtc)] = DefaultPreferencePreservationReason.RuntimeState,
                 [nameof(AppSettings.DefaultManagedStorageRootPath)] = DefaultPreferencePreservationReason.Storage,
                 [nameof(AppSettings.AutomaticBackupDirectory)] = DefaultPreferencePreservationReason.Storage,
+                [nameof(AppSettings.CloudBackupProvider)] = DefaultPreferencePreservationReason.UserChoice,
+                [nameof(AppSettings.CloudBackupServerUrl)] = DefaultPreferencePreservationReason.Storage,
+                [nameof(AppSettings.CloudBackupRemotePath)] = DefaultPreferencePreservationReason.Storage,
+                [nameof(AppSettings.CloudBackupUsername)] = DefaultPreferencePreservationReason.UserChoice,
+                [nameof(AppSettings.CloudBackupTodoDataEnabled)] = DefaultPreferencePreservationReason.UserChoice,
+                [nameof(AppSettings.CloudBackupQuickCaptureDataEnabled)] = DefaultPreferencePreservationReason.UserChoice,
+                [nameof(AppSettings.CloudBackupWidgetStyleEnabled)] = DefaultPreferencePreservationReason.UserChoice,
+                [nameof(AppSettings.CloudBackupLastSuccessUtcTicks)] = DefaultPreferencePreservationReason.RuntimeState,
                 [nameof(AppSettings.ManagedStorageDesktopShortcutEnabled)] = DefaultPreferencePreservationReason.UserChoice,
                 [nameof(AppSettings.ManagedStorageDesktopShortcutPath)] = DefaultPreferencePreservationReason.SystemIntegration,
                 [nameof(AppSettings.HasCompletedOnboarding)] = DefaultPreferencePreservationReason.RuntimeState,
@@ -602,6 +611,12 @@ settings.WeatherRefreshIntervalMinutes = 60;
         settings.AutomaticBackupEnabled = DataBackupSettingsPolicy.DefaultEnabled;
         settings.AutomaticBackupIntervalMinutes = DataBackupSettingsPolicy.DefaultIntervalMinutes;
         settings.AutomaticBackupRetentionCount = DataBackupSettingsPolicy.DefaultRetentionCount;
+        // Cloud cadence prefs reset like the local ones; the channel itself
+        // (provider/url/path/user/toggles) stays preserved — see the policy.
+        settings.CloudBackup.CloudBackupRetentionCount =
+            CloudBackupSettingsPolicy.DefaultRetentionCount;
+        settings.CloudBackup.CloudBackupIntervalMinutes =
+            CloudBackupSettingsPolicy.DefaultIntervalMinutes;
         settings.GlobalHotkeyEnabled = DefaultGlobalHotkeyEnabled;
         settings.GlobalHotkeyActivationKind = DefaultGlobalHotkeyActivationKind;
         settings.GlobalHotkeyModifiers = DefaultGlobalHotkeyModifiers;
@@ -622,12 +637,24 @@ settings.FocusClickedWidgetOnRaise = false;
     public SettingsService()
     {
         _settingsPath = InitializeSettingsPath(DeskBoxDataPathService.Current.DataDirectory);
+        OrganizationHistory = new DesktopOrganizationHistoryStore(
+            Path.Combine(Path.GetDirectoryName(_settingsPath)!, "desktop-organization-history.json"));
     }
 
     internal SettingsService(string dataDir)
     {
         _settingsPath = InitializeSettingsPath(dataDir);
+        OrganizationHistory = new DesktopOrganizationHistoryStore(
+            Path.Combine(dataDir, "desktop-organization-history.json"));
     }
+
+    /// <summary>
+    /// FileSafety-domain store owning the desktop-organization undo receipts.
+    /// Local-layer data (machine-local transaction state) — deliberately not
+    /// part of settings.json so it can never join the sync layer. Loaded and
+    /// migrated inside <see cref="LoadAsync"/>.
+    /// </summary>
+    public DesktopOrganizationHistoryStore OrganizationHistory { get; }
 
     private static string InitializeSettingsPath(string dataDir)
     {
@@ -734,6 +761,18 @@ settings.FocusClickedWidgetOnRaise = false;
                 changed |= NormalizeWeatherSettings(_settings);
                 changed |= NormalizeDeletionSettings(_settings);
                 changed |= DataBackupSettingsPolicy.Normalize(_settings);
+            }
+
+            // Local-layer migration: the FileSafety-domain history store
+            // adopts the legacy settings list only once its own file is
+            // durable. If the migration write failed, the legacy list stays
+            // so the next launch retries instead of losing receipts.
+            bool historyStoreReady = await OrganizationHistory.LoadAsync(
+                _settings.RecentOrganizationHistory);
+            if (historyStoreReady && _settings.RecentOrganizationHistory.Count > 0)
+            {
+                _settings.RecentOrganizationHistory = [];
+                changed = true;
             }
 
             if (changed)
@@ -2499,40 +2538,11 @@ settings.FocusClickedWidgetOnRaise = false;
             changed = true;
         }
 
+        // Null-guard only for the migration seed read in LoadAsync: the live
+        // list, sorting, and field defaults moved to
+        // DesktopOrganizationHistoryStore (local-layer domain). The entry cap
+        // stays with OrganizationHistoryPolicy as before.
         settings.RecentOrganizationHistory ??= [];
-        // Order only: the entry cap belongs to OrganizationHistoryPolicy
-        // (single source), which also knows about active undos and journal
-        // protected entries. Capping here, before startup recovery, could
-        // trim an entry whose receipts are still transaction state.
-        settings.RecentOrganizationHistory = settings.RecentOrganizationHistory
-            .Where(entry => entry is not null)
-            .OrderByDescending(entry => entry.TimestampUtc)
-            .ToList();
-
-        foreach (var entry in settings.RecentOrganizationHistory)
-        {
-            if (string.IsNullOrWhiteSpace(entry.Id))
-            {
-                entry.Id = Guid.NewGuid().ToString();
-                changed = true;
-            }
-
-            entry.WidgetId ??= string.Empty;
-            entry.WidgetName ??= string.Empty;
-            entry.ActionType = string.IsNullOrWhiteSpace(entry.ActionType)
-                ? OrganizationActionType.ManagedDrop
-                : entry.ActionType;
-            entry.TransferMode = entry.TransferMode is "Move" or "Copy"
-                ? entry.TransferMode
-                : ManagedDropActionMove;
-            entry.Items ??= [];
-            entry.Targets ??= [];
-            foreach (var item in entry.Items)
-            {
-                item.TargetWidgetId ??= string.Empty;
-                item.TargetWidgetName ??= string.Empty;
-            }
-        }
 
         settings.DesktopOrganizationRules ??= [];
         var validFileWidgetIds = settings.Widgets

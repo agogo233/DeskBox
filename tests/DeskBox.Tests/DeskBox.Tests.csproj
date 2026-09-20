@@ -50,6 +50,7 @@
 
   <ItemGroup>
     <Using Include="Xunit" />
+    <Using Include="DeskBox.Platform" />
   </ItemGroup>
 
   <Target

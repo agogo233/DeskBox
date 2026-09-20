@@ -7,7 +7,7 @@ English | [简体中文](README.zh-CN.md)
 > External pull requests are not being merged at this time — bug reports, ideas, and discussions are very welcome via Issues / Discussions. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 [![CI](https://github.com/Tianyu199509/DeskBox/actions/workflows/ci.yml/badge.svg)](https://github.com/Tianyu199509/DeskBox/actions/workflows/ci.yml)
-[![Release 1.5.3](https://img.shields.io/badge/release-1.5.3-2563EB.svg)](https://github.com/Tianyu199509/DeskBox/releases/tag/v1.5.3)
+[![Release 1.5.4](https://img.shields.io/badge/release-1.5.4-2563EB.svg)](https://github.com/Tianyu199509/DeskBox/releases/tag/v1.5.4)
 [![Windows 10/11](https://img.shields.io/badge/Windows-10%2F11-0078D4.svg)](#system-requirements)
 [![x64 and ARM64](https://img.shields.io/badge/architecture-x64%20%7C%20ARM64-5C2D91.svg)](#download)
 [![License: GPL v3](https://img.shields.io/badge/license-GPLv3-blue.svg)](LICENSE)
@@ -40,10 +40,10 @@ All twelve selectable languages share the same resource-key and formatting-place
 
 ## Download
 
-DeskBox 1.5.3 is prepared for release. The [GitHub Releases](https://github.com/Tianyu199509/DeskBox/releases/tag/v1.5.3) download links below will become available after publication.
+DeskBox 1.5.4 is prepared for release. The [GitHub Releases](https://github.com/Tianyu199509/DeskBox/releases/tag/v1.5.4) download links below will become available after publication.
 
-- [DeskBox 1.5.3 for x64](https://github.com/Tianyu199509/DeskBox/releases/download/v1.5.3/DeskBox_Setup_1.5.3_x64.exe), recommended for most Intel and AMD PCs.
-- [DeskBox 1.5.3 for ARM64](https://github.com/Tianyu199509/DeskBox/releases/download/v1.5.3/DeskBox_Setup_1.5.3_arm64.exe), recommended for Snapdragon, Surface Pro X, and other Windows on ARM PCs.
+- [DeskBox 1.5.4 for x64](https://github.com/Tianyu199509/DeskBox/releases/download/v1.5.4/DeskBox_Setup_1.5.4_x64.exe), recommended for most Intel and AMD PCs.
+- [DeskBox 1.5.4 for ARM64](https://github.com/Tianyu199509/DeskBox/releases/download/v1.5.4/DeskBox_Setup_1.5.4_arm64.exe), recommended for Snapdragon, Surface Pro X, and other Windows on ARM PCs.
 
 Both packages are Full Native AOT builds with the matching private Windows App Runtime 2.4, so they can install offline without downloading a separate .NET 10 or Windows App Runtime package.
 
@@ -124,6 +124,14 @@ Every release also publishes a matching `.sha256` sidecar for each installer. Th
 - Start a visible installer after DeskBox closes; upgrades reuse and lock the existing installation path instead of creating a second copy.
 - Back up and restore settings, and export a privacy-filtered diagnostics package for troubleshooting.
 - Recover settings from resilient snapshots, flush pending changes during shutdown, and report save failures instead of silently reverting to defaults.
+
+## What's new in 1.5.4
+
+- **Keep memory in check after large batch operations.** Importing, organizing, or cutting thousands of files no longer leaves private memory near 1 GB until restart: settings persist by streaming to disk, move-out batches stop triggering thousands of redundant saves, and the cut-state sweep runs once per batch instead of freezing the widget per item.
+- **Bound the undo history inside settings.json.** Oversized batches keep a summary history entry (real count, never partially undoable), so settings.json can no longer grow unboundedly — a profile bloated to nearly 20 MB shrinks to under 100 KB automatically on the first launch after updating.
+- **Speed up large widget operations.** Imports and watcher reloads use a scoped path index with binary insertion instead of per-file list scans.
+
+Read the complete [changelog](CHANGELOG.md) or the [1.5.4 release notes](docs/releases/v1.5.4.md).
 
 ## What's new in 1.5.3
 

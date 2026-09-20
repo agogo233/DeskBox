@@ -4,3 +4,4 @@
 spikes/github-stats*/** -text
 spikes/keys/** -text
 scripts/spike/** -text
+.githooks/** text eol=lf

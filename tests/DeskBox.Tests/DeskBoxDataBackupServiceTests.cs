@@ -20,6 +20,50 @@ public sealed class DeskBoxDataBackupServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task ExportBackupAsync_CopiesFileSafetyMetadataUnderOperationGate()
+    {
+        // settings/history/journal are committed as a unit under
+        // OperationGate; the snapshot must copy them under the same gate or
+        // a backup could capture history@T1 with settings@T0 — a mix that
+        // never existed in the live system.
+        string dataDirectory = Directory.CreateDirectory(Path.Combine(_appDataRoot, "data")).FullName;
+        await File.WriteAllTextAsync(Path.Combine(dataDirectory, "settings.json"), "{\"language\":\"en-US\"}");
+        await File.WriteAllTextAsync(
+            Path.Combine(dataDirectory, "desktop-organization-history.json"),
+            "{\"entries\":[]}");
+        var service = new DeskBoxDataBackupService(_appDataRoot);
+
+        await DesktopOrganizationTransaction.OperationGate.WaitAsync();
+        Task<string> backup;
+        try
+        {
+            backup = service.ExportBackupAsync(_exportRoot);
+            await Task.Delay(750);
+            Assert.False(
+                backup.IsCompleted,
+                "the snapshot must wait for OperationGate before copying FileSafety metadata");
+
+            // A journal appearing while the snapshot waits for the gate must
+            // land in the backup — the FileSafety set is resolved inside the
+            // gate, not from the pre-enumerated file list.
+            await File.WriteAllTextAsync(
+                Path.Combine(dataDirectory, "desktop-organization-recovery.json"),
+                "{\"transactionId\":\"in-flight\"}");
+        }
+        finally
+        {
+            DesktopOrganizationTransaction.OperationGate.Release();
+        }
+
+        string backupPath = await backup;
+        Assert.True(File.Exists(backupPath));
+        using ZipArchive archive = ZipFile.OpenRead(backupPath);
+        Assert.NotNull(archive.GetEntry("data/settings.json"));
+        Assert.NotNull(archive.GetEntry("data/desktop-organization-history.json"));
+        Assert.NotNull(archive.GetEntry("data/desktop-organization-recovery.json"));
+    }
+
+    [Fact]
     public async Task ExportBackupAsync_IncludesManifestDataAndNestedAttachments()
     {
         string dataDirectory = Directory.CreateDirectory(Path.Combine(_appDataRoot, "data")).FullName;
@@ -27,6 +71,20 @@ public sealed class DeskBoxDataBackupServiceTests : IDisposable
             Path.Combine(dataDirectory, "widgets", "todo", "attachments")).FullName;
         await File.WriteAllTextAsync(Path.Combine(dataDirectory, "settings.json"), "{\"language\":\"en-US\"}");
         await File.WriteAllBytesAsync(Path.Combine(attachmentDirectory, "spec.pdf"), [1, 2, 3]);
+        // User attachments keep their original names — "database.bak",
+        // "config.json.bak", "*.corrupt-*", "*.json.corrupt-*" and "*.tmp"
+        // are all user data under attachments/, not store sidecars, and
+        // must never be filtered out of the backup.
+        await File.WriteAllBytesAsync(Path.Combine(attachmentDirectory, "database.bak"), [10, 11]);
+        await File.WriteAllBytesAsync(Path.Combine(attachmentDirectory, "config.json.bak"), [10, 11]);
+        await File.WriteAllBytesAsync(Path.Combine(attachmentDirectory, "report.corrupt-copy.pdf"), [12, 13]);
+        await File.WriteAllBytesAsync(Path.Combine(attachmentDirectory, "report.json.corrupt-copy"), [12, 13]);
+        await File.WriteAllBytesAsync(Path.Combine(attachmentDirectory, "file.tmp"), [12, 13]);
+        // Internal ResilientJsonStore sidecars are the only .bak/.corrupt-*
+        // paths that belong outside the backup.
+        await File.WriteAllTextAsync(Path.Combine(dataDirectory, "settings.json.bak"), "{}");
+        await File.WriteAllTextAsync(
+            Path.Combine(dataDirectory, "desktop-organization-recovery.json.bak"), "{}");
         await File.WriteAllTextAsync(Path.Combine(dataDirectory, "ignored.tmp"), "partial");
         string thumbnailDirectory = Directory.CreateDirectory(
             Path.Combine(dataDirectory, "quick-capture", "thumbnails")).FullName;
@@ -48,6 +106,13 @@ public sealed class DeskBoxDataBackupServiceTests : IDisposable
         using ZipArchive archive = ZipFile.OpenRead(backupPath);
         Assert.NotNull(archive.GetEntry("data/settings.json"));
         Assert.NotNull(archive.GetEntry("data/widgets/todo/attachments/spec.pdf"));
+        Assert.NotNull(archive.GetEntry("data/widgets/todo/attachments/database.bak"));
+        Assert.NotNull(archive.GetEntry("data/widgets/todo/attachments/config.json.bak"));
+        Assert.NotNull(archive.GetEntry("data/widgets/todo/attachments/report.corrupt-copy.pdf"));
+        Assert.NotNull(archive.GetEntry("data/widgets/todo/attachments/report.json.corrupt-copy"));
+        Assert.NotNull(archive.GetEntry("data/widgets/todo/attachments/file.tmp"));
+        Assert.Null(archive.GetEntry("data/settings.json.bak"));
+        Assert.Null(archive.GetEntry("data/desktop-organization-recovery.json.bak"));
         Assert.Null(archive.GetEntry("data/ignored.tmp"));
         Assert.Null(archive.GetEntry("data/quick-capture/thumbnails/cached.png"));
         Assert.Null(archive.GetEntry("data/quick-capture/exports/temporary.txt"));
@@ -66,7 +131,7 @@ public sealed class DeskBoxDataBackupServiceTests : IDisposable
         Assert.Equal(2, manifest.RootElement.GetProperty("schemaVersion").GetInt32());
         Assert.Equal("manual", manifest.RootElement.GetProperty("kind").GetString());
         JsonElement[] files = manifest.RootElement.GetProperty("files").EnumerateArray().ToArray();
-        Assert.Equal(2, files.Length);
+        Assert.Equal(7, files.Length);
         Assert.All(files, file =>
         {
             Assert.Equal(JsonValueKind.String, file.GetProperty("path").ValueKind);

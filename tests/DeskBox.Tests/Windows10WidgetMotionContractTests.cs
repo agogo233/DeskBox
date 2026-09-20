@@ -293,7 +293,7 @@ public sealed class Windows10WidgetMotionContractTests
         string policy = File.ReadAllText(TestPaths.FromRepository(
             "src/DeskBox/Services/InteractionBackdropSimplificationPolicy.cs"));
         string win32Helper = File.ReadAllText(TestPaths.FromRepository(
-            "src/DeskBox/Helpers/Win32Helper.cs"));
+            "src/DeskBox/Platform/Win32Helper.cs"));
 
         // Frosted glass stays by default: simplification is gated on measured
         // frame-budget overruns or ResourceSaver, never unconditional.
@@ -334,7 +334,7 @@ public sealed class Windows10WidgetMotionContractTests
             StringComparison.Ordinal);
 
         int restoreIndex = app.IndexOf(
-            "await WidgetManager.RestoreWidgetsAsync();",
+            "await widgetManager.RestoreWidgetsAsync();",
             StringComparison.Ordinal);
         int hotkeyIndex = app.IndexOf(
             "InitializeGlobalHotkeyService(localizationService)",

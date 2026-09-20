@@ -326,9 +326,11 @@ public partial class WidgetViewModel
             VisibleItemCount);
         if (VisibleItemCount > RenderWindowActivationThreshold)
         {
-            // One line per reconcile is what makes a dead-end ("files exist
-            // but nothing scrolls") diagnosable from the log alone.
-            App.Log(
+            // Verbose since 1.5.4: one line per reconcile on large folders
+            // dominated the log during the batch-operation memory work.
+            // Set DESKBOX_VERBOSE_LOG=1 to bring back the dead-end
+            // ("files exist but nothing scrolls") diagnostics.
+            App.LogVerbose(
                 $"[RenderWindow] visible={VisibleItemCount} " +
                 $"rendered={RenderedItems.Count} budget={_renderWindowBudget}");
         }
