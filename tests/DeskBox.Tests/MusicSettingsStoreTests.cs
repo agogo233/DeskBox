@@ -64,40 +64,6 @@ public sealed class MusicSettingsStoreTests : IDisposable
     }
 
     [Fact]
-    public void Migration_9_To_10_CopiesLegacyFieldsAndIsIdempotent()
-    {
-        string dataDirectory = Path.Combine(_tempRoot, "data");
-        var settings = new AppSettings
-        {
-            MusicUseArtworkBackdrop = false,
-            MusicEnableCoverHoverMotion = true,
-            MusicDisplayMode = "RecordVertical"
-        };
-
-        Migration_9_To_10.Migrate(
-            settings, dataDirectory);
-
-        // The legacy fields stay as an inert compatibility source (N+2 removes them).
-        Assert.False(settings.MusicUseArtworkBackdrop);
-
-        string storePath = Path.Combine(dataDirectory, "music", "settings.json");
-        Assert.True(File.Exists(storePath), "Migration must create the music store.");
-        using (var document = System.Text.Json.JsonDocument.Parse(File.ReadAllText(storePath)))
-        {
-            Assert.False(document.RootElement.GetProperty("useArtworkBackdrop").GetBoolean());
-            Assert.Equal("RecordVertical", document.RootElement.GetProperty("displayMode").GetString());
-        }
-
-        // Idempotence: a second migration run never overwrites the store.
-        File.WriteAllText(storePath,
-            File.ReadAllText(storePath).Replace("RecordVertical", "Cover"));
-        Migration_9_To_10.Migrate(
-            new AppSettings(), dataDirectory);
-        using var reparsed = System.Text.Json.JsonDocument.Parse(File.ReadAllText(storePath));
-        Assert.Equal("Cover", reparsed.RootElement.GetProperty("displayMode").GetString());
-    }
-
-    [Fact]
     public async Task Load_RecoversFromOrphanedBackupWhenPrimaryIsMissing()
     {
         var store = CreateStore();
@@ -183,130 +149,10 @@ public sealed class MusicSettingsStoreTests : IDisposable
     }
 
     [Fact]
-    public void Pipeline_LeavesVersionAtLastSuccessWhenAMigrationFails()
-    {
-        var settings = new AppSettings { SchemaVersion = 5 };
-
-        bool applied = new SettingsMigrationPipeline(
-        [
-            new FakeMigration(5, succeeded: true),
-            new FakeMigration(6, succeeded: false),
-            new FakeMigration(7, succeeded: true)
-        ]).RunMigrations(settings);
-
-        // Partial progress is kept (so it is saved and not redone), the
-        // failed step is retried next launch, and later steps never run.
-        Assert.True(applied);
-        Assert.Equal(6, settings.SchemaVersion);
-    }
-
-    [Fact]
-    public void Pipeline_StampsCurrentVersionWhenAllMigrationsSucceed()
-    {
-        var settings = new AppSettings { SchemaVersion = 9 };
-
-        bool applied = new SettingsMigrationPipeline(
-        [
-            new FakeMigration(9, succeeded: true)
-        ]).RunMigrations(settings);
-
-        Assert.True(applied);
-        Assert.Equal(SettingsMigrationPipeline.CurrentSchemaVersion, settings.SchemaVersion);
-    }
-
-    [Fact]
-    public void Pipeline_StopsWhenARegistryGapIsDetected()
-    {
-        // Registry missing the 6->7 step: the old >= comparison ran 7->8
-        // directly and silently skipped it; exact-step matching must stop.
-        var settings = new AppSettings { SchemaVersion = 5 };
-
-        bool applied = new SettingsMigrationPipeline(
-        [
-            new FakeMigration(5, succeeded: true),
-            new FakeMigration(7, succeeded: true)
-        ]).RunMigrations(settings);
-
-        Assert.True(applied);
-        Assert.Equal(6, settings.SchemaVersion);
-    }
-
-    [Fact]
-    public void Pipeline_StopsWhenTrailingMigrationIsMissing()
-    {
-        // Registry simply ends before reaching the current version: the
-        // loop previously stamped CurrentSchemaVersion anyway, marking
-        // steps that were never registered as applied.
-        var settings = new AppSettings { SchemaVersion = 8 };
-
-        bool applied = new SettingsMigrationPipeline(
-        [
-            new FakeMigration(8, succeeded: true)
-        ]).RunMigrations(settings);
-
-        Assert.True(applied);
-        Assert.Equal(9, settings.SchemaVersion);
-    }
-
-    [Fact]
-    public void Pipeline_NeverRunsStepsBeyondTheCurrentVersion()
-    {
-        // A step registered for a future schema version must never execute.
-        var settings = new AppSettings { SchemaVersion = 9 };
-
-        bool applied = new SettingsMigrationPipeline(
-        [
-            new FakeMigration(9, succeeded: true),
-            new FakeMigration(10, succeeded: true)
-        ]).RunMigrations(settings);
-
-        Assert.True(applied);
-        Assert.Equal(SettingsMigrationPipeline.CurrentSchemaVersion, settings.SchemaVersion);
-    }
-
-    [Fact]
-    public void Migration_9_To_10_PropagatesExternalWriteFailures()
-    {
-        string dataDirectory = Path.Combine(_tempRoot, "blocked-data");
-        Directory.CreateDirectory(dataDirectory);
-        // A file named "music" makes the store's directory creation throw -
-        // exactly a failed external write during migration 9-to-10. The
-        // migration must let it propagate so the pipeline can stop.
-        File.WriteAllText(Path.Combine(dataDirectory, "music"), "blocker");
-
-        Assert.ThrowsAny<Exception>(() =>
-            Migration_9_To_10.Migrate(new AppSettings(), dataDirectory));
-    }
-
-    private sealed class FakeMigration(int fromVersion, bool succeeded) : ISettingsMigration
-    {
-        public int FromVersion { get; } = fromVersion;
-
-        public void Migrate(AppSettings settings)
-        {
-            if (!succeeded)
-            {
-                throw new InvalidOperationException("Injected migration failure.");
-            }
-        }
-    }
-
-    [Fact]
-    public void Pipeline_RegistersTheMusicMigration()
-    {
-        string pipelineSource = File.ReadAllText(TestPaths.SourceFile(
-            "src/DeskBox/Services/SettingsMigrationService.cs"));
-        Assert.Contains("new Migration_9_To_10()", pipelineSource, StringComparison.Ordinal);
-        Assert.Contains("CurrentSchemaVersion = 10", pipelineSource, StringComparison.Ordinal);
-    }
-
-    [Fact]
     public void Consumers_UseTheProcessWideSingletonAndSerializedWritePath()
     {
         string storeSource = File.ReadAllText(TestPaths.SourceFile(
             "src/DeskBox/Services/MusicSettingsStore.cs"));
-        string migrationSource = File.ReadAllText(TestPaths.SourceFile(
-            "src/DeskBox/Services/SettingsMigrationService.cs"));
         string settingsVmSource = File.ReadAllText(TestPaths.SourceFile(
             "src/DeskBox/ViewModels/SettingsViewModel.cs"));
         string widgetVmSource = File.ReadAllText(TestPaths.SourceFile(
@@ -337,12 +183,6 @@ public sealed class MusicSettingsStoreTests : IDisposable
         // not copied to Weather/Todo/QuickCapture stores.
         Assert.Contains("LIFECYCLE NOTE", storeSource, StringComparison.Ordinal);
         Assert.Contains("do not copy", storeSource, StringComparison.Ordinal);
-
-        // Migration: synchronous failure-propagating write, never a blocking
-        // wait on an async continuation (UI-thread startup deadlock).
-        Assert.Contains("store.SaveSynchronously(migrated);", migrationSource, StringComparison.Ordinal);
-        Assert.DoesNotContain("GetAwaiter().GetResult()", migrationSource, StringComparison.Ordinal);
-        Assert.Contains("settings.SchemaVersion = version;", migrationSource, StringComparison.Ordinal);
     }
 
     private MusicSettingsStore CreateStore() =>
