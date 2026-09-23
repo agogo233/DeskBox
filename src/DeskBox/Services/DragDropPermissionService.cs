@@ -703,7 +703,6 @@ public static class DragDropPermissionService
         // An empty icon location lets the shell resolve the source file's own
         // icon (embedded icon for executables, type association for documents)
         // instead of stamping every shortcut with the DeskBox branding.
-        string iconPath = string.Empty;
         string effectiveIconPath = iconPath ?? string.Empty;
 #if DESKBOX_NATIVE_AOT
         var metadata = new ShortcutInfo(
