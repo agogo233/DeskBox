@@ -1,9 +1,12 @@
 using DeskBox.Helpers;
 using DeskBox.Platform;
+using Microsoft.UI.Composition;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Hosting;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Animation;
+using System.Numerics;
 using Windows.Graphics;
 
 namespace DeskBox.Services;
@@ -20,28 +23,24 @@ public sealed class ResizeGuideOverlayService
 
     private const double SnapEngageThresholdDips = 8.0;
     private const double SnapReleaseThresholdDips = 12.0;
-    private const int HighlightThickness = 12;       // DIPs – gradient fade width
+    private const double HighlightBandDips = 10.0;      // DIPs – edge glow band width
+    private const double HighlightSlideDips = 8.0;      // DIPs – entry slide-out distance
+    private const float TipFadeMinFraction = 0.03f;
+    private const float TipFadeMaxFraction = 0.45f;
     private const int HighlightZIndex = 100;
-    private const double BreathingMinOpacity = 0.45;
-    private const double BreathingMaxOpacity = 1.0;
-    private static readonly TimeSpan BreathingDuration = TimeSpan.FromMilliseconds(1200);
+    private static readonly TimeSpan HighlightFadeInDuration = TimeSpan.FromMilliseconds(160);
+    private static readonly TimeSpan HighlightFadeOutDuration = TimeSpan.FromMilliseconds(100);
+    private static readonly TimeSpan HighlightSlideDuration = TimeSpan.FromMilliseconds(260);
 
-    private static readonly Windows.UI.Color _transparent = Windows.UI.Color.FromArgb(0, 0, 0, 0);
+    // ── Active highlight elements (keyed by widget HWND + edge) ─────────
 
-    // ── Active highlight elements (keyed by widget HWND) ────────────────
-
-    private readonly Dictionary<IntPtr, Border> _activeHighlights = new();
+    private readonly Dictionary<(IntPtr Hwnd, SnapEdge Edge), Border> _activeHighlights = new();
 
     // ── Resize session state ─────────────────────────────────────────────
 
     private IntPtr _resizingWidgetHwnd;
     private FrameworkElement? _resizingWidgetRoot;
     private Windows.UI.Color _highlightColor;
-    private IntPtr _currentTargetHwnd;
-    private FrameworkElement? _currentTargetRoot;
-    private SnapEdge? _currentResizeEdge;
-    private SnapEdge? _currentTargetEdge;
-    private string? _lastDragSnapSignature;
     private readonly List<WidgetSnapTarget> _resizeSnapTargets = [];
     private readonly List<WidgetSnapTarget> _dragSnapTargets = [];
     private RectInt32? _resizeWorkAreaBounds;
@@ -80,10 +79,6 @@ public sealed class ResizeGuideOverlayService
         _resizingWidgetHwnd = resizingWidgetHwnd;
         _resizingWidgetRoot = resizingWidgetRoot;
         _highlightColor = GetHighlightColor();
-        _currentTargetHwnd = IntPtr.Zero;
-        _currentTargetRoot = null;
-        _currentResizeEdge = null;
-        _currentTargetEdge = null;
         _resizeSnapTargets.Clear();
         _resizeSnapTargets.AddRange(GetOtherWidgetBounds(resizingWidgetHwnd));
         _resizeWorkAreaBounds = GetResizeWorkAreaBounds(resizingWidgetHwnd);
@@ -108,6 +103,12 @@ public sealed class ResizeGuideOverlayService
     {
         if (!IsActive || !IsSnapEnabled)
         {
+            // Snap toggled off mid-session must still converge the bands.
+            if (IsActive)
+            {
+                ClearAllHighlights();
+            }
+
             return proposedBounds;
         }
 
@@ -204,53 +205,11 @@ public sealed class ResizeGuideOverlayService
 
         // ── Update highlights ────────────────────────────────────────────
 
-        WidgetSnapMatch? visibleMatch = verticalMatch ?? horizontalMatch;
-        if (visibleMatch is { } snapMatch)
-        {
-            SnapEdge snapEdge = ToOverlayEdge(snapMatch.SourceEdge);
-            // Only rebuild the resizing widget's highlight if the edge changed.
-            if (_currentResizeEdge != snapEdge)
-            {
-                ShowHighlight(_resizingWidgetHwnd, _resizingWidgetRoot, snapEdge);
-                _currentResizeEdge = snapEdge;
-            }
-
-            // Highlight target widget's matched edge
-            if (snapMatch.TargetWindowHandle != IntPtr.Zero)
-            {
-                var targetRoot = App.Current?.WidgetManager
-                    ?.GetWidgetRootElementByHandle(snapMatch.TargetWindowHandle);
-                if (targetRoot is not null)
-                {
-                    SnapEdge targetEdge = ToOverlayEdge(snapMatch.TargetEdge);
-
-                    // Clear previous target if it changed
-                    if (_currentTargetHwnd != IntPtr.Zero &&
-                        _currentTargetHwnd != snapMatch.TargetWindowHandle)
-                    {
-                        RemoveHighlight(_currentTargetHwnd);
-                        _currentTargetEdge = null;
-                    }
-
-                    // Only rebuild target highlight if target or edge changed
-                    if (_currentTargetHwnd != snapMatch.TargetWindowHandle ||
-                        _currentTargetEdge != targetEdge)
-                    {
-                        ShowHighlight(snapMatch.TargetWindowHandle, targetRoot, targetEdge);
-                        _currentTargetEdge = targetEdge;
-                    }
-
-                    _currentTargetHwnd = snapMatch.TargetWindowHandle;
-                    _currentTargetRoot = targetRoot;
-                }
-            }
-        }
-        else
-        {
-            ClearAllHighlights();
-            _currentResizeEdge = null;
-            _currentTargetEdge = null;
-        }
+        var desired = new HashSet<(IntPtr Hwnd, SnapEdge Edge)>();
+        // A corner resize can snap on both axes — highlight both.
+        AddMatchHighlights(desired, _resizingWidgetHwnd, horizontalMatch);
+        AddMatchHighlights(desired, _resizingWidgetHwnd, verticalMatch);
+        SyncHighlights(desired);
 
         return snapped;
     }
@@ -269,10 +228,6 @@ public sealed class ResizeGuideOverlayService
         IsActive = false;
         _resizingWidgetHwnd = IntPtr.Zero;
         _resizingWidgetRoot = null;
-        _currentTargetHwnd = IntPtr.Zero;
-        _currentTargetRoot = null;
-        _currentResizeEdge = null;
-        _currentTargetEdge = null;
         _resizeSnapTargets.Clear();
         _resizeWorkAreaBounds = null;
 
@@ -357,6 +312,60 @@ public sealed class ResizeGuideOverlayService
     //  Edge highlight management
     // ─────────────────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// Brings the on-screen edge lines in line with <paramref name="desired"/>:
+    /// lines for edges that are no longer snapped fade out, newly snapped
+    /// edges get a fresh line that plays the one-shot settle animation, and
+    /// unchanged edges keep their existing line untouched.
+    /// </summary>
+    private void SyncHighlights(HashSet<(IntPtr Hwnd, SnapEdge Edge)> desired)
+    {
+        var stale = new List<(IntPtr Hwnd, SnapEdge Edge)>();
+        foreach (var kvp in _activeHighlights)
+        {
+            if (!desired.Contains(kvp.Key))
+            {
+                stale.Add(kvp.Key);
+            }
+        }
+
+        foreach (var key in stale)
+        {
+            FadeOutHighlight(_activeHighlights[key]);
+            _activeHighlights.Remove(key);
+        }
+
+        foreach (var key in desired)
+        {
+            if (_activeHighlights.ContainsKey(key))
+            {
+                continue;
+            }
+
+            FrameworkElement? root = key.Hwnd == _resizingWidgetHwnd
+                ? _resizingWidgetRoot
+                : App.Current?.WidgetManager?.GetWidgetRootElementByHandle(key.Hwnd);
+            ShowHighlight(key.Hwnd, root, key.Edge);
+        }
+    }
+
+    private static void AddMatchHighlights(
+        HashSet<(IntPtr Hwnd, SnapEdge Edge)> desired,
+        IntPtr sourceHwnd,
+        WidgetSnapMatch? match)
+    {
+        if (match is not { } snapMatch)
+        {
+            return;
+        }
+
+        desired.Add((sourceHwnd, ToOverlayEdge(snapMatch.SourceEdge)));
+        if (snapMatch.TargetWindowHandle != IntPtr.Zero)
+        {
+            desired.Add((snapMatch.TargetWindowHandle, ToOverlayEdge(snapMatch.TargetEdge)));
+        }
+    }
+
     private void ShowHighlight(IntPtr hwnd, FrameworkElement? root, SnapEdge edge)
     {
         if (root is not Grid grid)
@@ -364,83 +373,13 @@ public sealed class ResizeGuideOverlayService
             return;
         }
 
-        // Remove existing highlight for this widget if any
-        if (_activeHighlights.TryGetValue(hwnd, out var existing))
-        {
-            StopHighlightAnimation(existing);
-            grid.Children.Remove(existing);
-            _activeHighlights.Remove(hwnd);
-        }
+        var key = (hwnd, edge);
+        bool isVertical = edge is SnapEdge.Left or SnapEdge.Right;
 
-        var c = _highlightColor;
-
-        // Edge glow: brightest at the very edge, fading softly inward.
-        // The gradient runs from the edge (opaque) toward the interior (transparent).
-        LinearGradientBrush glowBrush;
-        double thickness = HighlightThickness;
-
-        // Edge highlight color: bright at edge, slightly translucent
-        var edgeColor = Windows.UI.Color.FromArgb(255, c.R, c.G, c.B);
-
-        // Mid-stop: the accent with transparency for both themes.
-        // Previously light theme used white here, which created a grey
-        // transition band between the accent edge and the white mid-stop.
-        // Using the accent with alpha keeps the glow unified and clean.
-        var midColor = Windows.UI.Color.FromArgb(100, c.R, c.G, c.B);
-
-        if (edge is SnapEdge.Left)
+        var host = new Border
         {
-            // Aligned left, gradient: left=bright → right=transparent
-            glowBrush = new LinearGradientBrush
-            {
-                StartPoint = new Windows.Foundation.Point(0, 0.5),
-                EndPoint = new Windows.Foundation.Point(1, 0.5),
-            };
-            glowBrush.GradientStops.Add(new GradientStop { Offset = 0.0, Color = edgeColor });
-            glowBrush.GradientStops.Add(new GradientStop { Offset = 0.3, Color = midColor });
-            glowBrush.GradientStops.Add(new GradientStop { Offset = 1.0, Color = _transparent });
-        }
-        else if (edge is SnapEdge.Right)
-        {
-            // Aligned right, gradient: right=bright → left=transparent
-            glowBrush = new LinearGradientBrush
-            {
-                StartPoint = new Windows.Foundation.Point(1, 0.5),
-                EndPoint = new Windows.Foundation.Point(0, 0.5),
-            };
-            glowBrush.GradientStops.Add(new GradientStop { Offset = 0.0, Color = edgeColor });
-            glowBrush.GradientStops.Add(new GradientStop { Offset = 0.3, Color = midColor });
-            glowBrush.GradientStops.Add(new GradientStop { Offset = 1.0, Color = _transparent });
-        }
-        else if (edge is SnapEdge.Top)
-        {
-            // Aligned top, gradient: top=bright → bottom=transparent
-            glowBrush = new LinearGradientBrush
-            {
-                StartPoint = new Windows.Foundation.Point(0.5, 0),
-                EndPoint = new Windows.Foundation.Point(0.5, 1),
-            };
-            glowBrush.GradientStops.Add(new GradientStop { Offset = 0.0, Color = edgeColor });
-            glowBrush.GradientStops.Add(new GradientStop { Offset = 0.3, Color = midColor });
-            glowBrush.GradientStops.Add(new GradientStop { Offset = 1.0, Color = _transparent });
-        }
-        else // Bottom
-        {
-            // Aligned bottom, gradient: bottom=bright → top=transparent
-            glowBrush = new LinearGradientBrush
-            {
-                StartPoint = new Windows.Foundation.Point(0.5, 1),
-                EndPoint = new Windows.Foundation.Point(0.5, 0),
-            };
-            glowBrush.GradientStops.Add(new GradientStop { Offset = 0.0, Color = edgeColor });
-            glowBrush.GradientStops.Add(new GradientStop { Offset = 0.3, Color = midColor });
-            glowBrush.GradientStops.Add(new GradientStop { Offset = 1.0, Color = _transparent });
-        }
-
-        var border = new Border
-        {
-            Background = glowBrush,
             IsHitTestVisible = false,
+            Opacity = 0,
             HorizontalAlignment = edge switch
             {
                 SnapEdge.Left => HorizontalAlignment.Left,
@@ -453,88 +392,256 @@ public sealed class ResizeGuideOverlayService
                 SnapEdge.Bottom => VerticalAlignment.Bottom,
                 _ => VerticalAlignment.Stretch
             },
-            Width = edge is SnapEdge.Left or SnapEdge.Right ? thickness : double.NaN,
-            Height = edge is SnapEdge.Top or SnapEdge.Bottom ? thickness : double.NaN,
+            Width = isVertical ? HighlightBandDips : double.NaN,
+            Height = isVertical ? double.NaN : HighlightBandDips,
         };
 
-        Grid.SetRowSpan(border, 20);
-        Grid.SetColumnSpan(border, 20);
-        Grid.SetRow(border, 0);
-        Grid.SetColumn(border, 0);
-        border.SetValue(Canvas.ZIndexProperty, HighlightZIndex);
+        Grid.SetRowSpan(host, 20);
+        Grid.SetColumnSpan(host, 20);
+        Grid.SetRow(host, 0);
+        Grid.SetColumn(host, 0);
+        host.SetValue(Canvas.ZIndexProperty, HighlightZIndex);
 
-        if (WindowsCompatibilityService.IsWindows11OrLater)
+        // True 2D falloff via a composition mask brush: a perpendicular
+        // gradient (opaque accent at the boundary → transparent inward)
+        // multiplied by a longitudinal alpha mask whose tips fade out before
+        // the corner zone.  Band ends dissolve instead of being sheared by
+        // the DWM-rounded window silhouette.
+        var compositor = ElementCompositionPreview.GetElementVisual(host).Compositor;
+        var (glow, tipFadeIn, tipFadeOut, resources) =
+            CreateEdgeGlowVisual(compositor, _highlightColor, edge, isVertical);
+        ElementCompositionPreview.SetElementChildVisual(host, glow);
+        host.Tag = resources;
+
+        double tipFadeDips = GetTipFadeDips();
+        host.SizeChanged += (_, e) =>
         {
-            // Win11 keeps the original breathing effect. Win10 uses the same
-            // edge gradient as a static glow so live resize does not add a
-            // second continuously animated XAML workload.
-            var breathing = new DoubleAnimation
-            {
-                From = BreathingMaxOpacity,
-                To = BreathingMinOpacity,
-                Duration = new Duration(BreathingDuration),
-                AutoReverse = true,
-                RepeatBehavior = RepeatBehavior.Forever,
-                EasingFunction = new SineEase { EasingMode = EasingMode.EaseInOut },
-            };
-            Storyboard.SetTarget(breathing, border);
-            Storyboard.SetTargetProperty(breathing, "Opacity");
+            glow.Size = new Vector2(
+                (float)e.NewSize.Width, (float)e.NewSize.Height);
+            float length = Math.Max(
+                1.0f,
+                isVertical ? (float)e.NewSize.Height : (float)e.NewSize.Width);
+            float fade = Math.Clamp(
+                (float)(tipFadeDips / length),
+                TipFadeMinFraction,
+                TipFadeMaxFraction);
+            tipFadeIn.Offset = fade;
+            tipFadeOut.Offset = 1.0f - fade;
+        };
 
-            var sb = new Storyboard();
-            sb.Children.Add(breathing);
-            border.Resources["BreathingStoryboard"] = sb;
-        }
-
-        grid.Children.Add(border);
-        _activeHighlights[hwnd] = border;
-
-        if (border.Resources.TryGetValue("BreathingStoryboard", out var value) &&
-            value is Storyboard storyboard)
+        // One-shot entry: the glow fades in while sliding outward onto the
+        // boundary — the closest "extending out of the edge" a
+        // window-clipped surface can produce.
+        var slide = new TranslateTransform();
+        switch (edge)
         {
-            storyboard.Begin();
+            case SnapEdge.Left: slide.X = HighlightSlideDips; break;
+            case SnapEdge.Right: slide.X = -HighlightSlideDips; break;
+            case SnapEdge.Top: slide.Y = HighlightSlideDips; break;
+            default: slide.Y = -HighlightSlideDips; break;
         }
+        host.RenderTransform = slide;
+
+        var fadeIn = new DoubleAnimation
+        {
+            From = 0,
+            To = 1,
+            Duration = new Duration(HighlightFadeInDuration),
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
+        };
+        Storyboard.SetTarget(fadeIn, host);
+        Storyboard.SetTargetProperty(fadeIn, "Opacity");
+
+        var slideIn = new DoubleAnimation
+        {
+            To = 0,
+            Duration = new Duration(HighlightSlideDuration),
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
+        };
+        Storyboard.SetTarget(slideIn, slide);
+        Storyboard.SetTargetProperty(slideIn, isVertical ? "X" : "Y");
+
+        var sb = new Storyboard();
+        sb.Children.Add(fadeIn);
+        sb.Children.Add(slideIn);
+        host.Resources["EnterStoryboard"] = sb;
+
+        grid.Children.Add(host);
+        _activeHighlights[key] = host;
+        sb.Begin();
     }
 
-    private void RemoveHighlight(IntPtr hwnd)
+    /// <summary>
+    /// Builds the composition sprite for one edge-glow band.  The brush is a
+    /// mask brush: source = perpendicular color gradient, mask =
+    /// longitudinal alpha fade, so the rendered falloff is the product of
+    /// the two axes.
+    /// </summary>
+    private static (SpriteVisual Glow, CompositionColorGradientStop TipFadeIn,
+        CompositionColorGradientStop TipFadeOut, IDisposable[] Resources)
+        CreateEdgeGlowVisual(
+            Compositor compositor,
+            Windows.UI.Color accent,
+            SnapEdge edge,
+            bool isVertical)
     {
-        if (!_activeHighlights.TryGetValue(hwnd, out var border))
+        var (start, end) = edge switch
         {
-            return;
-        }
+            SnapEdge.Left => (new Vector2(0, 0.5f), new Vector2(1, 0.5f)),
+            SnapEdge.Right => (new Vector2(1, 0.5f), new Vector2(0, 0.5f)),
+            SnapEdge.Top => (new Vector2(0.5f, 0), new Vector2(0.5f, 1)),
+            _ => (new Vector2(0.5f, 1), new Vector2(0.5f, 0)),
+        };
 
-        StopHighlightAnimation(border);
+        var colorGradient = compositor.CreateLinearGradientBrush();
+        colorGradient.StartPoint = start;
+        colorGradient.EndPoint = end;
+        colorGradient.ColorStops.Add(
+            compositor.CreateColorGradientStop(0.0f, accent));
+        colorGradient.ColorStops.Add(
+            compositor.CreateColorGradientStop(0.22f, WithAlpha(accent, 180)));
+        colorGradient.ColorStops.Add(
+            compositor.CreateColorGradientStop(0.55f, WithAlpha(accent, 70)));
+        colorGradient.ColorStops.Add(
+            compositor.CreateColorGradientStop(1.0f, WithAlpha(accent, 0)));
 
-        if (border.Parent is Grid grid)
-        {
-            grid.Children.Remove(border);
-        }
+        var transparent = Windows.UI.Color.FromArgb(0, 255, 255, 255);
+        var opaque = Windows.UI.Color.FromArgb(255, 255, 255, 255);
+        var tipFade = compositor.CreateLinearGradientBrush();
+        tipFade.StartPoint = isVertical
+            ? new Vector2(0.5f, 0)
+            : new Vector2(0, 0.5f);
+        tipFade.EndPoint = isVertical
+            ? new Vector2(0.5f, 1)
+            : new Vector2(1, 0.5f);
+        var tipStart = compositor.CreateColorGradientStop(0.0f, transparent);
+        var tipFadeIn = compositor.CreateColorGradientStop(0.12f, opaque);
+        var tipFadeOut = compositor.CreateColorGradientStop(0.88f, opaque);
+        var tipEnd = compositor.CreateColorGradientStop(1.0f, transparent);
+        tipFade.ColorStops.Add(tipStart);
+        tipFade.ColorStops.Add(tipFadeIn);
+        tipFade.ColorStops.Add(tipFadeOut);
+        tipFade.ColorStops.Add(tipEnd);
 
-        _activeHighlights.Remove(hwnd);
+        var mask = compositor.CreateMaskBrush();
+        mask.Source = colorGradient;
+        mask.Mask = tipFade;
+
+        var glow = compositor.CreateSpriteVisual();
+        glow.Brush = mask;
+
+        return (glow, tipFadeIn, tipFadeOut,
+            new IDisposable[]
+            {
+                glow, mask, colorGradient, tipFade,
+                tipStart, tipFadeIn, tipFadeOut, tipEnd
+            });
+    }
+
+    private static Windows.UI.Color WithAlpha(Windows.UI.Color color, byte alpha) =>
+        Windows.UI.Color.FromArgb(alpha, color.R, color.G, color.B);
+
+    /// <summary>
+    /// Length of the fade that dissolves each band end: the widget's outer
+    /// corner radius plus a small margin, so the glow is fully gone before
+    /// the DWM-rounded silhouette starts curving.
+    /// </summary>
+    private static double GetTipFadeDips()
+    {
+        string preference = WindowsCompatibilityService.ResolveEffectiveWidgetCornerPreference(
+            App.Current?.SettingsService?.Settings.WidgetShell.WidgetCornerPreference
+            ?? SettingsService.WidgetCornerPreferenceRound);
+        double radius = WidgetCompactBoundsCalculator.ResolveOuterCornerRadius(preference);
+        return Math.Max(10.0, radius + 4.0);
     }
 
     private void ClearAllHighlights()
     {
         foreach (var kvp in _activeHighlights)
         {
-            StopHighlightAnimation(kvp.Value);
-            if (kvp.Value.Parent is Grid grid)
-            {
-                grid.Children.Remove(kvp.Value);
-            }
+            FadeOutHighlight(kvp.Value);
         }
+
         _activeHighlights.Clear();
-        _currentTargetHwnd = IntPtr.Zero;
-        _currentTargetRoot = null;
-        _currentResizeEdge = null;
-        _currentTargetEdge = null;
     }
 
     private static void StopHighlightAnimation(Border border)
     {
-        if (border.Resources.TryGetValue("BreathingStoryboard", out var value) &&
+        if (border.Resources.TryGetValue("EnterStoryboard", out var value) &&
             value is Storyboard sb)
         {
             sb.Stop();
+        }
+    }
+
+    /// <summary>
+    /// Quickly fades a highlight band out, then removes it from its parent
+    /// grid and disposes its composition resources.
+    /// </summary>
+    private static void FadeOutHighlight(Border border)
+    {
+        double startOpacity = border.Opacity;
+        var slide = border.RenderTransform as TranslateTransform;
+        double startX = slide?.X ?? 0;
+        double startY = slide?.Y ?? 0;
+        StopHighlightAnimation(border);
+        border.Opacity = startOpacity;
+        if (slide is not null)
+        {
+            // Stopping the enter animation reverts the slide to its initial
+            // offset; keep the band where it was so the fade does not jump.
+            slide.X = startX;
+            slide.Y = startY;
+        }
+
+        var fadeOut = new DoubleAnimation
+        {
+            From = startOpacity,
+            To = 0,
+            Duration = new Duration(HighlightFadeOutDuration),
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseIn },
+        };
+        Storyboard.SetTarget(fadeOut, border);
+        Storyboard.SetTargetProperty(fadeOut, "Opacity");
+
+        var sb = new Storyboard();
+        sb.Children.Add(fadeOut);
+        sb.Completed += (_, _) => RemoveHighlightElement(border);
+        // Fallback: if the host leaves the tree before the storyboard
+        // finishes (widget window closed mid-fade, grid rebuilt), Completed
+        // may never fire — Unloaded guarantees the composition objects are
+        // still released.  Removal is idempotent.
+        border.Unloaded += (_, _) => RemoveHighlightElement(border);
+        try
+        {
+            sb.Begin();
+        }
+        catch (Exception)
+        {
+            RemoveHighlightElement(border);
+        }
+    }
+
+    /// <summary>
+    /// Detaches the host from its grid and releases the composition objects
+    /// it owns.  Safe to call more than once and on detached elements.
+    /// </summary>
+    private static void RemoveHighlightElement(Border border)
+    {
+        if (border.Parent is Grid grid)
+        {
+            grid.Children.Remove(border);
+        }
+
+        if (border.Tag is IDisposable[] resources)
+        {
+            ElementCompositionPreview.SetElementChildVisual(border, null);
+            foreach (var resource in resources)
+            {
+                resource.Dispose();
+            }
+
+            border.Tag = null;
         }
     }
 
@@ -553,7 +660,7 @@ public sealed class ResizeGuideOverlayService
         };
 
     /// <summary>
-    /// The tone a snap guide and its edge glow draw with: the effective DeskBox
+    /// The tone a snap guide edge line draws with: the effective DeskBox
     /// accent. Resizing/drag-snap feedback is deliberately the one drag-time
     /// visual that keeps the theme color (Simon, 2026-09-13).
     /// </summary>
@@ -583,11 +690,6 @@ public sealed class ResizeGuideOverlayService
         _draggingWidgetHwnd = draggingWidgetHwnd;
         _draggingWidgetRoot = draggingWidgetRoot;
         _highlightColor = GetHighlightColor();
-        _currentTargetHwnd = IntPtr.Zero;
-        _currentTargetRoot = null;
-        _currentResizeEdge = null;
-        _currentTargetEdge = null;
-        _lastDragSnapSignature = null;
         _currentDragHorizontalMatch = null;
         _currentDragVerticalMatch = null;
         _dragSnapTargets.Clear();
@@ -609,6 +711,12 @@ public sealed class ResizeGuideOverlayService
     {
         if (!IsDragActive || !IsSnapEnabled)
         {
+            // Snap toggled off mid-drag must still converge the bands.
+            if (IsDragActive)
+            {
+                ClearAllHighlights();
+            }
+
             return proposedBounds;
         }
 
@@ -629,72 +737,14 @@ public sealed class ResizeGuideOverlayService
         _currentDragHorizontalMatch = result.HorizontalMatch;
         _currentDragVerticalMatch = result.VerticalMatch;
 
-        // ── Update highlights for the best snap ───────────────────────
+        // ── Update highlights for the active snap matches ────────────────
 
-        // Build a lightweight signature to detect whether the snap state
-        // has actually changed since the last frame.  If it hasn't, we
-        // skip the expensive ClearAll + rebuild cycle entirely.
-        string snapSignature = string.Empty;
-        if (result.HorizontalMatch is not null || result.VerticalMatch is not null)
-        {
-            WidgetSnapMatch horizontal = result.HorizontalMatch.GetValueOrDefault();
-            WidgetSnapMatch vertical = result.VerticalMatch.GetValueOrDefault();
-            snapSignature =
-                $"{vertical.SourceEdge},{vertical.TargetEdge},{vertical.TargetWindowHandle}," +
-                $"{horizontal.SourceEdge},{horizontal.TargetEdge},{horizontal.TargetWindowHandle}";
-        }
-
-        if (snapSignature == _lastDragSnapSignature)
-        {
-            return result.Bounds;
-        }
-        _lastDragSnapSignature = snapSignature;
-
-        if (result.HorizontalMatch is not null || result.VerticalMatch is not null)
-        {
-            ClearAllHighlights();
-            if (result.VerticalMatch is { } verticalMatch)
-            {
-                ShowDragMatch(verticalMatch);
-            }
-
-            if (result.HorizontalMatch is { } horizontalMatch)
-            {
-                ShowDragMatch(horizontalMatch);
-            }
-        }
-        else
-        {
-            ClearAllHighlights();
-        }
+        var desired = new HashSet<(IntPtr Hwnd, SnapEdge Edge)>();
+        AddMatchHighlights(desired, _draggingWidgetHwnd, result.VerticalMatch);
+        AddMatchHighlights(desired, _draggingWidgetHwnd, result.HorizontalMatch);
+        SyncHighlights(desired);
 
         return result.Bounds;
-    }
-
-    private void ShowDragMatch(WidgetSnapMatch match)
-    {
-        ShowHighlight(
-            _draggingWidgetHwnd,
-            _draggingWidgetRoot,
-            ToOverlayEdge(match.SourceEdge));
-        if (match.TargetWindowHandle == IntPtr.Zero)
-        {
-            return;
-        }
-
-        FrameworkElement? targetRoot = App.Current?.WidgetManager
-            ?.GetWidgetRootElementByHandle(match.TargetWindowHandle);
-        if (targetRoot is null)
-        {
-            return;
-        }
-
-        ShowHighlight(
-            match.TargetWindowHandle,
-            targetRoot,
-            ToOverlayEdge(match.TargetEdge));
-        _currentTargetHwnd = match.TargetWindowHandle;
-        _currentTargetRoot = targetRoot;
     }
 
     /// <summary>
@@ -712,15 +762,16 @@ public sealed class ResizeGuideOverlayService
         IsActive = false;
         _draggingWidgetHwnd = IntPtr.Zero;
         _draggingWidgetRoot = null;
-        _currentTargetHwnd = IntPtr.Zero;
-        _currentTargetRoot = null;
-        _currentResizeEdge = null;
-        _currentTargetEdge = null;
-        _lastDragSnapSignature = null;
         _currentDragHorizontalMatch = null;
         _currentDragVerticalMatch = null;
         _dragSnapTargets.Clear();
         _resizeWorkAreaBounds = null;
+        // The drag path aliases the resize session fields — drop them too
+        // so a closed widget's root element isn't retained until the next
+        // session.
+        _resizingWidgetHwnd = IntPtr.Zero;
+        _resizingWidgetRoot = null;
+        _resizeSnapTargets.Clear();
 
         App.LogVerbose("[ResizeGuide] EndDrag");
     }

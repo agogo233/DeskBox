@@ -596,7 +596,7 @@ public sealed class ShortcutNativeDifferentialTests : IDisposable
         string missingParent = Path.Combine(_tempRoot, "missing-parent", "write.lnk");
         ShortcutNativeWriteCallResult saveFailure = Native.WriteShortcut(
             missingParent,
-            new ShortcutInfo(target, "failure", "--failure", string.Empty, string.Empty, 0));
+            new ShortcutInfo(target, "failure", "--failure", string.Empty, "failure.ico", 0));
         Assert.False(saveFailure.Success);
         Assert.Equal(ShortcutNativeCallFailure.NativeFailure, saveFailure.Failure);
         Assert.Equal(WritePhaseMask, saveFailure.AttemptedPhases);
@@ -633,6 +633,8 @@ public sealed class ShortcutNativeDifferentialTests : IDisposable
     public async Task Write_ConcurrentDistinctShortcutsRemainIndependent()
     {
         string target = CreateTarget("write-concurrent.exe");
+        string iconPath = Path.Combine(_tempRoot, "write-concurrent.ico");
+        File.WriteAllBytes(iconPath, [0]);
         Task[] writes = Enumerable.Range(0, 24).Select(index => Task.Run(() =>
         {
             string link = Path.Combine(_tempRoot, $"write-concurrent-{index}.lnk");
@@ -644,7 +646,7 @@ public sealed class ShortcutNativeDifferentialTests : IDisposable
                     $"description {index}",
                     arguments,
                     _tempRoot,
-                    string.Empty,
+                    iconPath,
                     index));
             Assert.True(write.Success, write.Detail);
             ShortcutInfo stored = ShortcutHelper.ReadStoredMetadataWithCSharpUncached(link);
@@ -656,15 +658,35 @@ public sealed class ShortcutNativeDifferentialTests : IDisposable
     }
 
     [Fact]
+    public void Write_EmptyIconLocationLeavesShortcutOnTargetDefault()
+    {
+        // Contract for user-file shortcuts: an empty icon location must skip
+        // SetIconLocation entirely so the system renders the target's own
+        // icon (the Explorer-native default) instead of relying on
+        // undocumented empty-string reset semantics.
+        string target = CreateTarget("write-default-icon.exe");
+        string link = Path.Combine(_tempRoot, "write-default-icon.lnk");
+        ShortcutNativeWriteCallResult write = Native.WriteShortcut(
+            link,
+            new ShortcutInfo(target, string.Empty, string.Empty, _tempRoot, string.Empty, 0));
+        Assert.True(write.Success, write.Detail);
+        ShortcutInfo stored = ShortcutHelper.ReadStoredMetadataWithCSharpUncached(link);
+        Assert.Equal(string.Empty, stored.IconLocation);
+        Assert.Equal(0, stored.IconIndex);
+    }
+
+    [Fact]
     public void ApplicationShortcutWriteInvalidatesStoredMetadataCache()
     {
         string link = Path.Combine(_tempRoot, "application-cache.lnk");
         string firstTarget = CreateTarget("cache-first.exe");
         string secondTarget = CreateTarget("cache-second.exe");
 
-        DragDropPermissionService.CreateOrUpdateShortcut(link, firstTarget, "--first");
+        DragDropPermissionService.CreateOrUpdateShortcut(
+            link, firstTarget, "--first", DragDropPermissionService.DeskBoxIconPath);
         ShortcutInfo? first = ShortcutHelper.ReadStoredMetadata(link);
-        DragDropPermissionService.CreateOrUpdateShortcut(link, secondTarget, "--other");
+        DragDropPermissionService.CreateOrUpdateShortcut(
+            link, secondTarget, "--other", DragDropPermissionService.DeskBoxIconPath);
         ShortcutInfo? second = ShortcutHelper.ReadStoredMetadata(link);
 
         Assert.Equal(firstTarget, first?.TargetPath);

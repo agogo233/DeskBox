@@ -1,3 +1,4 @@
+using DeskBox.Helpers;
 using DeskBox.Models;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -190,8 +191,6 @@ public sealed partial class SearchResultRowControl : UserControl
         DateText.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
     }
 
-    private static Brush? ResolveThemeBrush(string key) =>
-        Application.Current.Resources.TryGetValue(key, out object? value)
-            ? value as Brush
-            : null;
+    private Brush? ResolveThemeBrush(string key) =>
+        NeutralInteractionBrush.ResolveThemedResource(key, this);
 }

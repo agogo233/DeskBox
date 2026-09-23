@@ -76,7 +76,7 @@
   "operation_id": "<客户端 UUID，幂等键>",
   "payload": { /* 域记录的序列化 JSON，见 §3.3 */ },
   "attachments": [
-    { "name": "a.pdf", "blob_id": "<content-hash>", "size": 12345 }
+    { "name": "attachments/a.pdf", "blob_id": "<content-hash>", "size": 12345 }
   ]
 }
 ```
@@ -110,6 +110,7 @@
 ## 5. 附件 blob
 
 - `blob_id` = 内容寻址（SHA-256 of bytes）——去重、幂等、校验三合一。
+- **`name` = 集合相对路径**，与 payload 中引用的路径逐字一致（`attachments/report.pdf` / `images/photo.png`），不是裸 basename——同一记录里同名 basename 的主图片与附件也能无歧义地还原到各自 payload 路径；下行按 name 即知 blob 落地位置。
 - **顺序不变量**：上行先 PUT blob 再推引用它的 envelope（服务端可拒 dangling 引用）；下行先取 blob 再投影 envelope（附件未落地的实体不得对 UI 可见为"有附件"——按附件缺失降级显示）。
 - 传输在 `ISyncTransport` 内是独立子面（`UploadBlob/DownloadBlob`），官方云实现走 OSS 预签名直传；payload 与 blob 分离使 envelope 永远 KB 级。
 - GC：blob 仅被 live envelope 引用时存活；实体墓碑化→其 blob 进入 GC 候选（服务端窗同 §4）。

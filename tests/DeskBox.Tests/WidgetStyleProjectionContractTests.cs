@@ -39,7 +39,23 @@ public sealed class WidgetStyleProjectionContractTests
     {
         "widgetCapsuleBarOrder",       // stable order — layout, not style
         "widgetCapsuleFreePlacements", // free-layout coordinates — layout
-        "widgetCompactSettingsVersion" // internal migration counter
+        "widgetCompactSettingsVersion", // internal migration counter
+        // Layout + behavior stay device-local; only visual style syncs.
+        "defaultWidgetWidth", "defaultWidgetHeight",           // default geometry
+        "iconSize", "textSize",                                // content scale
+        "layoutDensity", "layoutDensityScale",                 // density preset/scale
+        "horizontalSpacingScale", "verticalSpacingScale",      // spacing scale
+        "widgetCapsuleArrangementMode",                        // capsule arrangement
+        "widgetCapsuleBarSpacing", "widgetCapsuleBarPlacement",
+        "widgetCapsuleBarDirection",                           // capsule bar placement
+        "widgetCollapseBehavior",                              // compact-state policy
+        "widgetCapsuleModeEnabled",                            // legacy compact gate
+        "widgetCompactWidthMode", "widgetCompactExpansionDirection", // compact geometry
+        "widgetCompactExpandDelayMs", "widgetCompactCollapseDelayMs", // compact hover timing
+        "widgetLayerMode",                                     // window z-layer
+        "keepWidgetsVisibleOnShowDesktop",                     // window behavior
+        "resizeSnapEnabled", "widgetSnapSpacing",              // snap geometry
+        "focusClickedWidgetOnRaise"                            // raise behavior
     };
 
     /// <summary>
@@ -65,6 +81,8 @@ public sealed class WidgetStyleProjectionContractTests
         "items", "fileAddedAtByPath", "fileAddedAtTrackingInitialized",
         // visibility + lock state
         "isVisible", "isDisabled", "isPositionLocked", "isSizeLocked",
+        // compact/collapse state + per-widget density — layout, not style
+        "isCollapsed", "compactWidth", "iconSizeOverride",
     };
 
     [Fact]

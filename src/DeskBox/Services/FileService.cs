@@ -101,6 +101,17 @@ public sealed partial class FileService
         DateTime LastWriteTimeUtc,
         FileTransferSourceIdentity? Identity);
 
+    /// <summary>
+    /// A destination file this operation created, with the object identity
+    /// captured from its own CreateNew handle. Partial-copy cleanup may
+    /// only delete paths whose current object still matches this record —
+    /// a foreign file dropped into the tree mid-copy fails the check and
+    /// survives.
+    /// </summary>
+    internal readonly record struct CopiedDestinationFileRecord(
+        string DestinationFilePath,
+        FileTransferSourceIdentity? Identity);
+
     public sealed record FileTransferPlan(string SourcePath, string DestinationPath);
 
     public sealed record FileTransferResult(string SourcePath, string DestinationPath);
@@ -130,6 +141,38 @@ public sealed partial class FileService
         }
 
         public IReadOnlyList<FileTransferResult> CompletedResults { get; }
+    }
+
+    /// <summary>
+    /// A directory move's partial-copy cleanup could not remove every
+    /// destination object this operation created: files are stranded at
+    /// the destination. This must propagate past the per-item retry/skip
+    /// decision — a "skip" answer would leave an unrecorded partial tree
+    /// behind and the caller would report the batch as merely skipped.
+    /// </summary>
+    public sealed class FileTransferDestinationCleanupException : IOException
+    {
+        internal FileTransferDestinationCleanupException(
+            string sourceDirectory,
+            string destinationDirectory,
+            Exception copyFailure,
+            int strandedFileCount)
+            : base(
+                $"The directory move failed and its partial destination at " +
+                $"'{destinationDirectory}' could not be fully cleaned " +
+                $"({strandedFileCount} file(s) remain).",
+                copyFailure)
+        {
+            SourceDirectory = sourceDirectory;
+            DestinationDirectory = destinationDirectory;
+            StrandedFileCount = strandedFileCount;
+        }
+
+        public string SourceDirectory { get; }
+
+        public string DestinationDirectory { get; }
+
+        public int StrandedFileCount { get; }
     }
 
     public sealed class FileTransferSourceChangedException : IOException,
@@ -168,6 +211,97 @@ public sealed partial class FileService
         }
 
         public IReadOnlyList<FileTransferResult> CompletedResults { get; }
+    }
+
+    /// <summary>
+    /// The caller's decision for one failed transfer item: run the same
+    /// operation again, leave the source untouched and continue with the
+    /// next item, or stop the whole batch.
+    /// </summary>
+    public enum FileTransferItemAction
+    {
+        Retry,
+        Skip,
+        Abort
+    }
+
+    /// <summary>
+    /// One transfer item that failed, handed to the item-error callback so an
+    /// interactive caller can ask the user for a retry/skip/abort decision.
+    /// </summary>
+    public sealed record FileTransferItemError(
+        string SourcePath,
+        string DestinationPath,
+        Exception Exception);
+
+    /// <summary>
+    /// Why one transfer item could not move, classified so the UI can pick a
+    /// localized reason instead of showing a raw (English) OS message.
+    /// </summary>
+    public enum FileTransferItemErrorKind
+    {
+        Unknown,
+        InUse,
+        AccessDenied,
+        NotFound,
+        DiskFull,
+        PathTooLong
+    }
+
+    /// <summary>
+    /// One item the caller chose to skip: it still exists at the source and
+    /// never reached the destination. <see cref="Detail"/> keeps the raw
+    /// exception text for diagnostics; <see cref="ErrorKind"/> drives the
+    /// localized user-facing reason.
+    /// </summary>
+    public sealed record FileTransferSkippedItem(
+        string SourcePath,
+        string DestinationPath,
+        FileTransferItemErrorKind ErrorKind,
+        string Detail);
+
+    /// <summary>
+    /// Maps an item-level transfer failure to a coarse error kind. Unwraps
+    /// the partial-failure wrapper so the real cause (e.g. a locked file's
+    /// sharing violation) drives the classification.
+    /// </summary>
+    internal static FileTransferItemErrorKind ClassifyTransferError(Exception exception)
+    {
+        Exception inner =
+            exception is FileTransferPartialFailureException { InnerException: { } partialInner }
+                ? partialInner
+                : exception;
+        // Normalize to a raw Win32 error code: exceptions raised by the
+        // runtime carry HRESULT_FROM_WIN32 (0x8007xxxx) while parts of this
+        // service construct IOException(msg, rawWin32Code) directly.
+        int hresult = inner.HResult;
+        int win32 =
+            (hresult & unchecked((int)0xFFFF0000)) == unchecked((int)0x80070000)
+                ? hresult & 0xFFFF
+                : hresult is >= 0 and <= 0xFFFF
+                    ? hresult
+                    : -1;
+        return inner switch
+        {
+            PathTooLongException => FileTransferItemErrorKind.PathTooLong,
+            FileNotFoundException or DirectoryNotFoundException =>
+                FileTransferItemErrorKind.NotFound,
+            UnauthorizedAccessException => FileTransferItemErrorKind.AccessDenied,
+            _ => win32 switch
+            {
+                // ERROR_SHARING_VIOLATION / ERROR_LOCK_VIOLATION
+                0x20 or 0x21 => FileTransferItemErrorKind.InUse,
+                // ERROR_ACCESS_DENIED
+                0x05 => FileTransferItemErrorKind.AccessDenied,
+                // ERROR_FILE_NOT_FOUND / ERROR_PATH_NOT_FOUND
+                0x02 or 0x03 => FileTransferItemErrorKind.NotFound,
+                // ERROR_DISK_FULL / ERROR_HANDLE_DISK_FULL
+                0x70 or 0x27 => FileTransferItemErrorKind.DiskFull,
+                // ERROR_FILENAME_EXCED_RANGE
+                0xCE => FileTransferItemErrorKind.PathTooLong,
+                _ => FileTransferItemErrorKind.Unknown
+            }
+        };
     }
 
     public sealed class FileTransferPartialFailureException : IOException,
@@ -1251,7 +1385,9 @@ public sealed partial class FileService
         IProgress<FileTransferProgress>? progress = null,
         CancellationToken cancellationToken = default,
         bool useShellProgress = false,
-        IntPtr ownerWindowHandle = default)
+        IntPtr ownerWindowHandle = default,
+        Func<FileTransferItemError, Task<FileTransferItemAction>>? onItemError = null,
+        ICollection<FileTransferSkippedItem>? skippedItems = null)
     {
         // Directory.Exists/File.Exists can block for a disconnected UNC or
         // network provider. Keep all planning and probing off the UI thread.
@@ -1295,7 +1431,9 @@ public sealed partial class FileService
             useShellProgress: useShellProgress,
             ownerWindowHandle: ownerWindowHandle,
             progress: progress,
-            cancellationToken: cancellationToken);
+            cancellationToken: cancellationToken,
+            onItemError: onItemError,
+            skippedItems: skippedItems);
     }
 
     /// <summary>
@@ -1309,7 +1447,9 @@ public sealed partial class FileService
         IProgress<FileTransferProgress>? progress = null,
         CancellationToken cancellationToken = default,
         bool allowShellElevation = false,
-        Action<FileTransferResult>? itemCompleted = null)
+        Action<FileTransferResult>? itemCompleted = null,
+        Func<FileTransferItemError, Task<FileTransferItemAction>>? onItemError = null,
+        ICollection<FileTransferSkippedItem>? skippedItems = null)
     {
         var operations = await Task.Run(() =>
         {
@@ -1350,13 +1490,15 @@ public sealed partial class FileService
                 keepBoth: true, itemCompleted: itemCompleted);
         }
 
-        if (useShellProgress)
+        if (useShellProgress && onItemError is null)
         {
 #if !DESKBOX_NATIVE_AOT
             // Interactive imports use the modern Windows Shell operation on a
             // dedicated STA thread. It owns enumeration, conflicts, errors,
             // cancellation and the native progress window for both copy and
-            // move operations.
+            // move operations. A caller that asked for per-item error
+            // decisions must stay on the managed engine — Shell transfers
+            // cannot surface them.
             return await ExecuteModernShellTransferPlanAsync(
                 operations,
                 move,
@@ -1364,9 +1506,15 @@ public sealed partial class FileService
                 progress,
                 cancellationToken);
 #else
-            // The staged Native AOT profile still uses the validated legacy
-            // move bridge. Copy operations fall through to the safe managed
-            // engine until a source-generated/native Shell bridge is gated.
+            // The Native AOT profile keeps the legacy SHFileOperation bridge
+            // for same-volume moves: its partial/cancel/late-return contract
+            // is pinned by the AOT managed-UI smoke matrix. Everything else —
+            // cross-volume moves and copies — uses the modern IFileOperation
+            // engine. Only that engine can surface the Shell's elevation and
+            // per-item error UI, which readable-but-not-deletable sources
+            // (e.g. Public Desktop shortcuts) need when the host runs
+            // unelevated; the managed engine instead fails with a raw
+            // access-denied error.
             if (move && CanUseLegacyShellMove(operations.Select(operation =>
                     new FileTransferPlan(
                         operation.SourcePath,
@@ -1377,26 +1525,31 @@ public sealed partial class FileService
                     ownerWindowHandle);
             }
 
-            if (move)
-            {
-                App.Log(
-                    "[FileTransfer] Legacy Shell move bypassed because one or " +
-                    "more items cross filesystem roots.");
-            }
+            return await ExecuteModernShellTransferPlanAsync(
+                operations,
+                move,
+                ownerWindowHandle,
+                progress,
+                cancellationToken);
 #endif
         }
 
-        if (progress is not null || cancellationToken.CanBeCanceled)
+        if (progress is not null || cancellationToken.CanBeCanceled ||
+            onItemError is not null)
         {
             // Keep synchronous filesystem probes, partial-file cleanup and
             // rollback off the caller's synchronization context. In the UI the
             // progress callback marshals updates back through DispatcherQueue.
+            // Item-level retry/skip decisions only exist on the managed engine:
+            // the Shell operations own their own error dialogs instead.
             return await Task.Run(
                 () => ExecuteManagedTransferPlanWithProgressAsync(
                     operations,
                     move,
                     progress,
-                    cancellationToken),
+                    cancellationToken,
+                    onItemError,
+                    skippedItems),
                 CancellationToken.None);
         }
 
@@ -1457,6 +1610,9 @@ public sealed partial class FileService
             // Partial completion: completed items stay; the failure
             // propagates with the completed results attached (including any
             // item-level receipts the inner exception already carries).
+            App.Log(
+                $"[FileTransfer] Managed transfer failed after " +
+                $"{completedOperations.Count} of {operations.Count} item(s): {exception}");
             var completedSnapshot = completedOperations
                 .Select(operation => new FileTransferResult(operation.SourcePath, operation.DestinationPath))
                 .ToList();
@@ -1950,9 +2106,30 @@ public sealed partial class FileService
     /// </summary>
     public async Task RelocateDirectoryAsync(string sourceFolder, string destinationFolder)
     {
+        await RelocateDirectoryAsync(
+            sourceFolder,
+            destinationFolder,
+            progress: null,
+            CancellationToken.None,
+            onItemError: null);
+    }
+
+    /// <summary>
+    /// Interactive relocation variant: reports managed-engine progress, honors
+    /// cancellation, and asks <paramref name="onItemError"/> for a
+    /// retry/skip/abort decision whenever one entry fails. Skipped entries stay
+    /// in the source folder and are returned in the report.
+    /// </summary>
+    public async Task<DirectoryMoveReport> RelocateDirectoryAsync(
+        string sourceFolder,
+        string destinationFolder,
+        IProgress<FileTransferProgress>? progress,
+        CancellationToken cancellationToken,
+        Func<FileTransferItemError, Task<FileTransferItemAction>>? onItemError)
+    {
         if (string.IsNullOrWhiteSpace(sourceFolder) || string.IsNullOrWhiteSpace(destinationFolder))
         {
-            return;
+            return new DirectoryMoveReport(0, []);
         }
 
         string normalizedSource = Path.GetFullPath(sourceFolder);
@@ -1960,7 +2137,7 @@ public sealed partial class FileService
         if (string.Equals(normalizedSource, normalizedDestination, StringComparison.OrdinalIgnoreCase))
         {
             Directory.CreateDirectory(normalizedDestination);
-            return;
+            return new DirectoryMoveReport(0, []);
         }
 
         EnsureSafeDirectoryTransfers([new TransferOperation(normalizedSource, normalizedDestination)]);
@@ -1968,32 +2145,102 @@ public sealed partial class FileService
         if (!Directory.Exists(normalizedSource))
         {
             Directory.CreateDirectory(normalizedDestination);
-            return;
+            return new DirectoryMoveReport(0, []);
         }
 
+        cancellationToken.ThrowIfCancellationRequested();
         Directory.CreateDirectory(Path.GetDirectoryName(normalizedDestination)!);
 
         try
         {
             if (!Directory.Exists(normalizedDestination))
             {
-                await Task.Run(() => Directory.Move(normalizedSource, normalizedDestination));
-                return;
+                int entryCount = Directory
+                    .EnumerateFileSystemEntries(normalizedSource)
+                    .Count();
+                await Task.Run(
+                    () => Directory.Move(normalizedSource, normalizedDestination),
+                    CancellationToken.None);
+                return new DirectoryMoveReport(Math.Max(entryCount, 1), []);
             }
         }
         catch
         {
         }
 
-        Directory.CreateDirectory(normalizedDestination);
+        // Creation ownership must come from the atomic call itself: an
+        // Exists-check first would still blame us for a directory a foreign
+        // actor created in between.
+        bool destinationCreatedByUs = TryCreateOwnedDirectory(normalizedDestination);
         var entries = Directory.EnumerateFileSystemEntries(normalizedSource).ToList();
-        await MoveItemsAsync(entries, normalizedDestination);
+        var skipped = new List<FileTransferSkippedItem>();
+        IReadOnlyList<FileTransferResult> results;
+        try
+        {
+            results = await TransferItemsWithResultAsync(
+                entries,
+                normalizedDestination,
+                move: true,
+                progress: progress,
+                cancellationToken: cancellationToken,
+                onItemError: onItemError,
+                skippedItems: skipped);
+        }
+        catch
+        {
+            RemoveDestinationIfOursAndEmpty(normalizedDestination, destinationCreatedByUs);
+            throw;
+        }
 
         if (!Directory.EnumerateFileSystemEntries(normalizedSource).Any())
         {
             Directory.Delete(normalizedSource, recursive: false);
         }
+
+        // A folder this call created but never populated (every entry skipped,
+        // or a failure that left nothing behind) is litter, not a result.
+        RemoveDestinationIfOursAndEmpty(normalizedDestination, destinationCreatedByUs);
+        return new DirectoryMoveReport(results.Count, skipped);
     }
+
+    /// <summary>
+    /// Deletes <paramref name="destination"/> only when this operation
+    /// provably created it and nothing remains inside. A folder that
+    /// existed beforehand — whoever created it — or still holds entries is
+    /// never touched.
+    /// </summary>
+    private static void RemoveDestinationIfOursAndEmpty(
+        string destination,
+        bool createdByUs)
+    {
+        if (!createdByUs)
+        {
+            return;
+        }
+
+        try
+        {
+            if (Directory.Exists(destination) &&
+                !Directory.EnumerateFileSystemEntries(destination).Any())
+            {
+                Directory.Delete(destination, recursive: false);
+            }
+        }
+        catch (Exception ex)
+        {
+            App.Log(
+                $"[FileTransfer] Empty destination cleanup failed " +
+                $"for '{destination}': {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Outcome of one folder relocation: how many top-level entries moved and
+    /// which entries the caller chose to skip (still present at the source).
+    /// </summary>
+    public sealed record DirectoryMoveReport(
+        int MovedItems,
+        IReadOnlyList<FileTransferSkippedItem> SkippedItems);
 
     public static string SanitizeFileSystemName(string? name)
     {
@@ -2794,11 +3041,12 @@ public sealed partial class FileService
             // The source identity comes from the copy's own handle: it
             // describes the object that was actually read, never whatever
             // may have appeared at the path after the copy finished.
-            FileTransferSourceIdentity? sourceIdentity = await CopyFileWithProgressAsync(
-                filePath,
-                destinationFilePath,
-                new TransferProgressReporter(progress: null, totalItems: 1),
-                CancellationToken.None);
+            (FileTransferSourceIdentity? sourceIdentity, _) =
+                await CopyFileWithProgressAsync(
+                    filePath,
+                    destinationFilePath,
+                    new TransferProgressReporter(progress: null, totalItems: 1),
+                    CancellationToken.None);
             copiedSourceFiles.Add(new CopiedSourceFileRecord(
                 filePath,
                 sourceLength,
@@ -3031,6 +3279,8 @@ public sealed partial class FileService
     private const uint FileFlagOverlapped = 0x40000000;
     private const int FileDispositionInfoClass = 4; // FILE_INFO_BY_HANDLE_CLASS.FileDispositionInfo
     private const int ErrorAccessDenied = 5;
+    private const int ErrorSharingViolation = 32;
+    private const int ErrorAlreadyExists = 183;
 
     [StructLayout(LayoutKind.Sequential)]
     private struct FileDispositionInfo

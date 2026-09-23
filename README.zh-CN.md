@@ -7,7 +7,7 @@
 > 目前暂不接受外部 PR 合并——欢迎通过 Issue / Discussion 提交 Bug、功能建议与技术讨论，详见 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
 [![CI](https://github.com/Tianyu199509/DeskBox/actions/workflows/ci.yml/badge.svg)](https://github.com/Tianyu199509/DeskBox/actions/workflows/ci.yml)
-[![1.5.4 版本](https://img.shields.io/badge/release-1.5.4-2563EB.svg)](https://github.com/Tianyu199509/DeskBox/releases/tag/v1.5.4)
+[![1.5.5 版本](https://img.shields.io/badge/release-1.5.5-2563EB.svg)](https://github.com/Tianyu199509/DeskBox/releases/tag/v1.5.5)
 [![Windows 10/11](https://img.shields.io/badge/Windows-10%2F11-0078D4.svg)](#环境要求)
 [![x64 and ARM64](https://img.shields.io/badge/architecture-x64%20%7C%20ARM64-5C2D91.svg)](#下载)
 [![License: GPL v3](https://img.shields.io/badge/license-GPLv3-blue.svg)](LICENSE)
@@ -40,10 +40,10 @@ DeskBox 使用贴近 Windows 原生体验的材质，同时保留普通桌面文
 
 ## 下载
 
-DeskBox 1.5.4 已进入发版准备阶段。下方 [GitHub Releases](https://github.com/Tianyu199509/DeskBox/releases/tag/v1.5.4) 下载链接会在正式发布后生效。
+DeskBox 1.5.5 已进入发版准备阶段。下方 [GitHub Releases](https://github.com/Tianyu199509/DeskBox/releases/tag/v1.5.5) 下载链接会在正式发布后生效。
 
-- [DeskBox 1.5.4 x64 安装包](https://github.com/Tianyu199509/DeskBox/releases/download/v1.5.4/DeskBox_Setup_1.5.4_x64.exe)，推荐大多数 Intel 和 AMD 电脑使用。
-- [DeskBox 1.5.4 ARM64 安装包](https://github.com/Tianyu199509/DeskBox/releases/download/v1.5.4/DeskBox_Setup_1.5.4_arm64.exe)，推荐骁龙、Surface Pro X 等 Windows on ARM 电脑使用。
+- [DeskBox 1.5.5 x64 安装包](https://github.com/Tianyu199509/DeskBox/releases/download/v1.5.5/DeskBox_Setup_1.5.5_x64.exe)，推荐大多数 Intel 和 AMD 电脑使用。
+- [DeskBox 1.5.5 ARM64 安装包](https://github.com/Tianyu199509/DeskBox/releases/download/v1.5.5/DeskBox_Setup_1.5.5_arm64.exe)，推荐骁龙、Surface Pro X 等 Windows on ARM 电脑使用。
 
 两个安装包都是 Full Native AOT 构建，并内置对应架构的私有 Windows App Runtime 2.4，可离线安装，不需要另外下载 .NET 10 或 Windows App Runtime。
 
@@ -124,6 +124,20 @@ DeskBox 1.5.4 已进入发版准备阶段。下方 [GitHub Releases](https://git
 - DeskBox 关闭后会显示安装界面；升级会复用并锁定原安装路径，避免生成第二份应用。
 - 支持设置备份与恢复，并可导出经过隐私过滤的一键诊断包用于排查问题。
 - 设置使用可恢复快照，退出时刷新待保存内容；保存失败会明确记录和提示，不再静默恢复默认配置。
+
+## 1.5.5 更新亮点
+
+- **云备份上线。** 把待办、随记和格子样式定时备份到你自己的 WebDAV 服务器（设置 → 维护）。密码保存在 Windows 凭据管理器，每个数据域独立开关，远端快照可浏览、可还原。
+- **想还原什么就还原什么。** 可选回哪些数据域——待办、随记、格子样式——并选择"合并"（新者胜出、不删除本机数据）或"完全恢复"（严格按快照还原）。删除现在会留下墓碑，合并还原不再复活本机已删的条目。
+- **拖放到处都好用。** 从格子拖出文件现在携带与 Explorer 同源的原生 Shell 数据对象：VS Code、浏览器等此前拒绝 DeskBox 拖放的目标现在都能接受。跨盘传输改走系统文件操作引擎，获得原生进度、取消与冲突处理——修复了跨盘导入以"0 items"空完成的问题。
+- **热键自愈。** Windows 会静默摘除全局热键、搜索热键、桌面双击激活背后的低级钩子——此前只能重启恢复。现在有健康 watchdog 自动检测并重新注册。
+- **真正静默时修剪空闲内存。** 不再要求全部隐藏——格子在几秒真实静默后即可向 Windows 归还内存，受绝对工作集下限和常驻动画感知保护。由新的"空闲时修剪内存"选项控制。
+- **吸附反馈换上 Fluent 风格。** 调整或拖动时的循环呼吸辉光改为锐利的 accent 边缘光带，落定一次后稳定常亮，在圆角处自然消融。
+- **紧凑格子方向控制与胶囊重排。** 收起菜单可单独覆盖展开方向（自动/向下/向上），胶囊条支持拖拽重排——包括跨显示器。新格子组默认标签页导航，外观设置还新增了窗口阴影开关。
+- **一大批看得见的修复。** 设置窗不再冻结在关闭时的主题；快捷方式箭头大尺寸下清晰；Alt 拖入的快捷方式保留目标自身图标；云备份页在 Native AOT 版不再崩溃；残留文件夹不再堵死同名格子的创建；迁移回滚失败会说清楚自己；中止的传输绝不误删不是它创建的文件。
+- **备份更诚实。** 服务器已接收但迟迟未列入目录的上传会标注"等待服务器确认"而非看似干净的成功；透明效果或省电模式在会话中途降级 Mica 时，材质提示会即时出现。
+
+完整内容见 [更新日志](CHANGELOG.md) 和 [1.5.5 发布说明](docs/releases/v1.5.5.md)。
 
 ## 1.5.4 更新亮点
 

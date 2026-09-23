@@ -21,7 +21,7 @@ public sealed partial class TodoItemViewModel : ObservableObject
     private DateTimeOffset? _completedAt;
     private int? _reminderOffsetMinutes;
     private DateTimeOffset? _snoozedUntil;
-        private bool _isEditing;
+    private bool _isEditing;
     private bool _isCopySelected;
     private bool _isExpanded;
     private string _editText = string.Empty;

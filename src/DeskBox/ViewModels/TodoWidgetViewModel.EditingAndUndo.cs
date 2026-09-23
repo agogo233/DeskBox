@@ -131,7 +131,7 @@ public sealed partial class TodoWidgetViewModel
         {
             SelectedDetailItem = null;
         }
-        Items.Remove(item);
+        TombstoneItem(item);
         NormalizeSortOrders();
         RefreshVisibleItems();
         RefreshCountProperties();
@@ -160,7 +160,7 @@ public sealed partial class TodoWidgetViewModel
 
         foreach (var item in itemsToDelete)
         {
-            Items.Remove(item);
+            TombstoneItem(item);
         }
 
         NormalizeSortOrders();
@@ -181,7 +181,7 @@ public sealed partial class TodoWidgetViewModel
         CaptureUndoSnapshot(_localizationService.Format("Todo.Undo.ClearedCompleted", completedItems.Count));
         foreach (var item in completedItems)
         {
-            Items.Remove(item);
+            TombstoneItem(item);
         }
 
         NormalizeSortOrders();
@@ -200,6 +200,14 @@ public sealed partial class TodoWidgetViewModel
 
         int removedCount = Items.Count;
         CaptureUndoSnapshot(_localizationService.Format("Todo.Undo.ClearedAll", removedCount));
+        var clearedAt = DateTimeOffset.UtcNow;
+        foreach (var item in Items)
+        {
+            item.Item.IsDeleted = true;
+            item.Item.UpdatedAt = clearedAt;
+            _tombstones.Add(item.Item);
+        }
+
         Items.Clear();
         RefreshVisibleItems();
         RefreshCountProperties();
@@ -272,5 +280,15 @@ public sealed partial class TodoWidgetViewModel
 
         _undoSnapshot = null;
         RefreshUndoProperties();
+    }
+
+    // Soft-delete: the record stays in the store file as a tombstone (via
+    // SaveAsync) so a merge restore cannot resurrect it as "unknown".
+    private void TombstoneItem(TodoItemViewModel item)
+    {
+        item.Item.IsDeleted = true;
+        item.Item.UpdatedAt = DateTimeOffset.UtcNow;
+        Items.Remove(item);
+        _tombstones.Add(item.Item);
     }
 }

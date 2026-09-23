@@ -364,7 +364,7 @@ public sealed class AotPublishContractTests
         Assert.Contains("DESKBOX_SHORTCUT_BACKEND", loader, StringComparison.Ordinal);
         Assert.Contains("RuntimeFeature.IsDynamicCodeSupported", loader, StringComparison.Ordinal);
         Assert.Contains("return ShortcutBackendMode.Rust", loader, StringComparison.Ordinal);
-        Assert.Contains("LoadLibraryExW", loader, StringComparison.Ordinal);
+        Assert.Contains("Kernel32NativeMethods.LoadLibraryEx(", loader, StringComparison.Ordinal);
         Assert.Contains("LoadLibrarySearchDllLoadDir", loader, StringComparison.Ordinal);
         Assert.Contains("LoadLibrarySearchSystem32", loader, StringComparison.Ordinal);
         Assert.Contains("Path.Combine(AppContext.BaseDirectory, DllName)", loader, StringComparison.Ordinal);
@@ -544,7 +544,7 @@ public sealed class AotPublishContractTests
 
     [Theory]
     [InlineData("src/DeskBox/ViewModels/SearchPopupViewModel.cs", 15)]
-    [InlineData("src/DeskBox/ViewModels/SettingsViewModel.cs", 76)]
+    [InlineData("src/DeskBox/ViewModels/SettingsViewModel.cs", 77)]
     public void AotSensitiveViewModels_UseObservablePartialProperties(
         string relativePath,
         int expectedCount)

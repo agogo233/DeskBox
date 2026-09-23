@@ -330,6 +330,12 @@ public abstract partial class WidgetWindowBase
         KeepRaisedUntilDeactivate = false;
         RestoreDesktopLayerWhenIdle = false;
         TopMostSafetyTimer?.Stop();
+        // HWND_BOTTOM also places this widget below every sibling, which
+        // breaks the shadow-safe peer order. Queue a normalization so the
+        // repair cannot leave the group misordered until an unrelated
+        // trigger happens to fix it.
+        App.Current.WidgetManager?.QueueIdleWidgetZOrderNormalization(
+            $"{LogPrefix}-pinned-bottom-reasserted");
         App.LogVerbose(
             $"[ZOrder] {LogPrefix} fixed-layer bottom reasserted reason={reason} " +
             $"hwnd=0x{HWnd.ToInt64():X}");
@@ -597,6 +603,16 @@ public abstract partial class WidgetWindowBase
     }
 
     // ── AppWindow change handling ──────────────────────────────
+
+    /// <summary>
+    /// True while any bounds write or position transition is still in flight.
+    /// Z-order normalization uses this to avoid sorting on transient bounds
+    /// that would produce a second, different order once the window settles.
+    /// </summary>
+    public bool IsBoundsTransitionActive =>
+        IsApplyingBounds ||
+        TrayAnimation.IsApplyingBounds ||
+        TrayAnimation.IsPositionTransitionActive;
 
     protected void OnAppWindowChanged(AppWindow sender, AppWindowChangedEventArgs args)
     {

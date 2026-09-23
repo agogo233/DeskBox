@@ -366,33 +366,11 @@ public sealed partial class TodoWidgetContent
 
     private Brush GetBrushResourceOrFallback(string resourceKey, Windows.UI.Color fallbackColor)
     {
-        for (DependencyObject? current = this;
-             current is not null;
-             current = VisualTreeHelper.GetParent(current))
-        {
-            if (current is FrameworkElement element &&
-                element.Resources.TryGetValue(resourceKey, out object? scopedResource))
-            {
-                return scopedResource switch
-                {
-                    Brush brush => brush,
-                    Windows.UI.Color color => new SolidColorBrush(color),
-                    _ => new SolidColorBrush(fallbackColor)
-                };
-            }
-        }
-
-        if (Application.Current.Resources.TryGetValue(resourceKey, out object? resource))
-        {
-            return resource switch
-            {
-                Brush brush => brush,
-                Windows.UI.Color color => new SolidColorBrush(color),
-                _ => new SolidColorBrush(fallbackColor)
-            };
-        }
-
-        return new SolidColorBrush(fallbackColor);
+        // Resolve by this element's own theme: a bare application-scope
+        // lookup would follow the system theme and invert the resource
+        // whenever the widget's theme override disagrees with it.
+        return NeutralInteractionBrush.ResolveThemedResource(resourceKey, this) ??
+               new SolidColorBrush(fallbackColor);
     }
 
     private static Windows.UI.Color ParseColor(string hex)
@@ -491,7 +469,6 @@ public sealed partial class TodoWidgetContent
     private void ShowUndoToast(
         string text,
         string? actionText = null,
-        int durationMs = UndoToastMs,
         bool clearUndoOnHide = true)
     {
         long generation = ++_undoToastGeneration;
@@ -525,7 +502,6 @@ public sealed partial class TodoWidgetContent
     private void ShowTodoStatus(string resourceKey) =>
         ShowUndoToast(
             App.Current.LocalizationService.T(resourceKey),
-            durationMs: CopyToastMs,
             clearUndoOnHide: false);
 
     private async Task<bool> SetCompletedWithFeedbackAsync(

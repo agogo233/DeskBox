@@ -634,7 +634,8 @@ $stage4D3AUnexpectedDropTargetWarningMessages = @(
 )
 $stage4D3BSourceFiles = @(
     "src\DeskBox\Helpers\NativeDropTarget.cs",
-    "src\DeskBox\Helpers\NativeDropTargetComInterop.cs"
+    "src\DeskBox\Helpers\NativeDropTargetComInterop.cs",
+    "src\DeskBox\Platform\Ole32NativeMethods.cs"
 )
 $stage4D3BLegacyRegistrationPatterns = @(
     "[ComImport",
@@ -674,15 +675,21 @@ $stage4D3BRequiredGeneratedComPatterns = @(
     "ComInterfaceMarshaller<INativeDropTarget>.ConvertToUnmanaged",
     "ComInterfaceMarshaller<INativeDropTarget>.Free"
 )
-$stage4D3BInteropSourcePath = Join-Path $repoRoot (
-    "src\DeskBox\Helpers\NativeDropTargetComInterop.cs")
-$stage4D3BInteropSource = if (
-    Test-Path -LiteralPath $stage4D3BInteropSourcePath -PathType Leaf) {
-    Get-Content -LiteralPath $stage4D3BInteropSourcePath -Raw
-}
-else {
-    ""
-}
+$stage4D3BInteropSourcePaths = @(
+    "src\DeskBox\Helpers\NativeDropTargetComInterop.cs",
+    # The ole32 RegisterDragDrop/RevokeDragDrop LibraryImport pair moved to the
+    # Platform surface during the P/Invoke consolidation; the contract is about
+    # the generated-COM surface as a whole, not a single file.
+    "src\DeskBox\Platform\Ole32NativeMethods.cs"
+)
+$stage4D3BInteropSource = (
+    $stage4D3BInteropSourcePaths | ForEach-Object {
+        $fullPath = Join-Path $repoRoot $_
+        if (Test-Path -LiteralPath $fullPath -PathType Leaf) {
+            Get-Content -LiteralPath $fullPath -Raw
+        }
+    }
+) -join "`n"
 $stage4D3BMissingGeneratedComPatterns = @(
     $stage4D3BRequiredGeneratedComPatterns |
         Where-Object {
@@ -1472,7 +1479,10 @@ $stage4E4SourceFiles = @(
     "src\DeskBox\ViewModels\SettingsViewModel.FileStackOptions.cs",
     "src\DeskBox\ViewModels\SettingsViewModel.FeatureOptions.cs",
     "src\DeskBox\ViewModels\SettingsViewModel.SelectionOptions.cs",
-    "src\DeskBox\Controls\SettingsComboBox.cs"
+    "src\DeskBox\Controls\SettingsComboBox.cs",
+    # Deferred-section host: AppearanceDetail is materialized lazily, so its
+    # typed ViewModel bridge lives here instead of SettingsWindow.xaml.cs.
+    "src\DeskBox\Views\SettingsWindow.DeferredSections.cs"
 )
 $stage4E4Sources = [ordered]@{}
 foreach ($sourceFile in $stage4E4SourceFiles) {
@@ -1590,6 +1600,10 @@ $stage4E4RequiredViewModelBridgePatterns = @(
         pattern = "Bindings.StopTracking();"
     },
     [PSCustomObject]@{
+        sourceFile = $stage4E4SourceFiles[7]
+        pattern = "fileSettings.ViewModel = ViewModel;"
+    },
+    [PSCustomObject]@{
         sourceFile = $stage4E4SourceFiles[2]
         pattern = "AppearanceDetailSection.ViewModel = null;"
     },
@@ -1611,8 +1625,12 @@ $stage4E4SettingsWindowSource = $stage4E4Sources[$stage4E4SourceFiles[2]]
 $stage4E4RootDataContextIndex = $stage4E4SettingsWindowSource.IndexOf(
     "SettingsRoot.DataContext = ViewModel;",
     [StringComparison]::Ordinal)
-$stage4E4BridgeAssignmentIndex = $stage4E4SettingsWindowSource.IndexOf(
-    "Bindings.Initialize();",
+$stage4E4DeferredSectionsSource = $stage4E4Sources[$stage4E4SourceFiles[7]]
+$stage4E4DeferredDataContextIndex = $stage4E4DeferredSectionsSource.IndexOf(
+    "section.DataContext = ViewModel;",
+    [StringComparison]::Ordinal)
+$stage4E4BridgeAssignmentIndex = $stage4E4DeferredSectionsSource.IndexOf(
+    "fileSettings.ViewModel = ViewModel;",
     [StringComparison]::Ordinal)
 $stage4E4BridgeClearIndex = $stage4E4SettingsWindowSource.IndexOf(
     "AppearanceDetailSection.ViewModel = null;",
@@ -1622,7 +1640,8 @@ $stage4E4ViewModelDisposeIndex = $stage4E4SettingsWindowSource.IndexOf(
     [StringComparison]::Ordinal)
 $stage4E4ViewModelBridgeOrderValid =
     $stage4E4RootDataContextIndex -ge 0 -and
-    $stage4E4BridgeAssignmentIndex -gt $stage4E4RootDataContextIndex -and
+    $stage4E4DeferredDataContextIndex -ge 0 -and
+    $stage4E4BridgeAssignmentIndex -gt $stage4E4DeferredDataContextIndex -and
     $stage4E4BridgeClearIndex -ge 0 -and
     $stage4E4BridgeClearIndex -lt $stage4E4ViewModelDisposeIndex
 $stage4E4UnexpectedManualBridgePatterns = @(
@@ -3452,7 +3471,10 @@ $stage5B4B1SourceFiles = @(
     "src/DeskBox/ViewModels/SettingsViewModel.FeatureOptions.cs",
     "src/DeskBox/ViewModels/SettingsViewModel.SelectionOptions.cs",
     "src/DeskBox/ViewModels/SettingsViewModel.WeatherOptions.cs",
-    "src/DeskBox/Views/SettingsWindow.HotkeyAndAppearance.cs"
+    "src/DeskBox/Views/SettingsWindow.HotkeyAndAppearance.cs",
+    # Deferred-section host owns the lazy typed-ViewModel bridges that used to
+    # live eagerly in SettingsWindow.xaml.cs.
+    "src/DeskBox/Views/SettingsWindow.DeferredSections.cs"
 )
 $stage5B4B1Sources = [ordered]@{}
 foreach ($sourceFile in $stage5B4B1SourceFiles) {
@@ -3526,14 +3548,21 @@ $stage5B4B1RequiredProjectionPatterns = @(
     '[WinRT.GeneratedBindableCustomProperty]',
     'private sealed partial record SettingsBreadcrumbItem',
     'private sealed partial record SettingsSearchResult',
-    'private sealed partial record BackupSnapshotListItem'
+    'private sealed partial record BackupSnapshotListItem',
+    'CapsuleModeSection.ViewModel = null',
+    # The typed bridge is assigned lazily by the deferred-section host.
+    'capsuleSettings.ViewModel = ViewModel'
 )
+$stage5B4B1ProjectionSource =
+    $stage5B4B1Sources[$stage5B4B1SourceFiles[5]] +
+    "`n" +
+    $stage5B4B1Sources[$stage5B4B1SourceFiles[22]]
 $stage5B4B1MissingProjectionPatterns = @(
     foreach ($pattern in $stage5B4B1RequiredProjectionPatterns) {
-        if ($stage5B4B1Sources[$stage5B4B1SourceFiles[5]].IndexOf(
+        if ($stage5B4B1ProjectionSource.IndexOf(
                 $pattern,
                 [StringComparison]::Ordinal) -lt 0) {
-            "$($stage5B4B1SourceFiles[5])::$pattern"
+            "$pattern"
         }
     }
 )
@@ -3617,7 +3646,7 @@ $stage5B4B1MissingBindableTypePatterns = @(
         }
     }
 )
-$stage5B4B1ExpectedBindableViewModelPropertyCount = 327
+$stage5B4B1ExpectedBindableViewModelPropertyCount = 349
 $stage5B4B1ActualBindableViewModelPropertyCount = [regex]::Matches(
     $stage5B4B1Sources[$stage5B4B1SourceFiles[9]],
     [regex]::Escape('nameof(')).Count
@@ -3851,7 +3880,7 @@ $stage5B4B1SourceWarningMessages = @(
         ForEach-Object { $_.Trim() } |
         Sort-Object -Unique
 )
-$stage5B4B1ExpectedWmc1510Count = 867
+$stage5B4B1ExpectedWmc1510Count = 866
 $stage5B4B1ActualWmc1510Count = @(
     $warningMatches | Where-Object { $_ -ieq "WMC1510" }
 ).Count
@@ -4030,7 +4059,7 @@ $stage5B4B2ASourceWarningMessages = @(
         ForEach-Object { $_.Trim() } |
         Sort-Object -Unique
 )
-$stage5B4B2AExpectedWmc1510Count = 867
+$stage5B4B2AExpectedWmc1510Count = 866
 $stage5B4B2AActualWmc1510Count = @(
     $warningMatches | Where-Object { $_ -ieq "WMC1510" }
 ).Count
@@ -4220,7 +4249,7 @@ $stage5B4B2B1SourceWarningMessages = @(
         ForEach-Object { $_.Trim() } |
         Sort-Object -Unique
 )
-$stage5B4B2B1ExpectedWmc1510Count = 867
+$stage5B4B2B1ExpectedWmc1510Count = 866
 $stage5B4B2B1ActualWmc1510Count = @(
     $warningMatches | Where-Object { $_ -ieq "WMC1510" }
 ).Count
@@ -4444,7 +4473,7 @@ $stage5B4B2B2ASourceWarningMessages = @(
         ForEach-Object { $_.Trim() } |
         Sort-Object -Unique
 )
-$stage5B4B2B2AExpectedWmc1510Count = 867
+$stage5B4B2B2AExpectedWmc1510Count = 866
 $stage5B4B2B2AActualWmc1510Count = @(
     $warningMatches | Where-Object { $_ -ieq "WMC1510" }
 ).Count
@@ -6302,7 +6331,7 @@ $stage5B4C1B2ARequiredScenarioPatterns = @(
     'case "VerifyRestore"',
     'case "Postflight"',
     'case "Compensate"',
-    'RecentOrganizationHistory.Clear()',
+    'OrganizationHistory.Entries.Clear()',
     'ShellMoveFilesRestoredByHarness',
     'ShellMoveCompensationCompleted',
     'SHA256.HashData(stream)'
@@ -6412,7 +6441,7 @@ $stage5B4C1B2BSourceFiles = @(
     "src/DeskBox/Controls/FileItemMenuBuilder.cs",
     "src/DeskBox/Controls/WidgetContents/FileSurfaceContent.SelectionAndMenus.cs",
     "src/DeskBox/Helpers/ShellContextMenuHelper.cs",
-    "src/DeskBox/Helpers/Win32Helper.cs",
+    "src/DeskBox/Platform/Win32Helper.cs",
     "scripts/run-aot-managed-ui-smoke.ps1",
     "scripts/run-aot-file-properties-smoke.ps1",
     "native/deskbox-native/src/lib.rs"
@@ -7001,8 +7030,10 @@ $stage5B4C1C2ARequiredProbePatterns = @(
     'PrimeAotNativeFolderHighlight(',
     'CaptureAotNativeFolderHighlightState(',
     'GetAotNativeFolderVisualState(',
-    'thickness.Left >= 0.5',
-    'borderBrush.Color.A > 0',
+    # Drop targets render the neutral hover surface now, so the probe keys on
+    # recorded target identity rather than measuring the highlight border.
+    'IsActiveChildDropTarget(border)',
+    '? "DropTarget"',
     'CaptureAotNativeDropProgress()',
     'Canvas.GetZIndex(ImportProgressCard)',
     'background is AcrylicBrush'
@@ -7147,7 +7178,7 @@ $stage5B4C1C2AActualWmc1510Count = @(
 ).Count
 $stage5B4C2ASourceFiles = @(
     "src/DeskBox/App.AotHotkeySmoke.cs",
-    "src/DeskBox/Helpers/Win32Helper.AotHotkeySmoke.cs",
+    "src/DeskBox/Platform/Win32Helper.AotHotkeySmoke.cs",
     "src/DeskBox/Services/GlobalHotkeyService.cs",
     "src/DeskBox/Services/SearchHotkeyService.cs",
     "src/DeskBox/Services/ReservedHotkeyHookService.cs",

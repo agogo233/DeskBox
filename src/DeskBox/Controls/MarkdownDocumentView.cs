@@ -1,3 +1,4 @@
+using DeskBox.Helpers;
 using DeskBox.Models;
 using DeskBox.Services;
 using Markdig.Extensions.Tables;
@@ -462,9 +463,7 @@ public sealed partial class MarkdownDocumentView : UserControl
         _documentText.Foreground = _contentForeground;
     }
 
-    private bool UsesDarkTheme => ActualTheme == ElementTheme.Dark ||
-        (ActualTheme == ElementTheme.Default &&
-         Application.Current?.RequestedTheme == ApplicationTheme.Dark);
+    private bool UsesDarkTheme => NeutralInteractionBrush.IsDarkTheme(this);
 
     private static Brush CreateLightThemeSemanticForeground()
     {
@@ -1218,24 +1217,11 @@ public sealed partial class MarkdownDocumentView : UserControl
 
     private Brush BrushResource(string key)
     {
-        for (DependencyObject? current = this;
-             current is not null;
-             current = VisualTreeHelper.GetParent(current))
-        {
-            if (current is FrameworkElement element &&
-                element.Resources.TryGetValue(key, out object? scopedResource) &&
-                scopedResource is Brush scopedBrush)
-            {
-                return scopedBrush;
-            }
-        }
-
-        if (Application.Current?.Resources.TryGetValue(key, out object? resource) == true &&
-            resource is Brush brush)
-        {
-            return brush;
-        }
-        return new SolidColorBrush(Microsoft.UI.Colors.Gray);
+        // Resolve by this element's own theme: a bare application-scope
+        // lookup would follow the system theme and invert the resource
+        // whenever the widget's theme override disagrees with it.
+        return NeutralInteractionBrush.ResolveThemedResource(key, this) ??
+               new SolidColorBrush(Microsoft.UI.Colors.Gray);
     }
 }
 

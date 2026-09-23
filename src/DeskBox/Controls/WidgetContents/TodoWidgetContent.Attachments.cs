@@ -69,7 +69,6 @@ public sealed partial class TodoWidgetContent
 
             ShowUndoToast(
                 ViewModel?.DetailFileMissingText ?? string.Empty,
-                durationMs: CopyToastMs,
                 clearUndoOnHide: false);
         }
         catch (Exception ex)

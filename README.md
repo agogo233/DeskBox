@@ -7,12 +7,13 @@ English | [简体中文](README.zh-CN.md)
 > External pull requests are not being merged at this time — bug reports, ideas, and discussions are very welcome via Issues / Discussions. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 [![CI](https://github.com/Tianyu199509/DeskBox/actions/workflows/ci.yml/badge.svg)](https://github.com/Tianyu199509/DeskBox/actions/workflows/ci.yml)
-[![Release 1.5.4](https://img.shields.io/badge/release-1.5.4-2563EB.svg)](https://github.com/Tianyu199509/DeskBox/releases/tag/v1.5.4)
+[![Release 1.5.5](https://img.shields.io/badge/release-1.5.5-2563EB.svg)](https://github.com/Tianyu199509/DeskBox/releases/tag/v1.5.5)
 [![Windows 10/11](https://img.shields.io/badge/Windows-10%2F11-0078D4.svg)](#system-requirements)
 [![x64 and ARM64](https://img.shields.io/badge/architecture-x64%20%7C%20ARM64-5C2D91.svg)](#download)
 [![License: GPL v3](https://img.shields.io/badge/license-GPLv3-blue.svg)](LICENSE)
 [![GitHub stars](https://img.shields.io/github/stars/Tianyu199509/DeskBox?style=flat&color=yellow)](https://github.com/Tianyu199509/DeskBox/stargazers)
 [![Downloads](https://img.shields.io/github/downloads/Tianyu199509/DeskBox/total?style=flat&color=brightgreen)](https://github.com/Tianyu199509/DeskBox/releases)
+<a href="https://hellogithub.com/repository/Tianyu199509/DeskBox" target="_blank"><img src="https://api.hellogithub.com/v1/widgets/recommend.svg?rid=f0cae3cb81f3496b9b6ead91194dc6f8&claim_uid=x4er8iQsXYT3aMN&theme=small" alt="Featured｜HelloGitHub" /></a>
 
 ![DeskBox Windows desktop organizer with file, todo, search, weather, and music widgets](docs/images/brand/readme-hero-1-3-7-dark-en.png)
 
@@ -40,10 +41,10 @@ All twelve selectable languages share the same resource-key and formatting-place
 
 ## Download
 
-DeskBox 1.5.4 is prepared for release. The [GitHub Releases](https://github.com/Tianyu199509/DeskBox/releases/tag/v1.5.4) download links below will become available after publication.
+DeskBox 1.5.5 is prepared for release. The [GitHub Releases](https://github.com/Tianyu199509/DeskBox/releases/tag/v1.5.5) download links below will become available after publication.
 
-- [DeskBox 1.5.4 for x64](https://github.com/Tianyu199509/DeskBox/releases/download/v1.5.4/DeskBox_Setup_1.5.4_x64.exe), recommended for most Intel and AMD PCs.
-- [DeskBox 1.5.4 for ARM64](https://github.com/Tianyu199509/DeskBox/releases/download/v1.5.4/DeskBox_Setup_1.5.4_arm64.exe), recommended for Snapdragon, Surface Pro X, and other Windows on ARM PCs.
+- [DeskBox 1.5.5 for x64](https://github.com/Tianyu199509/DeskBox/releases/download/v1.5.5/DeskBox_Setup_1.5.5_x64.exe), recommended for most Intel and AMD PCs.
+- [DeskBox 1.5.5 for ARM64](https://github.com/Tianyu199509/DeskBox/releases/download/v1.5.5/DeskBox_Setup_1.5.5_arm64.exe), recommended for Snapdragon, Surface Pro X, and other Windows on ARM PCs.
 
 Both packages are Full Native AOT builds with the matching private Windows App Runtime 2.4, so they can install offline without downloading a separate .NET 10 or Windows App Runtime package.
 
@@ -124,6 +125,20 @@ Every release also publishes a matching `.sha256` sidecar for each installer. Th
 - Start a visible installer after DeskBox closes; upgrades reuse and lock the existing installation path instead of creating a second copy.
 - Back up and restore settings, and export a privacy-filtered diagnostics package for troubleshooting.
 - Recover settings from resilient snapshots, flush pending changes during shutdown, and report save failures instead of silently reverting to defaults.
+
+## What's new in 1.5.5
+
+- **Cloud backup to your own server.** Back up todos, quick captures, and widget styles to WebDAV on a schedule (Settings → Maintenance). Passwords live in Windows Credential Manager, each data domain toggles independently, and remote snapshots are listed for browsing and restore.
+- **Restore only what you want.** Pick the data domains to bring back — todo, quick capture, widget style — and choose merge (newer entries win, nothing on this device is deleted) or a full snapshot-faithful restore. Deletions now leave tombstones, so merged restores stop resurrecting items you removed locally.
+- **Drag-and-drop that works everywhere.** File drags out of widgets now carry the same native Shell data object Explorer uses: VS Code, browsers, and other Copy-only targets that used to reject DeskBox drags now accept them. Cross-volume transfers go through the system file-operation engine with native progress, cancellation, and conflict handling — fixing the cross-volume import that completed with "0 items".
+- **Hotkeys that heal themselves.** Windows can silently strip the low-level hooks behind the global hotkey, search hotkey, or desktop double-click activation — previously dead until restart. A health watchdog now detects and re-registers them automatically.
+- **Widgets trim idle memory during true quiet.** After a few seconds of real inactivity — no longer only when everything is hidden — widgets can release memory back to Windows, gated by absolute working-set floors and ambient-animation awareness. Controlled by the new "Trim memory when idle" option.
+- **Snap feedback got a Fluent-grade makeover.** The looping breathing glow while resizing or dragging is replaced by a crisp accent edge band that settles once and dissolves cleanly around rounded corners.
+- **Compact widgets get directional control and capsule reordering.** Override the expansion direction per widget (auto / down / up) from the collapse menu, and reorder capsule bars by dragging — including across monitors. New groups default to tab navigation, and there's a new window-shadow toggle in Appearance.
+- **Dozens of visible fixes.** The settings window no longer freezes on the theme it had when closed; shortcut arrows are sharp at large sizes; alt-dragged shortcuts keep the target's own icon; the cloud-backup page no longer crashes on Native AOT builds; leftover folders no longer block creating a same-named widget; migration rollback failures explain themselves; aborted transfers never sweep files they didn't create.
+- **Backup honesty.** An upload the server accepted but never listed is marked "awaiting server confirmation" instead of looking like a clean success, and the material-fallback hint fires the moment transparency effects or battery saver degrade Mica mid-session.
+
+Read the complete [changelog](CHANGELOG.md) or the [1.5.5 release notes](docs/releases/v1.5.5.md).
 
 ## What's new in 1.5.4
 
@@ -303,6 +318,7 @@ You can also visit [deskbox.fun](https://deskbox.fun) or use the contact informa
 - License: [GPL-3.0-only](LICENSE)
 
 Earlier DeskBox versions already published under the MIT License remain available under that license. The change is not retroactive.
+
 
 ## Star history
 

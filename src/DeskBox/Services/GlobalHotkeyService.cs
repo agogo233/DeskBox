@@ -6,7 +6,7 @@ using Windows.System;
 
 namespace DeskBox.Services;
 
-public sealed class GlobalHotkeyService : IDisposable
+public sealed class GlobalHotkeyService : IDisposable, IHookHealthProbeTarget
 {
     public const uint WmHotkey = 0x0312;
     private const uint WmReservedHotkey = 0x8442;
@@ -298,6 +298,21 @@ public sealed class GlobalHotkeyService : IDisposable
         _settingsService.SaveDebounced();
         RefreshRegistration();
     }
+
+    string IHookHealthProbeTarget.ProbeName => "global-hotkey";
+
+    // Only the reserved-gesture path owns a low-level hook; RegisterHotKey
+    // chords are delivered as WM_HOTKEY and cannot be silently unhooked.
+    bool IHookHealthProbeTarget.HookProbeWanted => _usesReservedHook && _isRegistered;
+
+    bool IHookHealthProbeTarget.HookConfirmedDead => !_reservedHotkeyHook.IsActive;
+
+    long IHookHealthProbeTarget.LastHookCallbackTicks => _reservedHotkeyHook.LastCallbackTicks;
+
+    Task<bool> IHookHealthProbeTarget.ProbeHookAliveAsync(int echoWaitMilliseconds) =>
+        _reservedHotkeyHook.ProbeAliveAsync(echoWaitMilliseconds);
+
+    void IHookHealthProbeTarget.RecoverHook() => RefreshRegistration();
 
     public bool ResetToDefault(out string? error)
     {

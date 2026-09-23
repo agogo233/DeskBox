@@ -102,6 +102,9 @@ public class AppSettings
     /// <inheritdoc cref="PerformanceSettingsSlice.ImmediateHiddenWorkingSetTrimEnabled"/>
     public bool ImmediateHiddenWorkingSetTrimEnabled { get => Performance.ImmediateHiddenWorkingSetTrimEnabled; set => Performance.ImmediateHiddenWorkingSetTrimEnabled = value; }
 
+    /// <inheritdoc cref="PerformanceSettingsSlice.QuiescenceWorkingSetTrimEnabled"/>
+    public bool QuiescenceWorkingSetTrimEnabled { get => Performance.QuiescenceWorkingSetTrimEnabled; set => Performance.QuiescenceWorkingSetTrimEnabled = value; }
+
     /// <inheritdoc cref="PerformanceSettingsSlice.TransientWindowReleaseDelaySeconds"/>
     public int TransientWindowReleaseDelaySeconds { get => Performance.TransientWindowReleaseDelaySeconds; set => Performance.TransientWindowReleaseDelaySeconds = value; }
 
@@ -716,4 +719,10 @@ public class AppSettings
 
     /// <inheritdoc cref="CloudBackupSettingsSlice.CloudBackupLastSuccessUtcTicks"/>
     public long CloudBackupLastSuccessUtcTicks { get => CloudBackup.CloudBackupLastSuccessUtcTicks; set => CloudBackup.CloudBackupLastSuccessUtcTicks = value; }
+
+    /// <inheritdoc cref="CloudBackupSettingsSlice.CloudBackupLastFailureUtcTicks"/>
+    public long CloudBackupLastFailureUtcTicks { get => CloudBackup.CloudBackupLastFailureUtcTicks; set => CloudBackup.CloudBackupLastFailureUtcTicks = value; }
+
+    /// <inheritdoc cref="CloudBackupSettingsSlice.CloudBackupLastUnverifiedUtcTicks"/>
+    public long CloudBackupLastUnverifiedUtcTicks { get => CloudBackup.CloudBackupLastUnverifiedUtcTicks; set => CloudBackup.CloudBackupLastUnverifiedUtcTicks = value; }
 }

@@ -12,7 +12,7 @@ namespace DeskBox.Services;
 /// Alt+Space preset rides the reserved low-level hook, matching how the main
 /// hotkey handles system-reserved gestures.
 /// </summary>
-public sealed class SearchHotkeyService : IDisposable
+public sealed class SearchHotkeyService : IDisposable, IHookHealthProbeTarget
 {
     private const int SearchHotkeyId = 0x4444;
     private const uint WmReservedSearchHotkey = 0x8444;
@@ -270,6 +270,19 @@ public sealed class SearchHotkeyService : IDisposable
         _settingsService.SaveDebounced();
         RefreshRegistration();
     }
+
+    string IHookHealthProbeTarget.ProbeName => "search-hotkey";
+
+    bool IHookHealthProbeTarget.HookProbeWanted => _usesReservedHook && _isRegistered;
+
+    bool IHookHealthProbeTarget.HookConfirmedDead => !_reservedHotkeyHook.IsActive;
+
+    long IHookHealthProbeTarget.LastHookCallbackTicks => _reservedHotkeyHook.LastCallbackTicks;
+
+    Task<bool> IHookHealthProbeTarget.ProbeHookAliveAsync(int echoWaitMilliseconds) =>
+        _reservedHotkeyHook.ProbeAliveAsync(echoWaitMilliseconds);
+
+    void IHookHealthProbeTarget.RecoverHook() => RefreshRegistration();
 
     private IntPtr WindowSubclassProc(IntPtr hWnd, uint message, UIntPtr wParam, IntPtr lParam, UIntPtr uIdSubclass, UIntPtr dwRefData)
     {

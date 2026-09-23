@@ -100,8 +100,11 @@ public sealed class Windows10WidgetMotionContractTests
         Assert.Contains("!WindowsCompatibilityService.IsWindows11OrLater", bounds, StringComparison.Ordinal);
         Assert.Contains("SWP_NOCOPYBITS | Win32Helper.SWP_DEFERERASE", bounds, StringComparison.Ordinal);
         Assert.Contains("_resizeWorkAreaBounds", resizeGuides, StringComparison.Ordinal);
-        Assert.Contains("static glow", resizeGuides, StringComparison.Ordinal);
-        Assert.Contains("if (WindowsCompatibilityService.IsWindows11OrLater)", resizeGuides, StringComparison.Ordinal);
+        // Snap feedback is a single one-shot settle animation on every OS —
+        // no looping ambient animation may run during live resize, and no
+        // OS-specific visual branch is allowed back in.
+        Assert.DoesNotContain("RepeatBehavior.Forever", resizeGuides, StringComparison.Ordinal);
+        Assert.DoesNotContain("WindowsCompatibilityService.IsWindows11OrLater", resizeGuides, StringComparison.Ordinal);
         Assert.DoesNotContain("child.PointerPressed += ResizeBorder_PointerPressed", contentWindow, StringComparison.Ordinal);
     }
 

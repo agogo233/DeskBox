@@ -98,6 +98,7 @@ public partial class App : Application
     private DisplayAreaWatcherService? _displayAreaWatcher;
     private DisplayTopologyTransitionCoordinator? _displayTopologyTransitionCoordinator;
     private AppLifecycleRecoveryWatcher? _lifecycleRecoveryWatcher;
+    private HookHealthWatchdog? _hookHealthWatchdog;
     private EverythingSearchService? _everythingSearchService;
     private SearchEngineService? _searchEngineService;
     private FileMetaService? _fileMetaService;
@@ -124,6 +125,7 @@ public partial class App : Application
     private DateTimeOffset? _lastBareExternalActivationAtUtc;
     private readonly bool _processStartupLaunchDetected;
     private Microsoft.UI.Xaml.DispatcherTimer? _automaticBackupTimer;
+    private bool _cloudBackupUnverifiedToastShown;
 
     public static new App Current => (App)Application.Current;
 
@@ -275,6 +277,7 @@ public partial class App : Application
         DataBackupService = Services.GetRequiredService<DeskBoxDataBackupService>();
         DataBackupService.AutomaticSnapshotFallbackDetected += OnAutomaticBackupFallbackDetected;
         CloudBackupService = Services.GetRequiredService<CloudBackupService>();
+        CloudBackupService.BackupRunCompleted += OnCloudBackupRunCompleted;
         _ = LegacySearchIndexCleanupService.TryCleanup();
         AttachmentHealthService = Services.GetRequiredService<DeskBoxAttachmentHealthService>();
         DiagnosticsBundleService = Services.GetRequiredService<DeskBoxDiagnosticsBundleService>();
@@ -997,6 +1000,7 @@ public partial class App : Application
             await RunCriticalStartupStepAsync("settings-load", () => SettingsService.LoadAsync());
             RefreshAutomaticBackupOptionsFromSettings();
             SettingsService.SettingsChanged += OnBackupSettingsChanged;
+            SettingsService.SettingsChanged += OnMaterialCapabilitySettingsChanged;
             RunOptionalStartupStep("automatic-backup-timer", StartAutomaticBackupTimer);
             string requestedCornerPreference = SettingsService.Settings.WidgetCornerPreference;
             string effectiveCornerPreference =
@@ -1206,6 +1210,14 @@ RunCriticalStartupStep("widget-manager", () =>
                         titleKey,
                         bodyKey,
                         NotificationIcon.Warning)));
+            MaterialCapabilityAdvisor.Initialize(OnMaterialCapabilitySettingsChanged);
+            RunOptionalStartupStep("material-capability-advisor", () =>
+                MaterialCapabilityAdvisor.WarnIfMaterialDegraded(
+                    SettingsService.Settings.WidgetShell.WidgetMaterialType,
+                    (titleKey, bodyKey) => ShowSettingsNotification(
+                        titleKey,
+                        bodyKey,
+                        NotificationIcon.Warning)));
 
             // Configure taskbar Jump List with quick actions
             SafeFireAndForget(
@@ -1225,6 +1237,7 @@ RunCriticalStartupStep("widget-manager", () =>
             }
 
             RunOptionalStartupStep("idle-memory-maintenance", StartVisibleIdleMemoryMaintenance);
+            RunOptionalStartupStep("quiescence-working-set-trim", StartQuiescenceWorkingSetTrim);
             if (!string.IsNullOrWhiteSpace(updateInstallOutcome))
             {
                 RunOptionalStartupStep("update-install-result", () =>
@@ -1458,6 +1471,27 @@ RunCriticalStartupStep("widget-manager", () =>
         {
             Log($"[Lifecycle] Recovery watcher initialization failed: {ex.Message}");
         }
+
+        // Silent hook removal produces no message at all, so liveness needs an
+        // active probe rather than another window message.
+        if (Environment.GetEnvironmentVariable("DESKBOX_DISABLE_HOOK_WATCHDOG") is null)
+        {
+            try
+            {
+                _hookHealthWatchdog = new HookHealthWatchdog(
+                    UiDispatcherQueue,
+                    static message => Log(message));
+                _hookHealthWatchdog.Watch(() => GlobalHotkeyService);
+                _hookHealthWatchdog.Watch(() => _searchHotkeyService);
+                _hookHealthWatchdog.Watch(() => DesktopDoubleClickActivationService);
+            }
+            catch (Exception ex)
+            {
+                Log($"[Lifecycle] Hook watchdog initialization failed: {ex.Message}");
+                _hookHealthWatchdog?.Dispose();
+                _hookHealthWatchdog = null;
+            }
+        }
     }
 
     private void OnLifecycleRecoveryRequested(string reason)
@@ -1471,13 +1505,15 @@ RunCriticalStartupStep("widget-manager", () =>
         bool requiresExternalRecovery =
             reason.Contains("resume", StringComparison.OrdinalIgnoreCase) ||
             reason.Contains("session-", StringComparison.OrdinalIgnoreCase) ||
-            reason.Contains("explorer-restart", StringComparison.OrdinalIgnoreCase);
+            reason.Contains("explorer-restart", StringComparison.OrdinalIgnoreCase) ||
+            reason.Contains("display-power-on", StringComparison.OrdinalIgnoreCase);
         if (requiresExternalRecovery)
         {
             try
             {
                 GlobalHotkeyService?.RefreshRegistration();
                 DesktopDoubleClickActivationService?.RefreshRegistration();
+                _searchHotkeyService?.RefreshRegistration();
             }
             catch (Exception ex)
             {
@@ -2598,6 +2634,19 @@ RunCriticalStartupStep("widget-manager", () =>
             CloudBackupSettingsPolicy.GetOptions(SettingsService.Settings));
     }
 
+    private void OnMaterialCapabilitySettingsChanged()
+    {
+        // SettingsChanged can arrive off the UI thread and the notification
+        // callback owns UI objects, so marshal through the app dispatcher.
+        UiDispatcherQueue?.TryEnqueue(() =>
+            MaterialCapabilityAdvisor.WarnIfMaterialDegraded(
+                SettingsService.Settings.WidgetShell.WidgetMaterialType,
+                (titleKey, bodyKey) => ShowSettingsNotification(
+                    titleKey,
+                    bodyKey,
+                    NotificationIcon.Warning)));
+    }
+
     private void OnBackupSettingsChanged()
     {
         RefreshAutomaticBackupOptionsFromSettings();
@@ -2657,6 +2706,48 @@ RunCriticalStartupStep("widget-manager", () =>
         {
             Log($"[CloudBackup] Periodic upload check failed: {ex}");
         }
+    }
+
+    private void OnCloudBackupRunCompleted(CloudBackupRunCompletedInfo info)
+    {
+        if (UiDispatcherQueue is { HasThreadAccess: false } dispatcher)
+        {
+            dispatcher.TryEnqueue(() => OnCloudBackupRunCompleted(info));
+            return;
+        }
+
+        // An accepted-but-unverified upload is a degraded success, not a
+        // failure: toast at most once per session so a laggy DAV listing
+        // can't spam every interval, while a silently-dropping server still
+        // surfaces instead of hiding behind the "last success" stamp.
+        if (info is { Uploaded: true, UploadUnverified: true })
+        {
+            if (_cloudBackupUnverifiedToastShown)
+            {
+                return;
+            }
+
+            _cloudBackupUnverifiedToastShown = true;
+            ShowSettingsNotification(
+                "Settings.CloudBackup.UploadUnverified.Title",
+                "Settings.CloudBackup.UploadUnverified.Body",
+                NotificationIcon.Warning);
+            return;
+        }
+
+        // Only the FIRST failure of a scheduled streak toasts — the
+        // settings status row carries the rest, so a dead endpoint can't
+        // spam a notification on every interval tick. Manual failures are
+        // already shown by the settings page that triggered them.
+        if (info.Uploaded || !info.WasScheduled || !info.IsFirstFailureSinceSuccess)
+        {
+            return;
+        }
+
+        ShowSettingsNotification(
+            "Settings.CloudBackup.ScheduledFailure.Title",
+            "Settings.CloudBackup.ScheduledFailure.Body",
+            NotificationIcon.Warning);
     }
 
     private void OnAutomaticBackupFallbackDetected()
@@ -2877,14 +2968,8 @@ RunCriticalStartupStep("widget-manager", () =>
 
     private void SettingsWindow_ClosedForApp(object sender, WindowEventArgs args)
     {
-        // The window cancelled its own close to hide-and-reuse; the instance
-        // stays registered in _settingsWindow, so no teardown may run here.
-        if (args.Handled)
-        {
-            ScheduleBackgroundMemoryCleanup("settings-hidden");
-            return;
-        }
-
+        // Hide-and-reuse cancels at AppWindow.Closing and never reaches this
+        // event; Closed only ever runs for real destruction (shutdown).
         if (sender is SettingsWindow settingsWindow)
         {
             settingsWindow.Closed -= SettingsWindow_ClosedForApp;
@@ -3230,9 +3315,9 @@ RunCriticalStartupStep("widget-manager", () =>
                         process.PrivateMemorySize64))
                 {
                     visibleIdleTrimmed = Win32Helper.TrimWorkingSet();
+                    CompleteWorkingSetTrim(visibleIdleTrimmed, "visible-idle");
                     if (visibleIdleTrimmed)
                     {
-                        AdvanceMemoryCleanupEpoch("working-set-trim:visible-idle");
                         process.Refresh();
                     }
                 }
@@ -3392,6 +3477,7 @@ RunCriticalStartupStep("widget-manager", () =>
         if (Application.Current is App app)
         {
             app._visibleIdleMemoryTracker.Reset();
+            app.NoteQuiescenceWorkingSetTrimActivity();
         }
     }
 
@@ -4222,10 +4308,7 @@ RunCriticalStartupStep("widget-manager", () =>
               _immediateHiddenWorkingSetTrimTracker.TrimmedCurrentHiddenSession))
         {
             workingSetTrimmed = Win32Helper.TrimWorkingSet();
-            if (workingSetTrimmed)
-            {
-                AdvanceMemoryCleanupEpoch($"working-set-trim:{triggerReason}");
-            }
+            CompleteWorkingSetTrim(workingSetTrimmed, triggerReason);
         }
 
         MemoryCleanupDiagnosticSnapshot after =
@@ -4467,6 +4550,7 @@ RunCriticalStartupStep("widget-manager", () =>
     private async Task ShutdownCoreAsync()
     {
         StopVisibleIdleMemoryMaintenance();
+        StopQuiescenceWorkingSetTrim();
 
         // Stop the display area watcher FIRST, before closing any widgets,
         // so that no DisplaysChanged callback can fire during teardown
@@ -4477,6 +4561,10 @@ RunCriticalStartupStep("widget-manager", () =>
         _displayTopologyTransitionCoordinator = null;
         _lifecycleRecoveryWatcher?.Dispose();
         _lifecycleRecoveryWatcher = null;
+        // Stop probing before the hook services go away; a late recovery
+        // callback on a disposed target would be noisy and pointless.
+        _hookHealthWatchdog?.Dispose();
+        _hookHealthWatchdog = null;
 
         _diagnosticsService?.Dispose();
         _diagnosticsService = null;

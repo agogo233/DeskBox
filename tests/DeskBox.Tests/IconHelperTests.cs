@@ -49,18 +49,6 @@ public class IconHelperTests
     }
 
     [Theory]
-    [InlineData(false, true)]
-    [InlineData(true, false)]
-    public void HighResolutionShellItemPolicy_CoversOrdinaryItemsWithoutChangingShortcuts(
-        bool isShortcutPath,
-        bool expected)
-    {
-        Assert.Equal(
-            expected,
-            IconHelper.ShouldPreferHighResolutionShellItemIcon(isShortcutPath));
-    }
-
-    [Theory]
     [InlineData("game.url", true)]
     [InlineData("GAME.URL", true)]
     [InlineData("game.lnk", false)]

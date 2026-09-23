@@ -37,4 +37,19 @@ public sealed class CloudBackupSettingsSlice
 
     /// <summary>UTC ticks of the last successful upload; 0 = never.</summary>
     public long CloudBackupLastSuccessUtcTicks { get; set; }
+
+    /// <summary>
+    /// UTC ticks of the last failed upload attempt; 0 = none recorded.
+    /// Cleared on the next success and on destination change so a stale
+    /// failure never haunts an endpoint that hasn't run yet.
+    /// </summary>
+    public long CloudBackupLastFailureUtcTicks { get; set; }
+
+    /// <summary>
+    /// UTC ticks of the last upload the server accepted but whose directory
+    /// listing never confirmed; 0 = last upload verified or none yet.
+    /// Cleared on the next verified upload and on destination change —
+    /// the flag describes the newest run against the current endpoint.
+    /// </summary>
+    public long CloudBackupLastUnverifiedUtcTicks { get; set; }
 }

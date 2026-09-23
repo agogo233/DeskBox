@@ -45,6 +45,10 @@ internal static class MemoryCleanupPolicy
     /// fully away (idle contract in <see cref="IsVisibleIdleCandidate"/>) and
     /// both footprints exceed the bloat thresholds. Back-faults while anything
     /// is visible would jitter frame pacing, hence the strict presence gates.
+    /// While widgets are visible a separate quiescence path
+    /// (QuiescenceWorkingSetTrimTracker) may trim behind its own 240 MB
+    /// absolute working-set floor plus quiet-tier and blocker gates; this
+    /// policy stays the conservative channel for a user who has fully left.
     /// </summary>
     public static bool ShouldTrimVisibleIdleWorkingSet(
         MemoryCleanupActivitySnapshot snapshot,

@@ -298,6 +298,27 @@ internal static class ResilientJsonStore
         }
     }
 
+    /// <summary>
+    /// Undoes a completed commit so a composite save (layout + settings)
+    /// can leave no half-persisted pair. When the commit replaced an
+    /// existing primary, that save rotated the pre-commit bytes into
+    /// .bak — restore them. When the commit created the primary fresh,
+    /// pre-commit state is the file's absence — delete it.
+    /// </summary>
+    internal static void RevertLastCommit(
+        string storePath,
+        bool primaryExistedBeforeCommit)
+    {
+        if (primaryExistedBeforeCommit)
+        {
+            File.Copy(GetBackupPath(storePath), storePath, overwrite: true);
+        }
+        else
+        {
+            File.Delete(storePath);
+        }
+    }
+
     private static bool IsUnableToRemoveReplacedFile(IOException exception) =>
         exception.HResult == UnableToRemoveReplacedFileHResult;
 

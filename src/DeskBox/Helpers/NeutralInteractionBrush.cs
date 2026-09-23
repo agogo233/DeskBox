@@ -19,6 +19,8 @@ namespace DeskBox.Helpers;
 /// or by the app's effective theme when the caller owns no tree yet; a bare
 /// application-scope lookup would follow the system theme and invert the
 /// colors whenever the app's theme override disagrees with it.
+/// <see cref="ResolveThemedResource"/> and <see cref="IsDarkTheme"/>
+/// generalize the same resolution to any resource or painting decision.
 ///
 /// The resolved color is a snapshot: it does not follow a later theme flip,
 /// so callers that paint with it re-apply from their ActualThemeChanged
@@ -40,12 +42,25 @@ public static class NeutralInteractionBrush
         ResolveThemedBrush(LineKey, scope)?.Color ?? Colors.Transparent;
 
     /// <summary>
-    /// Resolves one of the mirrored <c>DeskBoxNeutral*</c> brushes for the
-    /// scope element's effective theme. The returned instance may be shared
-    /// (a host override or the theme dictionary's own brush), so callers must
-    /// copy the color instead of mutating it.
+    /// Effective theme for painting decisions in code: the scope element's
+    /// resolved theme, or the app's effective theme when the element is not
+    /// in a live tree yet. Never consults <see cref="Application.RequestedTheme"/>,
+    /// which stays pinned to the startup system theme.
     /// </summary>
-    public static SolidColorBrush? ResolveThemedBrush(string key, DependencyObject? scope)
+    public static bool IsDarkTheme(DependencyObject? scope) =>
+        ResolveElementTheme(scope) == ElementTheme.Dark;
+
+    /// <summary>
+    /// Resolves a themed resource — a <see cref="Brush"/>, or a
+    /// <see cref="Color"/> wrapped as a brush — for the scope element's
+    /// effective theme. Lookup order mirrors element-scope XAML resolution:
+    /// resources scoped to the element tree first, then the Light/Dark theme
+    /// dictionaries of the application and its merged dictionaries (the WinUI
+    /// dictionaries holding the system tokens live in the latter, and key
+    /// their dark values under "Default"). Returns null when the key is
+    /// absent everywhere.
+    /// </summary>
+    public static Brush? ResolveThemedResource(string key, DependencyObject? scope)
     {
         if (scope is FrameworkElement element)
         {
@@ -56,33 +71,83 @@ public static class NeutralInteractionBrush
                  current = VisualTreeHelper.GetParent(current))
             {
                 if (current is FrameworkElement candidate &&
-                    candidate.Resources.TryGetValue(key, out object? scoped) &&
-                    scoped is SolidColorBrush scopedBrush)
+                    candidate.Resources.TryGetValue(key, out object? scoped))
                 {
-                    return scopedBrush;
+                    return AsBrush(scoped);
                 }
             }
         }
 
-        string themeKey = ResolveThemeDictionaryKey(scope);
-        return Application.Current.Resources.ThemeDictionaries.TryGetValue(themeKey, out object? dictionary) &&
-            dictionary is ResourceDictionary themed &&
-            themed.TryGetValue(key, out object? value) &&
-            value is SolidColorBrush brush
-            ? brush
-            : null;
+        foreach (string themeKey in IsDarkTheme(scope)
+                     ? DarkThemeDictionaryKeys
+                     : LightThemeDictionaryKeys)
+        {
+            if (TryGetThemedDictionaryValue(
+                    Application.Current.Resources,
+                    themeKey,
+                    key,
+                    out object? value))
+            {
+                return AsBrush(value);
+            }
+        }
+
+        return null;
     }
 
     /// <summary>
-    /// Picks the application theme dictionary to read: the scope element's
-    /// resolved theme, or the theme ThemeService would apply to a window root
-    /// when the caller owns no tree yet.
+    /// Resolves one of the mirrored <c>DeskBoxNeutral*</c> brushes for the
+    /// scope element's effective theme. The returned instance may be shared
+    /// (a host override or the theme dictionary's own brush), so callers must
+    /// copy the color instead of mutating it.
     /// </summary>
-    private static string ResolveThemeDictionaryKey(DependencyObject? scope)
+    public static SolidColorBrush? ResolveThemedBrush(string key, DependencyObject? scope) =>
+        ResolveThemedResource(key, scope) as SolidColorBrush;
+
+    // XamlControlsResources carries the dark values under "Default" and has
+    // no "Dark" key; app dictionaries use explicit "Dark"/"Light" keys.
+    private static readonly string[] DarkThemeDictionaryKeys = ["Dark", "Default"];
+    private static readonly string[] LightThemeDictionaryKeys = ["Light"];
+
+    private static Brush? AsBrush(object? value) => value switch
+    {
+        Brush brush => brush,
+        Color color => new SolidColorBrush(color),
+        _ => null
+    };
+
+    private static ElementTheme ResolveElementTheme(DependencyObject? scope)
     {
         ElementTheme theme = scope is FrameworkElement element
             ? element.ActualTheme
-            : App.Current.ThemeService?.EffectiveTheme ?? ElementTheme.Light;
-        return theme == ElementTheme.Dark ? "Dark" : "Light";
+            : ElementTheme.Default;
+        return theme == ElementTheme.Default
+            ? App.Current.ThemeService?.EffectiveTheme ?? ElementTheme.Light
+            : theme;
+    }
+
+    private static bool TryGetThemedDictionaryValue(
+        ResourceDictionary dictionary,
+        string themeKey,
+        string resourceKey,
+        out object? value)
+    {
+        value = null;
+        if (dictionary.ThemeDictionaries.TryGetValue(themeKey, out object? themedObject) &&
+            themedObject is ResourceDictionary themed &&
+            themed.TryGetValue(resourceKey, out value))
+        {
+            return true;
+        }
+
+        foreach (ResourceDictionary merged in dictionary.MergedDictionaries)
+        {
+            if (TryGetThemedDictionaryValue(merged, themeKey, resourceKey, out value))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

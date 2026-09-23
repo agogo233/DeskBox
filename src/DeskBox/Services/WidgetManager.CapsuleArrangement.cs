@@ -247,9 +247,7 @@ public sealed partial class WidgetManager
             deltaX = 0;
         }
 
-        RectInt32 workArea = placement == SettingsService.WidgetCapsuleBarPlacementFloating
-            ? DisplayArea.GetFromRect(proposedActiveBounds, DisplayAreaFallback.Nearest).WorkArea
-            : session.WorkArea;
+        RectInt32 workArea = UpdateDragWorkArea(session, placement, proposedActiveBounds);
         RectInt32 groupBounds = GetUnion(session.MemberStartBounds.Values);
         deltaX = ClampGroupDelta(
             groupBounds.X,
@@ -263,7 +261,6 @@ public sealed partial class WidgetManager
             deltaY,
             workArea.Y,
             workArea.Height);
-        session.WorkArea = workArea;
 
         foreach ((string id, RectInt32 startBounds) in session.MemberStartBounds)
         {
@@ -289,6 +286,19 @@ public sealed partial class WidgetManager
         RectInt32 proposedActiveBounds,
         out RectInt32 resolvedActiveBounds)
     {
+        // Resolve the work area through the same per-frame logic as the
+        // move branch; a Floating reorder drag crossing monitors re-anchors
+        // the whole bar next to the pointer on the same frame so the drop
+        // can never fall back to a slot on the drag-start screen.
+        string placement = SettingsService.NormalizeWidgetCapsuleBarPlacement(
+            _settingsService.Settings.WidgetCapsuleBarPlacement);
+        RectInt32 previousWorkArea = session.WorkArea;
+        RectInt32 workArea = UpdateDragWorkArea(session, placement, proposedActiveBounds);
+        if (workArea != previousWorkArea)
+        {
+            ReanchorCapsuleBarToWorkArea(session, workArea, placement, proposedActiveBounds);
+        }
+
         IReadOnlyList<string> reordered = WidgetCapsuleOrderCalculator.MoveToNearestSlot(
             session.MemberOrder,
             session.MemberSlots,
@@ -323,13 +333,25 @@ public sealed partial class WidgetManager
             foreach ((string id, RectInt32 target) in arranged)
             {
                 _lastCapsuleBarBounds[id] = target;
-                if (FindLoadedWindow(id) is { IsCompactArrangementActive: true } window)
+                // The dragged capsule tracks the pointer itself; only siblings
+                // snap to their slots so it never teleports mid-drag.
+                if (!string.Equals(id, session.ActiveWidgetId, StringComparison.Ordinal) &&
+                    FindLoadedWindow(id) is { IsCompactArrangementActive: true } window)
                 {
                     window.PreviewCompactArrangement(target);
                 }
             }
 
             NoteWidgetWindowsMoved();
+        }
+
+        // Keep the active capsule under the pointer every frame. Parking it on
+        // its last slot between reorders made it visibly jump instead of drag.
+        RectInt32 tracked = ClampBoundsToRect(proposedActiveBounds, workArea);
+        if (FindLoadedWindow(session.ActiveWidgetId) is
+            { IsCompactArrangementActive: true } activeWindow)
+        {
+            activeWindow.PreviewCompactArrangement(tracked);
         }
 
         resolvedActiveBounds = _lastCapsuleBarBounds.TryGetValue(
@@ -819,6 +841,104 @@ public sealed partial class WidgetManager
         return new RectInt32(minX, minY, maxX - minX, maxY - minY);
     }
 
+    private static RectInt32 ClampBoundsToRect(RectInt32 bounds, RectInt32 workArea)
+    {
+        int width = Math.Min(Math.Max(1, bounds.Width), Math.Max(1, workArea.Width));
+        int height = Math.Min(Math.Max(1, bounds.Height), Math.Max(1, workArea.Height));
+        int maxX = workArea.X + workArea.Width - width;
+        int maxY = workArea.Y + workArea.Height - height;
+        return new RectInt32(
+            Math.Clamp(bounds.X, workArea.X, Math.Max(workArea.X, maxX)),
+            Math.Clamp(bounds.Y, workArea.Y, Math.Max(workArea.Y, maxY)),
+            width,
+            height);
+    }
+
+    // Shared by both drag branches: a Floating bar may follow the pointer
+    // across monitors mid-drag, so the tracking work area is re-resolved from
+    // the proposed bounds every frame and written back into the session;
+    // docked placements stay pinned to the monitor captured at drag start.
+    private static RectInt32 UpdateDragWorkArea(
+        CapsuleBarDragSession session,
+        string placement,
+        RectInt32 proposedActiveBounds)
+    {
+        RectInt32 workArea = placement == SettingsService.WidgetCapsuleBarPlacementFloating
+            ? DisplayArea.GetFromRect(proposedActiveBounds, DisplayAreaFallback.Nearest).WorkArea
+            : session.WorkArea;
+        session.WorkArea = workArea;
+        return workArea;
+    }
+
+    /// <summary>
+    /// Moves the whole capsule bar next to the pointer when a Floating drag
+    /// enters another monitor — the same frame, like the move branch — so the
+    /// drop lands on the pointer's screen instead of teleporting back to a
+    /// drag-start slot. Also refreshes the session's slots and anchor so
+    /// subsequent reorder math keys off the new screen.
+    /// </summary>
+    private void ReanchorCapsuleBarToWorkArea(
+        CapsuleBarDragSession session,
+        RectInt32 workArea,
+        string placement,
+        RectInt32 proposedActiveBounds)
+    {
+        RectInt32 tracked = ClampBoundsToRect(proposedActiveBounds, workArea);
+        RectInt32 activeCurrent = _lastCapsuleBarBounds.TryGetValue(
+            session.ActiveWidgetId,
+            out RectInt32 activeBounds)
+            ? activeBounds
+            : session.ActiveStartBounds;
+        var current = new Dictionary<string, RectInt32>(StringComparer.Ordinal);
+        foreach (string id in session.MemberOrder)
+        {
+            current[id] = _lastCapsuleBarBounds.TryGetValue(id, out RectInt32 bounds)
+                ? bounds
+                : session.MemberStartBounds[id];
+        }
+
+        RectInt32 groupBounds = GetUnion(current.Values);
+        int deltaX = ClampGroupDelta(
+            groupBounds.X,
+            groupBounds.Width,
+            tracked.X - activeCurrent.X,
+            workArea.X,
+            workArea.Width);
+        int deltaY = ClampGroupDelta(
+            groupBounds.Y,
+            groupBounds.Height,
+            tracked.Y - activeCurrent.Y,
+            workArea.Y,
+            workArea.Height);
+
+        foreach (string id in session.MemberOrder)
+        {
+            RectInt32 target = new RectInt32(
+                current[id].X + deltaX,
+                current[id].Y + deltaY,
+                current[id].Width,
+                current[id].Height);
+            _lastCapsuleBarBounds[id] = target;
+            // The dragged capsule keeps tracking the pointer; siblings move
+            // with the bar so the group lands together on the new monitor.
+            if (!string.Equals(id, session.ActiveWidgetId, StringComparison.Ordinal) &&
+                FindLoadedWindow(id) is { IsCompactArrangementActive: true } window)
+            {
+                window.PreviewCompactArrangement(target);
+            }
+        }
+
+        session.MemberSlots = session.MemberOrder
+            .Select(id => _lastCapsuleBarBounds[id])
+            .ToArray();
+        session.AnchorPoint = ResolveBarAnchor(
+            _lastCapsuleBarBounds[session.MemberOrder[0]],
+            session.PositionAnchor,
+            workArea,
+            placement).Point;
+        NoteWidgetWindowsMoved();
+    }
+
     private static int ClampGroupDelta(
         int groupStart,
         int groupLength,
@@ -868,11 +988,14 @@ public sealed partial class WidgetManager
         public RectInt32 WorkArea { get; set; } = workArea;
         public bool ReordersMember { get; } = reordersMember;
         public List<string> MemberOrder { get; set; } = memberOrder.ToList();
-        public IReadOnlyList<RectInt32> MemberSlots { get; } = memberOrder
+        // Both refresh when a Floating drag crosses monitors: later reorder
+        // decisions and arrangement math must key off the current screen,
+        // not the drag-start one.
+        public IReadOnlyList<RectInt32> MemberSlots { get; set; } = memberOrder
             .Select(id => memberStartBounds[id])
             .ToArray();
         public string Direction { get; } = direction;
-        public PointInt32 AnchorPoint { get; } = anchorPoint;
+        public PointInt32 AnchorPoint { get; set; } = anchorPoint;
         public string PositionAnchor { get; } = positionAnchor;
         public int Spacing { get; } = spacing;
     }

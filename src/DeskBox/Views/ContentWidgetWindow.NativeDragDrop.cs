@@ -103,6 +103,13 @@ public sealed partial class ContentWidgetWindow
                     ShouldUseNativeFileDropVisual,
                     ShouldFollowWindowsNativeFileDrop,
                     ShouldShortcutOutsideDesktopNativeFileDrop);
+                // A native drag-out that comes back to the widget currently
+                // hosted by this window must be refused (no launch, no
+                // import); the source files belong to that same widget.
+                target.SelfDragSourceWidgetProvider =
+                    () => _contentHost.CurrentContent is FileSurfaceContent file
+                        ? file.WidgetId
+                        : null;
                 target.DragEnterEvent += NativeFileDropTarget_DragEnterEvent;
                 target.DragOverEvent += NativeFileDropTarget_DragOverEvent;
                 target.DragLeaveEvent += NativeFileDropTarget_DragLeaveEvent;

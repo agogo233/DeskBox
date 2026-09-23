@@ -28,6 +28,12 @@ public sealed class PerformanceSettingsSlice
     /// <summary>Experimental working-set trim once all widget hide animations have completed.</summary>
     public bool ImmediateHiddenWorkingSetTrimEnabled { get; set; } = true;
 
+    /// <summary>
+    /// Trim the working set a few seconds after any interaction ends, even
+    /// while widgets stay visible. Gated by <see cref="IdleWorkingSetTrimEnabled"/>.
+    /// </summary>
+    public bool QuiescenceWorkingSetTrimEnabled { get; set; } = true;
+
     /// <summary>Finite delay before closing a hidden transient window such as Search.</summary>
     public int TransientWindowReleaseDelaySeconds { get; set; } = 2 * 60;
 

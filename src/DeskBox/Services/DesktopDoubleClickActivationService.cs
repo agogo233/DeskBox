@@ -7,11 +7,12 @@ using DeskBox.Platform;
 
 namespace DeskBox.Services;
 
-public sealed class DesktopDoubleClickActivationService : IDisposable
+public sealed class DesktopDoubleClickActivationService : IDisposable, IHookHealthProbeTarget
 {
     private const int StartupTimeoutMilliseconds = 1500;
     private const int StopTimeoutMilliseconds = 500;
     private const uint MouseInjectedFlag = 0x00000001;
+    private static readonly IntPtr CanaryEventTag = new(0x4442574D);
     private const int SystemMetricDoubleClickWidth = 36;
     private const int SystemMetricDoubleClickHeight = 37;
     private const int MaximumQueuedMouseDowns = 16;
@@ -35,6 +36,9 @@ public sealed class DesktopDoubleClickActivationService : IDisposable
     private long _injectedMouseDownCount;
     private long _blankMouseDownCount;
     private long _droppedMouseDownCount;
+    private long _lastCallbackTicks;
+    private long _probeCount;
+    private long _probeFailureCount;
     private int _queuedMouseDownCount;
     private int _inputDrainScheduled;
     private bool _disposed;
@@ -70,6 +74,61 @@ public sealed class DesktopDoubleClickActivationService : IDisposable
     public int LastErrorCode { get; private set; }
     public long TriggerCount => Interlocked.Read(ref _triggerCount);
     public long DispatchFailureCount => Interlocked.Read(ref _dispatchFailureCount);
+    public long ProbeCount => Interlocked.Read(ref _probeCount);
+    public long ProbeFailureCount => Interlocked.Read(ref _probeFailureCount);
+
+    /// <summary>
+    /// Environment.TickCount64 of the most recent hook-callback invocation,
+    /// or 0 if the hook has never been called. Windows silently removes
+    /// low-level hooks after repeated delivery timeouts, so callback delivery
+    /// is the only observable proof of liveness.
+    /// </summary>
+    internal long LastCallbackTicks => Volatile.Read(ref _lastCallbackTicks);
+
+    /// <summary>
+    /// Injects a tagged zero-net-movement mouse nudge and waits briefly for
+    /// the hook to echo it. False means the callback path is dead (silently
+    /// removed or starved) or input could not be injected.
+    /// </summary>
+    internal async Task<bool> ProbeAliveAsync(int echoWaitMilliseconds)
+    {
+        if (!IsActive)
+        {
+            return false;
+        }
+
+        Interlocked.Increment(ref _probeCount);
+        long before = Volatile.Read(ref _lastCallbackTicks);
+        if (!Win32Helper.TrySendTaggedMouseMoveNudge(CanaryEventTag, out int injectError))
+        {
+            LastErrorCode = injectError;
+            Interlocked.Increment(ref _probeFailureCount);
+            return false;
+        }
+
+        await Task.Delay(echoWaitMilliseconds).ConfigureAwait(false);
+        if (Volatile.Read(ref _lastCallbackTicks) != before)
+        {
+            return true;
+        }
+
+        Interlocked.Increment(ref _probeFailureCount);
+        return false;
+    }
+
+    string IHookHealthProbeTarget.ProbeName => "desktop-double-click";
+
+    bool IHookHealthProbeTarget.HookProbeWanted =>
+        _settingsService.Settings.DesktopDoubleClickEnabled && !_disposed;
+
+    bool IHookHealthProbeTarget.HookConfirmedDead => !IsActive;
+
+    long IHookHealthProbeTarget.LastHookCallbackTicks => Volatile.Read(ref _lastCallbackTicks);
+
+    Task<bool> IHookHealthProbeTarget.ProbeHookAliveAsync(int echoWaitMilliseconds) =>
+        ProbeAliveAsync(echoWaitMilliseconds);
+
+    void IHookHealthProbeTarget.RecoverHook() => RefreshRegistration();
 
     public bool TrySetEnabled(bool enabled, out int errorCode)
     {
@@ -332,6 +391,9 @@ public sealed class DesktopDoubleClickActivationService : IDisposable
 
     private IntPtr MouseHookProc(int nCode, IntPtr wParam, IntPtr lParam)
     {
+        // Any delivered callback proves the hook is still installed — Windows
+        // removes timed-out low-level hooks without notification.
+        Volatile.Write(ref _lastCallbackTicks, Environment.TickCount64);
         IntPtr hookHandle;
         long generation;
         lock (_sync)

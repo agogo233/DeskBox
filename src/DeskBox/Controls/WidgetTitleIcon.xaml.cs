@@ -391,15 +391,7 @@ public sealed partial class WidgetTitleIcon : UserControl
         LabelElement.Visibility = Visibility.Visible;
     }
 
-    private bool IsDarkTheme()
-    {
-        return ActualTheme switch
-        {
-            ElementTheme.Dark => true,
-            ElementTheme.Light => false,
-            _ => Application.Current.RequestedTheme == ApplicationTheme.Dark
-        };
-    }
+    private bool IsDarkTheme() => NeutralInteractionBrush.IsDarkTheme(this);
 
     private static string CreateShortLabel(string? text)
     {

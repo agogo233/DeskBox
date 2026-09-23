@@ -1,5 +1,117 @@
 # Changelog
 
+## 1.5.5 - 2026-09-22
+
+### English
+
+#### New features
+
+- Cloud backup to your own server. Settings → Maintenance gains a cloud-backup page supporting WebDAV: pick the data domains to back up (todo, quick capture, widget style), set the interval and retention count, and store the password in Windows Credential Manager. "Test connection" validates the credentials you just typed, backups can run on demand, and remote snapshots are listed for browsing and restoring.
+- Scoped restore. Pick which data domains come back and choose merge — newer entries win, nothing on this device is deleted — or a full snapshot-faithful restore. The confirmation dialog shows per-domain item counts; restores stage and validate first, then apply on the next launch with a pre-restore safety archive pinned.
+- Hotkeys now self-heal. Windows can silently strip low-level hooks under memory pressure or timeouts, leaving the global hotkey, search hotkey, or desktop double-click activation dead until restart. A health watchdog now detects this and re-registers the hook automatically.
+- New "Trim memory when idle" performance option returns memory after a few seconds of true quiet, not only when everything is hidden — guarded by working-set floors and ambient-animation awareness.
+- New window-shadow toggle in Appearance settings, applied system-wide with write-back verification and searchable in settings.
+- Storage-root migration is now interactive: a progress dialog you can cancel, with per-file retry / skip / apply-to-all when something fails, and skipped files can be migrated later.
+- Compact widgets can override the expansion direction per widget (auto / down / up) from the collapse menu, and capsule bars can be reordered by dragging — including across monitors.
+
+#### Drag and drop
+
+- Drags out of widgets now carry the same native Shell data object Explorer uses. Copy-only drop targets that used to reject DeskBox drags — Chromium/Electron apps such as VS Code and browsers, WM_DROPFILES-era programs, and WinForms — now accept them. Same-volume drops default to move, cross-volume to copy, and Ctrl/Shift/Alt modifiers behave as expected on Windows 11; Windows 10 keeps the single-move behavior without prompting.
+- Cross-volume transfers now go through the system file-operation engine with native progress, cancellation, and conflict dialogs, fixing the cross-volume import that completed with "0 items" on Native AOT builds. Same-volume moves keep the existing fast path.
+- Aborted transfers clean up only the objects the operation itself created, so files that appeared in the destination mid-copy or pre-existing folders are never swept away; transfer errors now distinguish "file in use" from "access denied".
+
+#### Interface
+
+- Snap alignment feedback while resizing or dragging widgets is now a crisp accent edge band that settles once — the old looping breathing glow is gone, and the band dissolves cleanly around rounded corners.
+- New widget groups now default to the tab navigation style.
+- A one-time hint now explains when Mica/Acrylic materials fall back to a solid color because Windows transparency effects or battery saver turned them off — including the moment they are switched off mid-session.
+- The settings window no longer freezes on the theme it had when it was closed: after being closed (hidden) and reopened it follows the system light/dark switch again.
+- The in-app feedback dialog no longer gets stuck on "Submitting…" after a network timeout, keeps error text visible after a success, and disables the submit button properly while rate-limited; a "send another" button follows a successful submission.
+- Widget folder-conflict messages now say exactly how two folders conflict (identical, nested inside, or containing) and name the other widget with its full path.
+
+#### Performance and memory
+
+- Idle z-order normalization now reorders widgets as a peer group instead of flattening them to the desktop bottom, reducing visible reordering flicker.
+- Memory cleanup is better coordinated: immediate-hidden and idle trims no longer race each other.
+- Entering a widget with a foreign drag skips a cross-process format query that could never succeed, so drag-over feels snappier.
+
+#### Fixes
+
+- Native AOT builds: the cloud-backup page no longer crashes with "Specified cast is not valid" when reading the password box (real WebDAV user report).
+- Shortcut icons: shortcuts created by alt-dragging keep the target's own icon instead of DeskBox's, and arrow-overlaid shortcut icons render through a high-resolution compositing channel instead of pre-scaled 32/48 px bitmaps — blurry shortcut arrows at large sizes are fixed.
+- Creating or renaming a widget is no longer blocked by a folder left behind by a closed same-named widget: the empty widget adopts the leftover folder and its contents.
+- Migration rollback failures are no longer silent: a dedicated dialog lists the stranded folders with their widget names and offers retry, and partial cleanups keep their remaining list instead of claiming success.
+- The migration dialog no longer loops forever when "apply to all" meets a locked file, and no longer waits forever for a decision after the dialog has been closed.
+- Files without an association open through DeskBox's own picker, which reports honestly — the shell picker reported success even when it was cancelled — and a "recommended" handler is no longer mistaken for the default association.
+- Cloud backups no longer include todo and quick-capture attachments (a single large attachment used to inflate the whole upload), and restores never delete local attachments.
+- Merge restores no longer resurrect entries you deleted on this device: quick capture and todo deletions now leave tombstones that keep cloud snapshots from bringing them back.
+- A backup the server accepted but never listed is no longer mistaken for a plain success or a failure — it is stamped "awaiting server confirmation" in the backup status and notified once, so a laggy WebDAV listing cannot hide a silently-dropped snapshot.
+- Restored todo widgets adopt their orphaned on-disk store instead of starting empty, and manual widget ordering survives restore and rearrange flows more reliably.
+- Restore packages are now validated against the bytes actually extracted — per-file and total caps enforced on the real stream — instead of trusting sizes declared inside the archive.
+
+#### Reliability and upgrades
+
+- The device-local widget layout moved into its own widget-layout.json file: it is adopted from settings.json on the first launch after updating, corrupt files are quarantined with .bak recovery instead of being treated as empty, and it stays out of cloud backups so restoring styles on another device never overwrites this device's layout.
+- Layout files that parse but are not layout documents (an empty object or a null layout) are treated as corrupt instead of wiping the desktop.
+- Layout and settings are now committed as a pair with rollback — a crash mid-save can no longer leave the two files describing different states. Widget-style restore became a journaled two-phase commit with crash recovery, and layout files written by a newer schema version fail honestly instead of pretending to save.
+- Backup snapshots and settings saves share a write gate, so a backup can no longer capture a torn half-saved pair; pre-restore safety archives are pinned to their pending restore so retries don't stack or evict them, and pending-restore markers retry only a bounded number of times.
+- Folder adoption resolves junctions and symbolic links before checking ownership, so aliased directories cannot bypass the takeover guards.
+
+### 中文
+
+#### 新功能
+
+- 云备份上线：设置 → 维护新增云备份页，支持 WebDAV。可选要备份的数据域（待办、随记、格子样式），自定义备份频率与保留份数，密码保存在 Windows 凭据管理器中。"测试连接"会直接校验刚输入的凭据，支持立即备份，并可浏览远端快照清单进行还原。
+- 域作用域还原：可选回哪些数据域，并选择"合并"（新者胜出、不删除本机数据）或"完全恢复"（严格按快照还原）。确认对话框会显示每个域的条目数；还原先暂存校验，下次启动时安全应用，且先固定一份还原前安全归档。
+- 热键自愈。Windows 在内存压力或超时下会静默摘除低级钩子，让全局热键、搜索热键或桌面双击激活一直失灵到重启为止。现在有健康 watchdog 自动检测并重新注册钩子。
+- 新增"空闲时修剪内存"性能选项：格子真正静默几秒后即可向系统归还内存，不再要求全部隐藏——带工作集下限与常驻动画感知保护。
+- 外观设置新增窗口阴影开关：系统级写入并读回校验，可在设置中搜索到。
+- 收纳根迁移改为交互式：带进度的对话框、可取消，单文件失败可逐项选择重试/跳过/应用到全部，跳过的文件事后可补迁移。
+- 紧凑格子可在收起菜单中单独覆盖展开方向（自动/向下/向上），胶囊条支持拖拽重排——包括跨显示器。
+
+#### 拖拽
+
+- 从格子拖出文件现在携带与 Explorer 同源的原生 Shell 数据对象。此前拒绝 DeskBox 拖放的仅复制型目标——VS Code、浏览器等 Chromium/Electron 应用、WM_DROPFILES 时代的老程序、WinForms——现在都能接受。同盘默认移动、跨盘默认复制，Win11 上 Ctrl/Shift/Alt 修饰键符合预期；Win10 保持单一移动语义、不再弹选择框。
+- 跨盘传输改走系统文件操作引擎，获得原生进度、取消与冲突对话框——修复了 Native AOT 版跨盘导入以"0 items"空完成的问题。同盘移动保留原有快速路径。
+- 中止的传输只清理本次操作自己创建的对象——复制中途外部丢进目标树的文件、操作前就存在的文件夹不会被误删；传输报错区分"文件被占用"与"拒绝访问"。
+
+#### 界面
+
+- 调整或拖动格子时的对齐吸附反馈改为锐利的 accent 边缘光带，落定一次后稳定常亮——移除了旧的循环呼吸辉光，光带在圆角处自然消融。
+- 新建格子组默认使用标签页导航样式。
+- 当 Windows 透明效果或省电模式导致 Mica/亚克力材质降级为实色时，会给出一次性提示说明原因——包括会话中途被关掉的瞬间。
+- 设置窗口不再冻结在关闭时的主题：关闭（实为隐藏）再重新打开后，恢复跟随系统明暗切换。
+- 应用内反馈弹窗不再在网络超时后卡在"提交中…"，错误提示在成功提交后仍可见，限流期间正确禁用提交按钮；提交成功后新增"再提交一条"按钮。
+- 格子文件夹冲突提示现在说清两个文件夹如何冲突（相同/包含于/包含对方），并显示对方格子名称与完整路径。
+
+#### 性能与内存
+
+- 空闲 Z 序归一化改为按同级窗口组重排，不再一股脑压到桌面底层，减少可见的重排闪烁。
+- 内存清理协调性更好：隐藏立即修剪与静默修剪不再相互竞争。
+- 外来拖入格子时跳过一次注定失败的跨进程格式查询，拖拽悬停响应更干脆。
+
+#### 修复
+
+- Native AOT 版：云备份页读取密码框不再崩溃（"Specified cast is not valid"，来自真实 WebDAV 用户反馈）。
+- 快捷方式图标：Alt 拖拽创建的快捷方式保留目标自身的图标而不再错误使用 DeskBox 图标；带箭头的快捷方式图标改走高分辨率合成通道，不再是预缩放的 32/48px 位图——大尺寸下快捷方式箭头模糊的问题已修复。
+- 新建或重命名格子不再被已关闭的同名格子残留的文件夹堵死：空格子会接管残留文件夹及其内容。
+- 迁移回滚失败不再静默：专用对话框列出搁浅文件夹及其所属格子并提供重试；部分清理会保留剩余清单，不再谎报成功。
+- 迁移对话框不再在"应用到全部"遇到被锁文件时无限循环，也不再在对话框关闭后永久等待用户决定。
+- 无关联文件改用 DeskBox 自有的打开方式选择器并如实报告结果（系统选择器被取消也会伪装成成功），且不再把"推荐处理器"误判为默认关联。
+- 云备份不再包含待办与随记的附件（单个大附件原先会撑大整包上传），还原也不会删除本机附件。
+- 合并还原不再复活本机已删除的条目：随记和待办的删除现在会留下墓碑，云快照不会再把它们带回来。
+- 服务器已接收但迟迟未列入目录的备份不再被误当作普通成功或失败——备份状态会标注"等待服务器确认"并通知一次，列表延迟的 WebDAV 无法掩盖悄悄丢失的快照。
+- 还原的待办格子会收编磁盘上的孤儿数据存储，不再从空白开始；手动排序在还原和重排流程中更可靠地保留。
+- 还原包校验改为按实际解出的字节数执行——单文件与总量上限作用于真实数据流——不再采信归档内部声明的大小。
+
+#### 可靠性与升级
+
+- 设备本地格子布局拆分为独立的 widget-layout.json：升级后首次启动自动从 settings.json 收养；损坏文件会被隔离取证并回退 .bak，不再被当作空布局；且不进云备份域——在另一台设备还原样式不会覆盖本机布局。
+- 能解析但不是布局文档的文件（空对象或 null 布局）按损坏处理，不再清空桌面。
+- 布局与设置成对提交、任一失败即回滚——保存中途崩溃不再留下两个文件指向不同状态的半提交对。格子样式还原改为日志化两段提交并支持崩溃恢复；更新版本写入的布局文件会如实保存失败，不再假报成功。
+- 备份快照与设置保存共用写入门，备份不再拍到撕裂的半保存对；还原前安全归档固定到其待还原事务，重试不会叠加或挤掉它；待还原标记的重试次数有上限。
+- 文件夹接管前先解析 junction 与符号链接，别名目录无法绕过接管守卫。
+
 ## 1.5.4 - 2026-09-18
 
 ### English

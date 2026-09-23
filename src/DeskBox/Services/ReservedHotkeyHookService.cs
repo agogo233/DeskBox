@@ -38,6 +38,9 @@ internal sealed class ReservedHotkeyHookService : IDisposable
     private long _postFailureCount;
     private long _inputFailureCount;
     private long _lifecycleGeneration;
+    private long _lastCallbackTicks;
+    private long _probeCount;
+    private long _probeFailureCount;
     private ReservedHotkeyMode _mode = ReservedHotkeyMode.WinSpace;
     private bool _disposed;
 
@@ -72,6 +75,51 @@ internal sealed class ReservedHotkeyHookService : IDisposable
     public long TriggerCount => Interlocked.Read(ref _triggerCount);
     public long PostFailureCount => Interlocked.Read(ref _postFailureCount);
     public long InputFailureCount => Interlocked.Read(ref _inputFailureCount);
+    public long ProbeCount => Interlocked.Read(ref _probeCount);
+    public long ProbeFailureCount => Interlocked.Read(ref _probeFailureCount);
+
+    /// <summary>
+    /// Environment.TickCount64 of the most recent hook-callback invocation,
+    /// or 0 if the hook has never been called. Windows silently removes
+    /// low-level hooks after repeated delivery timeouts without telling the
+    /// process, so liveness can only be proven by observing a callback.
+    /// </summary>
+    internal long LastCallbackTicks => Volatile.Read(ref _lastCallbackTicks);
+
+    /// <summary>
+    /// Injects a tagged synthetic key press and waits briefly for the hook to
+    /// echo it. True when any callback ran within the window; false means the
+    /// callback path is dead (silently removed or starved) or input could not
+    /// even be injected.
+    /// </summary>
+    internal async Task<bool> ProbeAliveAsync(int echoWaitMilliseconds)
+    {
+        if (!IsActive)
+        {
+            return false;
+        }
+
+        Interlocked.Increment(ref _probeCount);
+        long before = Volatile.Read(ref _lastCallbackTicks);
+        if (!Win32Helper.TrySendTaggedKeyPress(
+                InternalMaskVirtualKey,
+                InjectedEventTag,
+                out int injectError))
+        {
+            Volatile.Write(ref _lastErrorCode, injectError);
+            Interlocked.Increment(ref _probeFailureCount);
+            return false;
+        }
+
+        await Task.Delay(echoWaitMilliseconds).ConfigureAwait(false);
+        if (Volatile.Read(ref _lastCallbackTicks) != before)
+        {
+            return true;
+        }
+
+        Interlocked.Increment(ref _probeFailureCount);
+        return false;
+    }
 
     internal static bool IsInternalMaskKey(int virtualKey)
     {
@@ -363,6 +411,9 @@ internal sealed class ReservedHotkeyHookService : IDisposable
 
     private IntPtr KeyboardHookProc(int nCode, IntPtr wParam, IntPtr lParam)
     {
+        // A delivered callback is the only observable proof the hook is still
+        // installed; Windows removes timed-out hooks without notification.
+        Volatile.Write(ref _lastCallbackTicks, Environment.TickCount64);
         IntPtr hookHandle;
         IntPtr notificationWindow;
         uint notificationMessage;

@@ -749,6 +749,14 @@ public sealed partial class WidgetShell : UserControl
         OutgoingContentPresenter.Content is not null ||
         _groupDropBreathingAnimation is not null;
 
+    // Looping ambient decoration (compact marquee, vinyl rotation) is
+    // steady-state, not transient work — it is excluded from
+    // HasActiveVisualWork on purpose, and the quiescence trim only
+    // lengthens its required quiet period in response.
+    internal bool HasAmbientVisualWork =>
+        _compactMarqueeStoryboard is not null ||
+        _compactVinylRotationStoryboard is not null;
+
     public bool HasWidgetGroup => _groupPresentation is not null;
 
     internal void SetGroupTitleForegroundColors(Color primary, Color secondary, Color disabled, bool highContrast) =>
@@ -3102,8 +3110,7 @@ public sealed partial class WidgetShell : UserControl
     // scrim in light theme.
     private void ApplyFullBleedOverlayTheme()
     {
-        bool isDark = ActualTheme == ElementTheme.Dark ||
-            (ActualTheme == ElementTheme.Default && Application.Current.RequestedTheme == ApplicationTheme.Dark);
+        bool isDark = NeutralInteractionBrush.IsDarkTheme(this);
 
         byte channel = isDark ? (byte)0x00 : (byte)0xFF;
         bool useUniformOverlay = _compactPresentation?.UseUniformFullBleedOverlay == true;
@@ -3832,6 +3839,13 @@ public sealed partial class WidgetShell : UserControl
         var transform = new TranslateTransform();
         marquee.Track.RenderTransform = transform;
         double distance = marquee.NaturalWidth + CompactMarqueeGap;
+        // Grid children can never exceed the track's arrange slot: a
+        // viewport-sized track would clip the primary to the visible
+        // width and collapse the offset clone to zero, so the marquee
+        // would only ever show the first part of the text. The track
+        // must span both copies; the viewport clip does the cropping.
+        marquee.Track.HorizontalAlignment = HorizontalAlignment.Left;
+        marquee.Track.Width = distance + marquee.NaturalWidth;
         TimeSpan startDelay = TimeSpan.FromMilliseconds(CompactMarqueeStartDelayMs);
         TimeSpan travelDuration = TimeSpan.FromSeconds(
             distance / CompactMarqueeSpeedPixelsPerSecond);
@@ -4002,6 +4016,8 @@ public sealed partial class WidgetShell : UserControl
         if (_compactMarqueeTrack is not null)
         {
             _compactMarqueeTrack.RenderTransform = null;
+            _compactMarqueeTrack.ClearValue(WidthProperty);
+            _compactMarqueeTrack.HorizontalAlignment = HorizontalAlignment.Stretch;
         }
         if (_compactMarqueePrimary is not null && _compactMarqueeViewport is not null)
         {
@@ -4966,35 +4982,16 @@ public sealed partial class WidgetShell : UserControl
 
     private Brush CreateOpaqueOverlayButtonBackground()
     {
-        bool isDark = ActualTheme == ElementTheme.Dark ||
-            ActualTheme == ElementTheme.Default && Application.Current.RequestedTheme == ApplicationTheme.Dark;
-        return SharedBrushCache.GetOrCreate(isDark
+        return SharedBrushCache.GetOrCreate(NeutralInteractionBrush.IsDarkTheme(this)
             ? Color.FromArgb(0xFF, 0x2C, 0x2F, 0x36)
             : Color.FromArgb(0xFF, 0xFF, 0xFF, 0xFF));
     }
 
     private Brush CreateOpaqueOverlayButtonBorder()
     {
-        bool isDark = ActualTheme == ElementTheme.Dark ||
-            ActualTheme == ElementTheme.Default && Application.Current.RequestedTheme == ApplicationTheme.Dark;
-        return SharedBrushCache.GetOrCreate(isDark
+        return SharedBrushCache.GetOrCreate(NeutralInteractionBrush.IsDarkTheme(this)
             ? Color.FromArgb(0x52, 0xFF, 0xFF, 0xFF)
             : Color.FromArgb(0x2E, 0x00, 0x00, 0x00));
-    }
-
-    private static Brush GetBrushResourceOrFallback(string resourceKey, Color fallbackColor)
-    {
-        if (Application.Current.Resources.TryGetValue(resourceKey, out object? resource))
-        {
-            return resource switch
-            {
-                Brush brush => brush,
-                Color color => new SolidColorBrush(color),
-                _ => new SolidColorBrush(fallbackColor)
-            };
-        }
-
-        return new SolidColorBrush(fallbackColor);
     }
 
     private void UpdateTitleEditorVisibility()

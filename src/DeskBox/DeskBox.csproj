@@ -296,18 +296,18 @@
       <CopyToPublishDirectory>Always</CopyToPublishDirectory>
     </Content>
     <EmbeddedResource Include="Assets\Cities\cities.json" />
-<EmbeddedResource Include="Strings\zh-CN.json" />
-<EmbeddedResource Include="Strings\zh-TW.json" />
-<EmbeddedResource Include="Strings\en-US.json" />
-<EmbeddedResource Include="Strings\ja-JP.json" />
-<EmbeddedResource Include="Strings\de-DE.json" />
-<EmbeddedResource Include="Strings\pt-BR.json" />
-<EmbeddedResource Include="Strings\hi-IN.json" />
-<EmbeddedResource Include="Strings\es-ES.json" />
-<EmbeddedResource Include="Strings\fr-FR.json" />
-<EmbeddedResource Include="Strings\ar-SA.json" />
-<EmbeddedResource Include="Strings\bn-BD.json" />
-<EmbeddedResource Include="Strings\ru-RU.json" />
+    <EmbeddedResource Include="Strings\zh-CN.json" />
+    <EmbeddedResource Include="Strings\zh-TW.json" />
+    <EmbeddedResource Include="Strings\en-US.json" />
+    <EmbeddedResource Include="Strings\ja-JP.json" />
+    <EmbeddedResource Include="Strings\de-DE.json" />
+    <EmbeddedResource Include="Strings\pt-BR.json" />
+    <EmbeddedResource Include="Strings\hi-IN.json" />
+    <EmbeddedResource Include="Strings\es-ES.json" />
+    <EmbeddedResource Include="Strings\fr-FR.json" />
+    <EmbeddedResource Include="Strings\ar-SA.json" />
+    <EmbeddedResource Include="Strings\bn-BD.json" />
+    <EmbeddedResource Include="Strings\ru-RU.json" />
   </ItemGroup>
 
   <ItemGroup>

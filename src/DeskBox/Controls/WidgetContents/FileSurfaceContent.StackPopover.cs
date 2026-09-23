@@ -1835,9 +1835,7 @@ public sealed partial class FileSurfaceContent
     }
 
     private bool IsStackPopoverDarkTheme() =>
-        ActualTheme == ElementTheme.Dark ||
-        ActualTheme == ElementTheme.Default &&
-        Application.Current?.RequestedTheme == ApplicationTheme.Dark;
+        NeutralInteractionBrush.IsDarkTheme(this);
 
     private int _stackPopoverAppearanceSignature;
 

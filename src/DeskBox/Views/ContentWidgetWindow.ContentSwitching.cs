@@ -1,5 +1,6 @@
 using DeskBox.Contracts;
 using DeskBox.Controls;
+using DeskBox.Controls.WidgetContents;
 using DeskBox.Models;
 using DeskBox.Services;
 
@@ -10,6 +11,9 @@ public sealed partial class ContentWidgetWindow
     internal int LiveMemberCount => _contentHost.LiveContentCount;
 
     internal int CachedGroupContentCount => _cachedGroupContents.Count;
+
+    internal IEnumerable<WidgetKind> CachedGroupContentKinds =>
+        _cachedGroupContents.Values.Select(content => content.WidgetKind);
 
     internal bool HasPresentableContentFrame =>
         ContentWidgetShell.HasPresentableContentFrame;
@@ -77,9 +81,7 @@ public sealed partial class ContentWidgetWindow
         _descriptor = descriptor;
         Diagnostics.SetWidgetContext(config);
         _titleViewModel.SetConfig(config);
-        ContentWidgetShell.TitleGlyph = descriptor.DefaultGlyph;
-        ContentWidgetShell.TitleIconKind =
-            WidgetTitleIconKindNames.FromWidgetKind(config.WidgetKind);
+        ApplyTitleIdentity(config, descriptor, content);
         AttachCompactPresentationSource(content);
         AttachFeedbackSource(content);
         AttachHostContextMenuSource(content);
@@ -92,6 +94,26 @@ public sealed partial class ContentWidgetWindow
             animateGroupIdentity,
             origin,
             forward);
+    }
+
+    private void ApplyTitleIdentity(
+        WidgetConfig config,
+        WidgetContentDescriptor descriptor,
+        IWidgetContent? content)
+    {
+        // File widgets own their managed/mapped identity in the view model so
+        // runtime remapping and group switches stay consistent; every other
+        // kind keeps the descriptor defaults.
+        if (content is FileSurfaceContent fileSurface)
+        {
+            ContentWidgetShell.TitleGlyph = fileSurface.ViewModel.IconGlyph;
+            ContentWidgetShell.TitleIconKind = fileSurface.ViewModel.TitleIconKind;
+            return;
+        }
+
+        ContentWidgetShell.TitleGlyph = descriptor.DefaultGlyph;
+        ContentWidgetShell.TitleIconKind =
+            WidgetTitleIconKindNames.FromWidgetKind(config.WidgetKind);
     }
 
     internal IWidgetContent? TakeCachedGroupContent(string widgetId)

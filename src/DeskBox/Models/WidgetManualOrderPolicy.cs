@@ -2,8 +2,12 @@ namespace DeskBox.Models;
 
 /// <summary>
 /// Reconciles a complete folder snapshot with the user's manual item order.
-/// The live order wins during a running session; the persisted order is used
-/// when a widget is cold-started and has no live items yet.
+/// The live order wins during a running session, but only for paths that
+/// survive in this snapshot: after embedded folder navigation the live
+/// collection still holds the folder just left, so its foreign paths must
+/// not outrank the persisted order for the folder being loaded. The
+/// persisted order is the fallback when no live path applies — cold start
+/// or a folder switch.
 /// </summary>
 internal static class WidgetManualOrderPolicy
 {
@@ -18,8 +22,22 @@ internal static class WidgetManualOrderPolicy
         ArgumentNullException.ThrowIfNull(persistedItems);
         ArgumentNullException.ThrowIfNull(pathSelector);
 
-        IReadOnlyList<string> baseline = liveOrderPaths.Count > 0
-            ? liveOrderPaths
+        var refreshedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (T refreshedItem in refreshedItems)
+        {
+            string? path = pathSelector(refreshedItem);
+            if (!string.IsNullOrWhiteSpace(path))
+            {
+                refreshedPaths.Add(path);
+            }
+        }
+
+        List<string> liveBaseline = liveOrderPaths
+            .Where(refreshedPaths.Contains)
+            .ToList();
+
+        IReadOnlyList<string> baseline = liveBaseline.Count > 0
+            ? liveBaseline
             : persistedItems
                 .Where(item => !string.IsNullOrWhiteSpace(item.Path))
                 .OrderBy(item => item.SortOrder)

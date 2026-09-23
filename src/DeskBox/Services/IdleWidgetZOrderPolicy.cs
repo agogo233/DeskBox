@@ -27,4 +27,27 @@ internal static class IdleWidgetZOrderPolicy
             .ThenBy(candidate => candidate.StableKey, StringComparer.Ordinal)
             .ToList();
     }
+
+    /// <summary>
+    /// The idle peer order only exists to keep an upper widget's drop shadow
+    /// off the widget below it. When Windows drop shadows are disabled the
+    /// normalization has no visual purpose and every applied reorder is pure
+    /// repaint churn.
+    /// </summary>
+    public static bool ShouldNormalizeIdlePeerOrder(bool windowDropShadowEnabled) =>
+        windowDropShadowEnabled;
+
+    /// <summary>
+    /// Reports whether the HWND z-order already matches the requested peer
+    /// order: no requested peer may sit above the requested highest handle,
+    /// and walking down from it must encounter the requested peers in order.
+    /// </summary>
+    public static bool MatchesRequestedOrder(
+        IReadOnlyList<IntPtr> requestedHighestToLowest,
+        IReadOnlyList<IntPtr> peersObservedAboveHighest,
+        IReadOnlyList<IntPtr> peersObservedFromHighestDown)
+    {
+        return peersObservedAboveHighest.Count == 0 &&
+               peersObservedFromHighestDown.SequenceEqual(requestedHighestToLowest);
+    }
 }

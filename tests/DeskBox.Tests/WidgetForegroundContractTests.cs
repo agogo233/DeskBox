@@ -147,12 +147,24 @@ public sealed class WidgetForegroundContractTests
             "src/DeskBox/Views/QuickCaptureWidgetWindow.Items.cs");
         string todo = Read(
             "src/DeskBox/Controls/WidgetContents/TodoWidgetContent.EditingAndUndo.cs");
+        string neutralBrush = Read("src/DeskBox/Helpers/NeutralInteractionBrush.cs");
 
         Assert.Contains("_contentForeground = Foreground ??", markdown, StringComparison.Ordinal);
-        Assert.Contains("element.Resources.TryGetValue(key", markdown, StringComparison.Ordinal);
+        Assert.Contains(
+            "NeutralInteractionBrush.ResolveThemedResource",
+            markdown,
+            StringComparison.Ordinal);
         Assert.Contains("ApplyStackPopoverForegroundResources(content)", stackPopover, StringComparison.Ordinal);
-        Assert.Contains("RootGrid.Resources.TryGetValue(resourceKey", quickCapture, StringComparison.Ordinal);
-        Assert.Contains("element.Resources.TryGetValue(resourceKey", todo, StringComparison.Ordinal);
+        Assert.Contains(
+            "NeutralInteractionBrush.ResolveThemedResource",
+            quickCapture,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "NeutralInteractionBrush.ResolveThemedResource",
+            todo,
+            StringComparison.Ordinal);
+        Assert.Contains("VisualTreeHelper.GetParent(current)", neutralBrush, StringComparison.Ordinal);
+        Assert.Contains("candidate.Resources.TryGetValue(key", neutralBrush, StringComparison.Ordinal);
     }
 
     private static string Read(string relativePath) =>

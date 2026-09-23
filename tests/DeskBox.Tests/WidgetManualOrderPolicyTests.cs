@@ -45,6 +45,49 @@ public sealed class WidgetManualOrderPolicyTests
     }
 
     [Fact]
+    public void ForeignLiveOrder_fallsBackToPersistedOrder()
+    {
+        // After navigating into a subfolder the live collection still holds
+        // that folder's contents; when the mapped root reloads those foreign
+        // paths must not outrank the persisted manual order.
+        string[] snapshot = ["C", "A", "D", "B"];
+        WidgetItemConfig[] persisted =
+        [
+            new() { Path = "B", SortOrder = 0 },
+            new() { Path = "A", SortOrder = 1 },
+            new() { Path = "C", SortOrder = 2 }
+        ];
+
+        IReadOnlyList<string> result = WidgetManualOrderPolicy.Reconcile(
+            snapshot,
+            liveOrderPaths: [@"Sub\X", @"Sub\Y"],
+            persisted,
+            path => path);
+
+        Assert.Equal(["B", "A", "C", "D"], result);
+    }
+
+    [Fact]
+    public void PartiallyMatchingLiveOrder_keepsLiveRank_forSurvivingItems()
+    {
+        string[] snapshot = ["A", "B", "C", "D"];
+        WidgetItemConfig[] persisted =
+        [
+            new() { Path = "A", SortOrder = 0 },
+            new() { Path = "B", SortOrder = 1 },
+            new() { Path = "C", SortOrder = 2 }
+        ];
+
+        IReadOnlyList<string> result = WidgetManualOrderPolicy.Reconcile(
+            snapshot,
+            liveOrderPaths: ["C", "A", @"Other\Gone"],
+            persisted,
+            path => path);
+
+        Assert.Equal(["C", "A", "B", "D"], result);
+    }
+
+    [Fact]
     public void MissingAndDuplicatePaths_areRemoved_withoutDisturbingKnownOrder()
     {
         string[] snapshot = ["B", "B", "C"];

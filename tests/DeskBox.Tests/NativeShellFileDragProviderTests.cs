@@ -172,7 +172,7 @@ public sealed class NativeShellFileDragProviderTests
     }
 
     [Fact]
-    public void DragPackage_ReplacesIncompleteStorageItemsWithOneNativeSelection()
+    public void DragPackage_UsesNativeShellForRegularFilesWithoutBroker()
     {
         string tempDirectory = Path.Combine(
             Path.GetTempPath(),
@@ -206,7 +206,7 @@ public sealed class NativeShellFileDragProviderTests
             Assert.True(prepared);
             Assert.True(result.UsesNativeShellDataObject);
             Assert.True(result.HasStorageItems);
-            Assert.Equal(1, brokerCallCount);
+            Assert.Equal(0, brokerCallCount);
             Assert.Equal(2, result.SourcePaths.Count);
             Assert.Contains(
                 StandardDataFormats.StorageItems,

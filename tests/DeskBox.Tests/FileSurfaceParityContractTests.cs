@@ -277,31 +277,40 @@ public sealed class FileSurfaceParityContractTests
     }
 
     [Fact]
-    public void NativeAotInteractiveCrossVolumeMoves_BypassLegacyShellMove()
+    public void NativeAotInteractiveRouting_ShellOwnsCrossVolumeMovesAndCopies()
     {
         string source = File.ReadAllText(Path.Combine(
             FindRepositoryRoot(),
             "src/DeskBox/Services/FileService.cs"));
         int aotBranch = source.IndexOf(
-            "// The staged Native AOT profile",
+            "// The Native AOT profile keeps the legacy SHFileOperation bridge",
             StringComparison.Ordinal);
-        int volumeGuard = source.IndexOf(
+        Assert.True(aotBranch >= 0, "The Native AOT interactive branch was removed.");
+        int branchEnd = source.IndexOf("#endif", aotBranch, StringComparison.Ordinal);
+        Assert.True(branchEnd > aotBranch);
+        string branch = source[aotBranch..branchEnd];
+        int volumeGuard = branch.IndexOf(
             "CanUseLegacyShellMove(",
-            aotBranch,
             StringComparison.Ordinal);
-        int shellMove = source.IndexOf(
+        int shellMove = branch.IndexOf(
             "ExecuteShellMovePlanAsync(",
-            volumeGuard,
             StringComparison.Ordinal);
-        int fallbackLog = source.IndexOf(
-            "Legacy Shell move bypassed because one or",
-            shellMove,
+        int modernEngine = branch.IndexOf(
+            "ExecuteModernShellTransferPlanAsync(",
             StringComparison.Ordinal);
 
-        Assert.True(aotBranch >= 0);
-        Assert.True(volumeGuard > aotBranch);
-        Assert.True(shellMove > volumeGuard);
-        Assert.True(fallbackLog > shellMove);
+        Assert.True(
+            volumeGuard >= 0 && shellMove > volumeGuard && modernEngine > shellMove,
+            "Same-volume moves must keep the legacy bridge; everything else " +
+            "must reach the modern Shell engine after it.");
+        // Cross-volume moves and copies must not fall back to the managed
+        // engine inside the interactive AOT branch: its CreateFileW(DELETE)
+        // source probe fails raw with access denied on readable-but-not-
+        // deletable sources such as Public Desktop shortcuts (feedback #138).
+        Assert.DoesNotContain(
+            "ExecuteManagedTransferPlanWithProgressAsync",
+            branch,
+            StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1920,7 +1929,7 @@ public sealed class FileSurfaceParityContractTests
             "private bool TryLaunchInternalDragOnShortcut(");
         string completed = ReadPrivateMethod(
             surface,
-            "private void Items_DragItemsCompleted(");
+            "private void CompleteDragItemsSession(");
 
         Assert.Contains(
             "ShortcutLaunchPolicy.EvaluateInternalDrag(",

@@ -45,7 +45,7 @@ public sealed class AotStage5B4C1B2BContractTests
         Assert.Contains("SHOP_FILEPATH", helper, StringComparison.Ordinal);
         Assert.Contains("AotFilePropertiesFixture.TryBeginInvocation", helper, StringComparison.Ordinal);
         Assert.Contains("AotFilePropertiesFixture.RecordInvocationResult", helper, StringComparison.Ordinal);
-        Assert.Contains("bool invoked = SHObjectProperties", helper, StringComparison.Ordinal);
+        Assert.Contains("bool invoked = Shell32NativeMethods.SHObjectProperties", helper, StringComparison.Ordinal);
         Assert.DoesNotContain("TaskDialog", helper, StringComparison.Ordinal);
     }
 

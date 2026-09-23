@@ -242,7 +242,11 @@ public sealed class WidgetGroupSettingsTests
                 CreateWidget("a"),
                 CreateWidget("b"),
                 CreateWidget("c"),
-                CreateWidget("d")
+                CreateWidget("d"),
+                CreateWidget("e"),
+                CreateWidget("f"),
+                CreateWidget("g"),
+                CreateWidget("h")
             ],
             WidgetGroups =
             [
@@ -261,20 +265,44 @@ public sealed class WidgetGroupSettingsTests
                     MemberIds = ["c", "d"],
                     ActiveMemberId = "c",
                     NavigationStyle = WidgetGroupNavigationStyles.FollowDefault
+                },
+                new WidgetGroupConfig
+                {
+                    Id = "group-3",
+                    SurfaceId = "surface-3",
+                    MemberIds = ["e", "f"],
+                    ActiveMemberId = "e",
+                    NavigationStyle = WidgetGroupNavigationStyles.Tabs
+                },
+                new WidgetGroupConfig
+                {
+                    Id = "group-4",
+                    SurfaceId = "surface-4",
+                    MemberIds = ["g", "h"],
+                    ActiveMemberId = "g",
+                    NavigationStyle = WidgetGroupNavigationStyles.Stack
                 }
             ]
         };
 
         Assert.True(WidgetGroupSettings.Normalize(settings));
+        // Invalid values repair to the default style (Tabs).
         Assert.Equal(
-            WidgetGroupNavigationStyles.Stack,
+            WidgetGroupNavigationStyles.Tabs,
             settings.WidgetGroupDefaultNavigationStyle);
         Assert.Equal(
-            WidgetGroupNavigationStyles.Stack,
+            WidgetGroupNavigationStyles.Tabs,
             settings.WidgetGroups[0].NavigationStyle);
+        // Stable explicit choices survive normalization untouched.
         Assert.Equal(
             WidgetGroupNavigationStyles.FollowDefault,
             settings.WidgetGroups[1].NavigationStyle);
+        Assert.Equal(
+            WidgetGroupNavigationStyles.Tabs,
+            settings.WidgetGroups[2].NavigationStyle);
+        Assert.Equal(
+            WidgetGroupNavigationStyles.Stack,
+            settings.WidgetGroups[3].NavigationStyle);
         Assert.False(WidgetGroupSettings.Normalize(settings));
     }
 

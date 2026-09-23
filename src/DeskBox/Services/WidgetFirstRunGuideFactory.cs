@@ -34,7 +34,9 @@ internal static class WidgetFirstRunGuideFactory
     public static bool ShouldSeedQuickCapture(QuickCaptureStoreData data)
     {
         ArgumentNullException.ThrowIfNull(data);
-        return data.Items.Count == 0;
+        // A data reset leaves tombstone stubs behind; only live entries
+        // decide whether the store counts as empty for guide seeding.
+        return data.Items.Count(item => item is not null && !item.IsDeleted) == 0;
     }
 
     public static (string Title, string Body) CreateQuickCaptureGuide(
@@ -49,7 +51,9 @@ internal static class WidgetFirstRunGuideFactory
     public static bool ShouldSeedTodo(TodoWidgetData data)
     {
         ArgumentNullException.ThrowIfNull(data);
-        return data.Items.Count == 0;
+        // Same tombstone rule as the quick-capture store: deleted stubs
+        // must not keep the first-run guide from seeding after a reset.
+        return data.Items.Count(item => item is not null && !item.IsDeleted) == 0;
     }
 
     public static async Task<bool> EnsureTodoGuideAsync(

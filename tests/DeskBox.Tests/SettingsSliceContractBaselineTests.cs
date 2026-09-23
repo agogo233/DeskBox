@@ -26,6 +26,7 @@ public sealed class SettingsSliceContractBaselineTests
         Assert.Equal(5 * 60, s.VisibleIdleCacheCleanupDelaySeconds);
         Assert.True(s.IdleWorkingSetTrimEnabled);
         Assert.True(s.ImmediateHiddenWorkingSetTrimEnabled);
+        Assert.True(s.QuiescenceWorkingSetTrimEnabled);
         Assert.Equal(2 * 60, s.TransientWindowReleaseDelaySeconds);
         Assert.Equal("Small", s.PerformanceCacheBudget);
         Assert.True(s.EnableContinuousDecorativeAnimations);
@@ -179,7 +180,7 @@ public sealed class SettingsSliceContractBaselineTests
         Assert.Empty(s.WidgetTopologyLayouts);
         Assert.Null(s.ActiveWidgetTopologyKey);
         Assert.True(s.WidgetGroupsEnabled);
-        Assert.Equal("Stack", s.WidgetGroupDefaultNavigationStyle);
+        Assert.Equal("Tabs", s.WidgetGroupDefaultNavigationStyle);
         Assert.Equal(WidgetGroupTitleDisplayModes.IconAndText, s.WidgetGroupDefaultTitleDisplayMode);
         Assert.True(s.WidgetGroupWheelSwitchEnabled);
         Assert.False(s.WidgetGroupHoverSwitchEnabled);
@@ -229,6 +230,7 @@ public sealed class SettingsSliceContractBaselineTests
         Assert.Equal(5, s.CloudBackupRetentionCount);
         Assert.Equal(24 * 60, s.CloudBackupIntervalMinutes);
         Assert.Equal(0L, s.CloudBackupLastSuccessUtcTicks);
+        Assert.Equal(0L, s.CloudBackupLastFailureUtcTicks);
     }
 
     [Fact]
@@ -261,6 +263,7 @@ public sealed class SettingsSliceContractBaselineTests
         "visibleIdleCacheCleanupDelaySeconds",
         "idleWorkingSetTrimEnabled",
         "immediateHiddenWorkingSetTrimEnabled",
+        "quiescenceWorkingSetTrimEnabled",
         "transientWindowReleaseDelaySeconds",
         "performanceCacheBudget",
         "enableContinuousDecorativeAnimations",
@@ -464,5 +467,7 @@ public sealed class SettingsSliceContractBaselineTests
         "cloudBackupRetentionCount",
         "cloudBackupIntervalMinutes",
         "cloudBackupLastSuccessUtcTicks",
+        "cloudBackupLastFailureUtcTicks",
+        "cloudBackupLastUnverifiedUtcTicks",
     ];
 }

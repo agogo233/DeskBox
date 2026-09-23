@@ -540,7 +540,6 @@ public sealed partial class TodoWidgetContent
             {
                 ShowUndoToast(
                     App.Current.LocalizationService.Format("Todo.Snooze.Set", text),
-                    durationMs: CopyToastMs,
                     clearUndoOnHide: false);
             }
         };
@@ -560,7 +559,6 @@ public sealed partial class TodoWidgetContent
             {
                 ShowUndoToast(
                     App.Current.LocalizationService.Format("Todo.Snooze.Set", text),
-                    durationMs: CopyToastMs,
                     clearUndoOnHide: false);
             }
         };

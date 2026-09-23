@@ -581,6 +581,279 @@ public static partial class Win32Helper
         return false;
     }
 
+    /// <summary>
+    /// Tick count of the last user input anywhere in this session
+    /// (GetLastInputInfo). Returns false when the platform call fails.
+    /// </summary>
+    public static bool TryGetLastInputTickCount(out uint lastInputTickCount)
+    {
+        var info = new LASTINPUTINFO { Size = (uint)Marshal.SizeOf<LASTINPUTINFO>() };
+        if (GetLastInputInfo(ref info))
+        {
+            lastInputTickCount = info.Time;
+            return true;
+        }
+
+        lastInputTickCount = 0;
+        return false;
+    }
+
+    /// <summary>
+    /// Id of a named clipboard format (RegisterClipboardFormat). Zero means
+    /// the platform call failed and the format must be treated as
+    /// unavailable, never as a valid format id.
+    /// </summary>
+    public static ushort GetRegisteredClipboardFormat(string format) =>
+        (ushort)RegisterClipboardFormatW(format);
+
+    /// <summary>
+    /// True while the current thread is servicing a COM call that originated
+    /// in another process (CoGetCallerTID: S_OK = same-process caller,
+    /// S_FALSE = different-process caller). Not a security boundary: the OS
+    /// documents that the returned information can be spoofed and must never
+    /// drive security decisions — this is fit for UX-level filtering and
+    /// diagnostics only. Behavior when no COM call is in flight is pinned by
+    /// CoGetCallerTidProbeTests.
+    /// </summary>
+    public static bool IsComCallerOutOfProcess() =>
+        CoGetCallerTID(out _) == S_FALSE;
+
+    private const int S_FALSE = 1;
+
+    [LibraryImport("user32.dll", EntryPoint = "RegisterClipboardFormatW",
+        StringMarshalling = StringMarshalling.Utf16)]
+    private static partial uint RegisterClipboardFormatW(string format);
+
+    [LibraryImport("ole32.dll")]
+    private static partial int CoGetCallerTID(out uint threadId);
+
+    /// <summary>
+    /// Runs the OLE drag loop on the calling STA thread. Synchronous: it does
+    /// not return until the user drops, cancels, or the drop source ends the
+    /// operation. The returned HRESULT is DRAGDROP_S_DROP/DRAGDROP_S_CANCEL
+    /// on normal endings (both non-negative), and finalEffect carries the
+    /// target's chosen effect.
+    /// </summary>
+    public static unsafe int RunOleDragDrop(
+        nint dataObject,
+        nint dropSource,
+        uint allowedEffects,
+        out uint finalEffect) =>
+        DoDragDrop(dataObject, dropSource, allowedEffects, out finalEffect);
+
+    /// <summary>
+    /// Initializes COM with OLE support on the current thread (drag-and-drop
+    /// requires the OLE apartment, not plain CoInitialize). Returns the
+    /// HRESULT; S_FALSE means already initialized (still balanced by
+    /// OleUninitialize).
+    /// </summary>
+    public static int InitializeOleOnCurrentThread() => OleInitialize(0);
+
+    /// <summary>
+    /// Releases the OLE apartment established by
+    /// <see cref="InitializeOleOnCurrentThread"/> on the current thread.
+    /// </summary>
+    public static void UninitializeOleOnCurrentThread() => OleUninitialize();
+
+    [LibraryImport("ole32.dll")]
+    private static partial int OleInitialize(nint reserved);
+
+    [LibraryImport("ole32.dll")]
+    private static partial void OleUninitialize();
+
+    /// <summary>
+    /// Releases the mouse capture held by any window on the calling thread.
+    /// Used before starting a native drag loop: a cancelled WinUI drag
+    /// gesture keeps the XAML input island's capture, which starves
+    /// DoDragDrop's own capture and freezes the system-wide drag lock.
+    /// </summary>
+    public static bool TryReleaseMouseCapture() => ReleaseCapture();
+
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool ReleaseCapture();
+
+    [LibraryImport("ole32.dll", EntryPoint = "DoDragDrop")]
+    private static partial int DoDragDrop(
+        nint pDataObj,
+        nint pDropSource,
+        uint dwOKEffects,
+        out uint pdwEffect);
+
+    /// <summary>
+    /// Allocates movable global memory and copies <paramref name="data"/> into
+    /// it, ready to be handed to IDataObject::SetData as a TYMED_HGLOBAL
+    /// medium with ownership transfer. Returns false when allocation fails.
+    /// </summary>
+    public static unsafe bool TryCreateGlobalMemory(
+        ReadOnlySpan<byte> data,
+        out nint globalMemory)
+    {
+        globalMemory = GlobalAlloc(GmemMoveable | GmemZeroInit, (nuint)Math.Max(1, data.Length));
+        if (globalMemory == 0)
+        {
+            return false;
+        }
+
+        byte* locked = (byte*)GlobalLock(globalMemory);
+        if (locked == null)
+        {
+            GlobalFree(globalMemory);
+            globalMemory = 0;
+            return false;
+        }
+
+        try
+        {
+            data.CopyTo(new Span<byte>(locked, data.Length));
+        }
+        finally
+        {
+            _ = GlobalUnlock(globalMemory);
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Frees global memory whose ownership did not transfer to a data object
+    /// (IDataObject::SetData rejected the medium).
+    /// </summary>
+    public static void FreeGlobalMemory(nint globalMemory)
+    {
+        if (globalMemory != 0)
+        {
+            GlobalFree(globalMemory);
+        }
+    }
+
+    /// <summary>
+    /// Reads a NUL-terminated UTF-16 string from global memory, bounded by
+    /// the allocation size so a malformed payload cannot run off the block.
+    /// </summary>
+    public static unsafe bool TryReadGlobalMemoryText(
+        nint globalMemory,
+        out string text)
+    {
+        text = string.Empty;
+        if (globalMemory == 0)
+        {
+            return false;
+        }
+
+        char* locked = (char*)GlobalLock(globalMemory);
+        if (locked == null)
+        {
+            return false;
+        }
+
+        try
+        {
+            nuint bytes = GlobalSize(globalMemory);
+            int maxChars = (int)Math.Min(bytes / 2, 8192);
+            int length = 0;
+            while (length < maxChars && locked[length] != '\0')
+            {
+                length++;
+            }
+
+            if (length == 0)
+            {
+                return false;
+            }
+
+            text = new string(locked, 0, length);
+            return true;
+        }
+        finally
+        {
+            _ = GlobalUnlock(globalMemory);
+        }
+    }
+
+    /// <summary>
+    /// Releases a STGMEDIUM obtained from IDataObject::GetData; ownership of
+    /// the contained medium transfers back to OLE.
+    /// </summary>
+    internal static unsafe void ReleaseStorageMedium(
+        ref Helpers.NativeStorageMedium medium)
+    {
+        fixed (Helpers.NativeStorageMedium* pointer = &medium)
+        {
+            ReleaseStgMedium(pointer);
+        }
+    }
+
+    [LibraryImport("kernel32.dll", SetLastError = true)]
+    private static partial nuint GlobalSize(nint memory);
+
+    [LibraryImport("ole32.dll")]
+    private static unsafe partial void ReleaseStgMedium(void* medium);
+
+    private const uint GmemMoveable = 0x0002;
+    private const uint GmemZeroInit = 0x0040;
+
+    [LibraryImport("kernel32.dll", SetLastError = true)]
+    private static partial nint GlobalAlloc(uint flags, nuint bytes);
+
+    [LibraryImport("kernel32.dll", SetLastError = true)]
+    private static partial nint GlobalLock(nint memory);
+
+    [LibraryImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool GlobalUnlock(nint memory);
+
+    [LibraryImport("kernel32.dll", SetLastError = true)]
+    private static partial nint GlobalFree(nint memory);
+
+    /// <summary>
+    /// Sends a tagged +1/-1 pixel mouse move pair whose net movement is zero.
+    /// A low-level mouse hook can recognize the ExtraInfo tag and treat the
+    /// delivered callback as a liveness echo.
+    /// </summary>
+    public static unsafe bool TrySendTaggedMouseMoveNudge(IntPtr extraInfo, out int errorCode)
+    {
+        var tag = new UIntPtr(unchecked((ulong)extraInfo.ToInt64()));
+        INPUT* inputs = stackalloc INPUT[2];
+        inputs[0] = CreateMouseMoveInput(1, 0, tag);
+        inputs[1] = CreateMouseMoveInput(-1, 0, tag);
+
+        uint sent = SendInput(2, inputs, sizeof(INPUT));
+        if (sent == 2)
+        {
+            errorCode = 0;
+            return true;
+        }
+
+        errorCode = Marshal.GetLastWin32Error();
+        if (errorCode == 0)
+        {
+            errorCode = 31; // ERROR_GEN_FAILURE
+        }
+
+        return false;
+    }
+
+    private static INPUT CreateMouseMoveInput(int dx, int dy, UIntPtr extraInfo)
+    {
+        return new INPUT
+        {
+            Type = 0, // INPUT_MOUSE
+            Data = new INPUTUNION
+            {
+                Mouse = new MOUSEINPUT
+                {
+                    X = dx,
+                    Y = dy,
+                    MouseData = 0,
+                    Flags = 0x0001, // MOUSEEVENTF_MOVE
+                    Time = 0,
+                    ExtraInfo = extraInfo
+                }
+            }
+        };
+    }
+
     private static unsafe bool TrySendKeyboardEvent(
         ushort virtualKey,
         uint flags,
@@ -798,6 +1071,117 @@ public static partial class Win32Helper
         int inputSize);
 
     [StructLayout(LayoutKind.Sequential)]
+    private struct LASTINPUTINFO
+    {
+        public uint Size;
+        public uint Time;
+    }
+
+    [LibraryImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool GetLastInputInfo(ref LASTINPUTINFO plii);
+
+    // Power setting notifications (display on/off etc.) delivered as
+    // WM_POWERBROADCAST/PBT_POWERSETTINGCHANGE to a window.
+    public const uint PbtPowerSettingChange = 0x8013;
+    public const uint DeviceNotifyWindowHandle = 0;
+
+    /// <summary>GUID_CONSOLE_DISPLAY_STATE — console display on/off/dimmed.</summary>
+    public static readonly Guid ConsoleDisplayStatePowerSetting =
+        new("6FE69556-704A-47A0-8F24-C28D936FDA47");
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct PowerBroadcastSetting
+    {
+        public Guid PowerSetting;
+        public uint DataLength;
+        public byte Data;
+    }
+
+    [LibraryImport("user32.dll", SetLastError = true, EntryPoint = "RegisterPowerSettingNotification")]
+    public static partial IntPtr RegisterPowerSettingNotification(
+        IntPtr hWnd,
+        ref Guid powerSettingGuid,
+        uint flags);
+
+    [LibraryImport("user32.dll", SetLastError = true, EntryPoint = "UnregisterPowerSettingNotification")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool UnregisterPowerSettingNotification(IntPtr handle);
+
+    // System-wide visual effects (HKCU-scoped per-user parameters).
+    private const uint SpiGetDropShadow = 0x1024;
+    private const uint SpiSetDropShadow = 0x1025;
+    private const uint SpifUpdateIniFile = 0x0001;
+    private const uint SpifSendChange = 0x0002;
+
+    // pvParam is polymorphic: GET actions want a pointer to the receiving
+    // buffer; simple BOOL SET actions want the new value passed BY VALUE in
+    // the pvParam slot — a marshalled pointer is always nonzero, i.e. TRUE.
+    [LibraryImport("user32.dll", SetLastError = true, EntryPoint = "SystemParametersInfoW")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool SystemParametersInfo(
+        uint uiAction,
+        uint uiParam,
+        IntPtr pvParam,
+        uint fWinIni);
+
+    /// <summary>Reads the system-wide "show shadows under windows" effect.</summary>
+    public static bool TryGetWindowDropShadowEnabled(out bool enabled)
+    {
+        enabled = false;
+        try
+        {
+            unsafe
+            {
+                int value = 0;
+                if (!SystemParametersInfo(SpiGetDropShadow, 0, (IntPtr)(&value), 0))
+                {
+                    return false;
+                }
+
+                enabled = value != 0;
+            }
+
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Writes the system-wide "show shadows under windows" effect the same way
+    /// the Performance Options dialog does: persist to the profile and broadcast
+    /// WM_SETTINGCHANGE. Affects every window with a non-client frame, not just
+    /// this app — callers must confirm with the user before invoking.
+    /// </summary>
+    public static bool TrySetWindowDropShadowEnabled(bool enabled, out int errorCode)
+    {
+        errorCode = 0;
+        var value = (IntPtr)(enabled ? 1 : 0);
+        try
+        {
+            if (SystemParametersInfo(
+                    SpiSetDropShadow,
+                    0,
+                    value,
+                    SpifUpdateIniFile | SpifSendChange))
+            {
+                return true;
+            }
+
+            errorCode = Marshal.GetLastWin32Error();
+            return false;
+        }
+        catch (Exception ex)
+        {
+            errorCode = ex.HResult;
+            return false;
+        }
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
     public struct MSG
     {
         public IntPtr hwnd;
@@ -903,6 +1287,7 @@ public static partial class Win32Helper
 
     private const uint AssocfNone = 0;
     private const uint AssocstrCommand = 1;
+    private const uint AssocstrProgId = 20; // ASSOCSTR_PROGID
     private const uint HResultEPointer = 0x80004003;
 
     [LibraryImport("shlwapi.dll", EntryPoint = "AssocQueryStringW", StringMarshalling = StringMarshalling.Utf16)]
@@ -915,7 +1300,7 @@ public static partial class Win32Helper
         ref uint cchOut);
 
     /// <summary>
-    /// Whether the shell has a registered command for opening this path.
+    /// Whether the shell resolves a default open handler for this path.
     /// URIs dispatch by protocol and directories through Explorer itself, so
     /// both count as associated. Unassociated files must not go through any
     /// Shell dispatch: every dispatch path answers its own Open With picker
@@ -951,12 +1336,46 @@ public static partial class Win32Helper
             return false;
         }
 
+        // The classic command query resolves the effective association —
+        // UserChoice included — but only reports handlers expressed as a
+        // literal shell\open\command line.
+        if (TryQueryOpenCommand(extension))
+        {
+            return true;
+        }
+
+        // Packaged (AppX) defaults register shell\open\command with only a
+        // DelegateExecute CLSID and no command line. Resolving the EFFECTIVE
+        // ProgId is UserChoice-aware and fails outright when nothing is
+        // associated, so a resolved ProgId already proves a default exists —
+        // a recommended-handler list would only prove capability. The verb
+        // check on that ProgId then covers DelegateExecute-only defaults.
+        if (TryQueryEffectiveProgId(extension, out string effectiveProgId) &&
+            ProgIdHasOpenVerb(effectiveProgId))
+        {
+            return true;
+        }
+
+        // A UserChoice whose hash no longer validates poisons both queries
+        // above, while Explorer still opens the file through the extension's
+        // class-default ProgId.
+        return ClassDefaultHasOpenVerb(extension);
+    }
+
+    /// <summary>
+    /// Whether the association string (extension or ProgId) resolves a real
+    /// shell\open\command line. Windows answers S_OK with the generic
+    /// OpenWith.exe launcher for unknown extensions; that fallback IS the
+    /// picker, not an association.
+    /// </summary>
+    private static bool TryQueryOpenCommand(string assoc)
+    {
         var buffer = new char[1024];
         uint length = (uint)buffer.Length;
         uint queryResult = AssocQueryString(
             AssocfNone,
             AssocstrCommand,
-            extension,
+            assoc,
             "open",
             buffer,
             ref length);
@@ -966,7 +1385,7 @@ public static partial class Win32Helper
             queryResult = AssocQueryString(
                 AssocfNone,
                 AssocstrCommand,
-                extension,
+                assoc,
                 "open",
                 buffer,
                 ref length);
@@ -982,13 +1401,126 @@ public static partial class Win32Helper
                 0,
                 (int)Math.Min(length, (uint)buffer.Length))
             .TrimEnd('\0');
-        // Windows resolves every unknown extension to the generic OpenWith
-        // launcher with S_OK; that fallback IS the picker, not an
-        // association.
         return !string.IsNullOrWhiteSpace(command) &&
                command.IndexOf(
                    "OpenWith.exe",
                    StringComparison.OrdinalIgnoreCase) < 0;
+    }
+
+    /// <summary>
+    /// Resolves the effective ProgId for the extension through the shell's
+    /// association chain — UserChoice first, then the class default. The
+    /// query fails when nothing is associated at all, which is what makes
+    /// it a proof of a default rather than of mere handler capability.
+    /// </summary>
+    private static bool TryQueryEffectiveProgId(string extension, out string progId)
+    {
+        progId = string.Empty;
+        var buffer = new char[512];
+        uint length = (uint)buffer.Length;
+        uint queryResult = AssocQueryString(
+            AssocfNone,
+            AssocstrProgId,
+            extension,
+            null,
+            buffer,
+            ref length);
+        if (queryResult == HResultEPointer && length > (uint)buffer.Length)
+        {
+            buffer = new char[length];
+            queryResult = AssocQueryString(
+                AssocfNone,
+                AssocstrProgId,
+                extension,
+                null,
+                buffer,
+                ref length);
+        }
+
+        if (queryResult != 0)
+        {
+            return false;
+        }
+
+        progId = new string(
+                buffer,
+                0,
+                (int)Math.Min(length, (uint)buffer.Length))
+            .TrimEnd('\0');
+        return !string.IsNullOrWhiteSpace(progId);
+    }
+
+    /// <summary>
+    /// Whether the extension's class-default ProgId carries a verb the Shell
+    /// can execute. Resolving the ProgId by name skips the extension's
+    /// UserChoice layer, so a stale or unverifiable UserChoice cannot hide a
+    /// working default.
+    /// </summary>
+    private static bool ClassDefaultHasOpenVerb(string extension)
+    {
+        try
+        {
+            using Microsoft.Win32.RegistryKey? extensionKey =
+                Microsoft.Win32.Registry.ClassesRoot.OpenSubKey(extension);
+            return extensionKey?.GetValue(null) is string progId &&
+                   !string.IsNullOrWhiteSpace(progId) &&
+                   ProgIdHasOpenVerb(progId);
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Whether a ProgId registration carries a verb the Shell can execute —
+    /// a classic command line or a packaged DelegateExecute command.
+    /// </summary>
+    private static bool ProgIdHasOpenVerb(string progId)
+    {
+        if (TryQueryOpenCommand(progId))
+        {
+            return true;
+        }
+
+        try
+        {
+            using Microsoft.Win32.RegistryKey? shellKey =
+                Microsoft.Win32.Registry.ClassesRoot.OpenSubKey(
+                    progId + "\\shell");
+            if (shellKey is null)
+            {
+                return false;
+            }
+
+            foreach (string verb in shellKey.GetSubKeyNames())
+            {
+                using Microsoft.Win32.RegistryKey? commandKey =
+                    shellKey.OpenSubKey(verb + "\\command");
+                if (commandKey is null)
+                {
+                    continue;
+                }
+
+                if (commandKey.GetValue(null) is string command &&
+                    !string.IsNullOrWhiteSpace(command))
+                {
+                    return true;
+                }
+
+                if (commandKey.GetValue("DelegateExecute") is string delegateExecute &&
+                    !string.IsNullOrWhiteSpace(delegateExecute))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+        catch (Exception)
+        {
+            return false;
+        }
     }
 
     private const int ShcneRenameItem = 0x00000001;
@@ -1413,9 +1945,16 @@ public static partial class Win32Helper
 
     /// <summary>
     /// Pages the whole working set out (same effect as minimizing a window).
-    /// Only safe to call while every widget is hidden and the user is idle:
-    /// touched pages fault back in afterwards, which would jitter interaction
-    /// or frame pacing if anything were visible at the time.
+    /// Historically only safe while every widget was hidden and the user was
+    /// idle: touched pages fault back in afterwards, which would jitter
+    /// interaction or frame pacing if anything were visible at the time.
+    /// The quiescence trim path may now also call this while widgets are
+    /// visible, but only behind its own gates: a 240 MB absolute working-set
+    /// floor, a per-tier quiet period (up to 15 s, escalated to the strictest
+    /// tier by looping ambient animation), hard blockers on interaction,
+    /// transient UI, and active visual work, plus a post-trim cooldown with a
+    /// regrowth gate. The immediate-hidden and visible-idle paths keep the
+    /// old hidden-or-user-away contract.
     /// </summary>
     public static bool TrimWorkingSet()
     {

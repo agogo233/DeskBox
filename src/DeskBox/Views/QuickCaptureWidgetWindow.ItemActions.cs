@@ -638,8 +638,7 @@ public sealed partial class QuickCaptureWidgetWindow
         _pendingDeletedItemSnapshot = snapshot;
         ShowStatusToast(
             _localizationService.T("QuickCapture.Deleted"),
-            _localizationService.T("Common.Undo"),
-            StatusToastUndoMs);
+            _localizationService.T("Common.Undo"));
     }
 
     private async Task DeleteSelectedQuickCaptureItemsAsync(

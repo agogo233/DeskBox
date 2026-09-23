@@ -317,8 +317,10 @@ public sealed partial class ContentWidgetWindow
         flyout.Items.Add(WidgetCollapseMenuBuilder.Create(
             _config,
             SettingsService.Settings.WidgetCollapseBehavior,
+            SettingsService.Settings.WidgetCompactExpansionDirection,
             App.Current.LocalizationService,
             SetCollapseBehaviorOverride,
+            SetCompactExpansionDirectionOverride,
             ResetCompactWidthOverride));
         flyout.Items.Add(WidgetLockMenuBuilder.Create(
             App.Current.LocalizationService,

@@ -302,8 +302,8 @@ public sealed class AotStage5B4B1ContractTests
         string baseline = ReadRepositoryFile("tests/DeskBox.Tests/JsonSerializationBaselineContractTests.cs");
         string source = ReadRepositoryFile("src/DeskBox/App.AotManagedUiSmoke.cs");
 
-        Assert.Contains("Assert.Equal(32, actual.Count);", baseline, StringComparison.Ordinal);
-        Assert.Contains("Assert.Equal(74, actual.Values.Sum());", baseline, StringComparison.Ordinal);
+        Assert.Contains("Assert.Equal(35, actual.Count);", baseline, StringComparison.Ordinal);
+        Assert.Contains("Assert.Equal(83, actual.Values.Sum());", baseline, StringComparison.Ordinal);
         Assert.Contains("\"src/DeskBox/App.AotManagedUiSmoke.cs\"", baseline, StringComparison.Ordinal);
         Assert.Equal(1, CountOccurrences(source, "JsonSerializer.Serialize("));
     }
@@ -315,11 +315,28 @@ public sealed class AotStage5B4B1ContractTests
         string launcher = ReadRepositoryFile("scripts/start-aot-preview.ps1");
         string project = ReadRepositoryFile("src/DeskBox/DeskBox.csproj");
 
-        Assert.Contains("$auditProfileVersion = 58", audit, StringComparison.Ordinal);
-        Assert.Contains("schemaVersion = 55", audit, StringComparison.Ordinal);
+        // Pin the semantics, not the literal: the launcher rejects any audit
+        // summary whose profile/schema version differs from what it requires,
+        // so the two scripts must declare the same numbers. Extracting both
+        // and comparing them catches a bump that lands on only one side —
+        // pinning each literal separately cannot.
+        var auditProfileMatch = System.Text.RegularExpressions.Regex.Match(
+            audit, @"\$auditProfileVersion\s*=\s*(\d+)");
+        var requiredProfileMatch = System.Text.RegularExpressions.Regex.Match(
+            launcher, @"\$RequiredAuditProfileVersion\s*=\s*(\d+)");
+        Assert.True(auditProfileMatch.Success, "audit script must declare $auditProfileVersion");
+        Assert.True(requiredProfileMatch.Success, "launcher must declare $RequiredAuditProfileVersion");
+        Assert.Equal(auditProfileMatch.Groups[1].Value, requiredProfileMatch.Groups[1].Value);
+
+        var auditSchemaMatch = System.Text.RegularExpressions.Regex.Match(
+            audit, @"(?m)^\s*schemaVersion\s*=\s*(\d+)\s*$");
+        var requiredSchemaMatch = System.Text.RegularExpressions.Regex.Match(
+            launcher, @"\$RequiredSummarySchemaVersion\s*=\s*(\d+)");
+        Assert.True(auditSchemaMatch.Success, "audit script must declare a schemaVersion");
+        Assert.True(requiredSchemaMatch.Success, "launcher must declare $RequiredSummarySchemaVersion");
+        Assert.Equal(auditSchemaMatch.Groups[1].Value, requiredSchemaMatch.Groups[1].Value);
+
         Assert.Contains("stage5B4B1", audit, StringComparison.Ordinal);
-        Assert.Contains("$RequiredAuditProfileVersion = 58", launcher, StringComparison.Ordinal);
-        Assert.Contains("$RequiredSummarySchemaVersion = 55", launcher, StringComparison.Ordinal);
         Assert.Contains("stage 5B-4C3B2B1", project, StringComparison.Ordinal);
         Assert.Contains("deep settings", project, StringComparison.OrdinalIgnoreCase);
     }
@@ -341,12 +358,12 @@ public sealed class AotStage5B4B1ContractTests
         Assert.Contains("stage5B4B1RequiredCommandXamlPatterns", audit, StringComparison.Ordinal);
         Assert.Contains("stage5B4B1RequiredCapsuleCommandXamlPatterns", audit, StringComparison.Ordinal);
         Assert.Contains("stage5B4B1RequiredCapsuleCodeBehindPatterns", audit, StringComparison.Ordinal);
-        Assert.Contains("stage5B4B1ExpectedBindableViewModelPropertyCount = 309", audit, StringComparison.Ordinal);
+        Assert.Contains("stage5B4B1ExpectedBindableViewModelPropertyCount = 349", audit, StringComparison.Ordinal);
         Assert.Contains("stage5B4B1RequiredSmokeScriptPatterns", audit, StringComparison.Ordinal);
         Assert.Contains("stage5B4B1MissingRoutePatterns", audit, StringComparison.Ordinal);
         Assert.Contains("stage5B4B1UnsafeMutationPatterns", audit, StringComparison.Ordinal);
         Assert.Contains("stage5B4B1SourceWarningMessages", audit, StringComparison.Ordinal);
-        Assert.Contains("stage5B4B1ExpectedWmc1510Count = 1235", audit, StringComparison.Ordinal);
+        Assert.Contains("stage5B4B1ExpectedWmc1510Count = 866", audit, StringComparison.Ordinal);
     }
 
     private static int CountOccurrences(string value, string token)

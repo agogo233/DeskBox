@@ -85,8 +85,7 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
 
         _titleViewModel = new ContentWidgetTitleViewModel(_config, settingsService);
         ContentWidgetShell.DataContext = _titleViewModel;
-        ContentWidgetShell.TitleGlyph = descriptor.DefaultGlyph;
-        ContentWidgetShell.TitleIconKind = WidgetTitleIconKindNames.FromWidgetKind(_config.WidgetKind);
+        ApplyTitleIdentity(_config, descriptor, content);
         ContentWidgetShell.ShowHoverButtons = settingsService.Settings.ShowHoverButtons;
         ContentWidgetShell.IsTitleEditable = true;
         ApplyLocalizedTitleActionTooltips();
@@ -1163,6 +1162,17 @@ IsHideAnimationRunning = true;
 
     private void CompactPresentationSource_PropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
+        // A runtime folder remap rewrites the file view model's managed/mapped
+        // identity; push it to the shell immediately instead of waiting for a
+        // content switch or window recreation.
+        if (sender is WidgetViewModel fileViewModel &&
+            e.PropertyName is nameof(WidgetViewModel.TitleIconKind)
+                or nameof(WidgetViewModel.IconGlyph))
+        {
+            ContentWidgetShell.TitleGlyph = fileViewModel.IconGlyph;
+            ContentWidgetShell.TitleIconKind = fileViewModel.TitleIconKind;
+        }
+
         if (!IsCompactPresentationPropertyRelevant(Config.WidgetKind, e.PropertyName))
         {
             return;

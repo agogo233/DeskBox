@@ -27,8 +27,6 @@ public sealed partial class TodoWidgetContent : UserControl
         TodoItemViewModel Item,
         Windows.Foundation.Rect Bounds);
 
-    private const int UndoToastMs = 4200;
-    private const int CopyToastMs = 900;
     private const int CopyTapDelayMs = 210;
 
     private string? _draggedTodoItemId;

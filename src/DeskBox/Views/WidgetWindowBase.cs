@@ -157,6 +157,9 @@ public abstract partial class WidgetWindowBase : Window
         TrayAnimation.IsPositionTransitionActive ||
         WidgetShellControl.HasActiveVisualWork;
 
+    internal bool HasAmbientVisualWork =>
+        WidgetShellControl.HasAmbientVisualWork;
+
     /// <summary>Log prefix used in Z-order and backdrop log messages.</summary>
     protected abstract string LogPrefix { get; }
 
@@ -295,6 +298,11 @@ public abstract partial class WidgetWindowBase : Window
         CompleteBoundsInteractionFrameMetrics(ref _titleBarDragFrameMetrics, "drag", "closed");
         CancelPendingInteractiveResizeFrame();
         EndInteractiveResizePerformanceSession("closed");
+        // A window closed mid-gesture must terminate the overlay session —
+        // otherwise the service stays active and highlights freeze on the
+        // remaining widgets.  Both calls are no-ops when no session runs.
+        App.Current?.ResizeGuideOverlay?.EndDrag();
+        App.Current?.ResizeGuideOverlay?.EndResize();
         RemoveDesktopPinnedPointerRouting();
         RemoveDesktopPinnedActivationGuard();
         WidgetShellControl.HostedContentChanged -= WidgetShellControl_HostedContentChanged;

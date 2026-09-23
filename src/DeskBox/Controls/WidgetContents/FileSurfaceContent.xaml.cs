@@ -66,6 +66,13 @@ public sealed partial class FileSurfaceContent :
         new(StringComparer.OrdinalIgnoreCase);
     private string[] _activeDragSourcePaths = [];
     private bool _activeDragHasStorageItems;
+    // True from DragItemsStarting cancellation until the native DoDragDrop
+    // call returns; guards the (platform-dependent) Completed event against
+    // double-finishing a session the native path owns.
+    // Revival seam for the shelved native drag-out (drag contract §8.1.1b):
+    // nothing assigns it today, so the WinUI Completed reconciliation always
+    // runs; a revived native path sets it to skip the double completion.
+    private bool _nativeFileDragInFlight = false;
     private bool _activeDragHandledAsStackMembership;
     private string? _activeDragSessionId;
     private readonly FileDragSessionState _sourceDragSession = new();
@@ -1144,6 +1151,8 @@ public sealed partial class FileSurfaceContent :
         // sequence; the number rides along on the existing protocol log.
         long storageBrokerMs = 0;
         var storageBrokerWatch = System.Diagnostics.Stopwatch.StartNew();
+        bool isManagedShortcutDrag = IsManagedShortcutDrag(
+            selectedItems.Select(item => item.Path).ToArray());
         if (!FileItemDragPackage.TryPrepare(
                 e.Data,
                 selectedItems,
@@ -1158,7 +1167,8 @@ public sealed partial class FileSurfaceContent :
                 paths => paths.Count == 1
                     ? Path.GetFileName(paths[0])
                     : paths.Count.ToString(),
-                out FileItemDragPackageResult result))
+                out FileItemDragPackageResult result,
+                isManagedShortcutDrag))
         {
             _activeDragSessionId = null;
             e.Cancel = true;
@@ -1186,7 +1196,8 @@ public sealed partial class FileSurfaceContent :
             $"kind=file popover={fromStackPopover} paths=" +
             $"{result.SourcePaths.Count} storage={result.HasStorageItems} " +
             $"storageBrokerMs={storageBrokerMs} " +
-            $"nativeShell={result.UsesNativeShellDataObject} requested=" +
+            $"nativeShell={result.UsesNativeShellDataObject} " +
+            $"managedShortcut={isManagedShortcutDrag} requested=" +
             $"{e.Data.RequestedOperation} mode=" +
             $"{(sender is ListView ? "list" : "icons")} " +
             $"pathSample='{string.Join(" | ", result.SourcePaths.Take(5))}'");
@@ -1199,7 +1210,8 @@ public sealed partial class FileSurfaceContent :
         // DragStarting can be raised before ListViewBase has finished publishing
         // DragItemsStarting state. Advertise the safe capability set up front so
         // internal targets never have to infer it from a possibly incomplete
-        // path/selection snapshot. RequestedOperation remains a single value.
+        // path/selection snapshot. RequestedOperation is owned by
+        // FileItemDragPackage.TryPrepare and is not rewritten here.
         e.AllowedOperations = FileItemDragPackage.SupportedOperations;
 
         string[] sourcePaths = _activeDragSourcePaths.Length > 0
@@ -1216,26 +1228,20 @@ public sealed partial class FileSurfaceContent :
                 _fileService.TransferSessions.GetState(sourcePaths[0]));
             return;
         }
+        bool isManagedShortcutDrag = IsManagedShortcutDrag(sourcePaths);
         if (sourcePaths.Length > 0)
         {
-            e.Data.RequestedOperation =
-                FileItemDragPackage.PreferredOperation;
-
             // Use the system-provided file visual instead of WinUI's item-card
             // snapshot. This keeps widget-to-widget drags visually identical
             // to an Explorer file drag while preserving the same DataPackage.
             e.DragUI.SetContentFromDataPackage();
         }
 
-        bool isManagedShortcutDrag =
-            ViewModel.FollowsDefaultStoragePath &&
-            NativeShellFileDragProvider.AreExistingShortcuts(sourcePaths);
         if (isManagedShortcutDrag)
         {
             // Keep Move as the preferred external action when a managed shortcut
             // is restored to the desktop. Link remains available for metadata-only
             // in-app arrangement without authorizing Shell source cleanup.
-            e.Data.RequestedOperation = FileItemDragPackage.PreferredOperation;
             e.AllowedOperations =
                 FileItemDragPackage.ResolveSupportedOperations(
                     isManagedShortcutDrag: true);
@@ -1250,16 +1256,38 @@ public sealed partial class FileSurfaceContent :
             $"allowed={e.AllowedOperations}");
     }
 
+    private bool IsManagedShortcutDrag(IReadOnlyList<string> sourcePaths) =>
+        ViewModel.FollowsDefaultStoragePath &&
+        NativeShellFileDragProvider.AreExistingShortcuts(sourcePaths);
+
     private void Items_DragItemsCompleted(
         ListViewBase sender,
         DragItemsCompletedEventArgs e)
     {
+        // A native drag-out cancels the WinUI session at DragItemsStarting;
+        // if the platform still raises Completed for it, the native path has
+        // already finished the session itself.
+        if (_nativeFileDragInFlight)
+        {
+            return;
+        }
+
         bool fromStackPopover =
             ReferenceEquals(sender, _stackPopoverItemsView);
+        CompleteDragItemsSession(
+            e.DropResult,
+            fromStackPopover,
+            e.Items.OfType<WidgetItem>().ToArray());
+    }
+
+    private void CompleteDragItemsSession(
+        DataPackageOperation dropResult,
+        bool fromStackPopover,
+        WidgetItem[] eventItems)
+    {
         string[] movedPaths = _activeDragSourcePaths.Length > 0
             ? _activeDragSourcePaths
-            : e.Items
-                .OfType<WidgetItem>()
+            : eventItems
                 .Where(item => item is not WidgetStackItem)
                 .Select(item => item.Path)
                 .Where(path => !string.IsNullOrWhiteSpace(path))
@@ -1281,7 +1309,7 @@ public sealed partial class FileSurfaceContent :
             $"[DragProtocol] stage=SourceCompleted widget={WidgetId} " +
             $"session={FormatDragSessionId(dragSessionId)} " +
             $"popover={fromStackPopover} paths={movedPaths.Length} " +
-            $"dropResult={e.DropResult} internalHandled=" +
+            $"dropResult={dropResult} internalHandled=" +
             $"{handledAsStackMembership} storage={hasStorageItems} " +
             $"releaseRecoveryPending={releaseRecoveryPending}");
 
@@ -1290,7 +1318,7 @@ public sealed partial class FileSurfaceContent :
         // is resolved here instead: the shortcut owns the gesture, the files
         // stay in the grid, and no reorder commits.
         bool launchedFromCompletedDrag =
-            ShouldLaunchFromCompletedInternalDrag(e, fromStackPopover) &&
+            ShouldLaunchFromCompletedInternalDrag(dropResult, fromStackPopover) &&
             TryLaunchInternalDragOnShortcut(movedPaths);
 
         try
@@ -1301,7 +1329,7 @@ public sealed partial class FileSurfaceContent :
             }
 
             bool allowReleaseRecovery = ShouldRecoverUnhandledSourceDrop(
-                e.DropResult, handledAsStackMembership);
+                dropResult, handledAsStackMembership);
             if (allowReleaseRecovery && fromStackPopover &&
                 TryCompleteReleasedStackPopoverReorder(
                     movedPaths,
@@ -1318,7 +1346,7 @@ public sealed partial class FileSurfaceContent :
             }
 
             if (ShouldObserveExternalDragOut(
-                    e.DropResult,
+                    dropResult,
                     hasStorageItems,
                     handledAsStackMembership,
                     fromStackPopover) &&
@@ -2660,7 +2688,7 @@ public sealed partial class FileSurfaceContent :
                 $"[DropOperation] operation={dropOperationId} widget={WidgetId} " +
                 $"stage=Failed error={ex}");
             ShowFeedback(new(
-                ex.Message,
+                T("Widget.ImportFailed"),
                 WidgetFeedbackSeverity.Error,
                 "file-drop-error"));
             if (!xamlDropNotified)
@@ -3981,7 +4009,7 @@ public sealed partial class FileSurfaceContent :
                 $"[WidgetSurface] Native file drop failed id={WidgetId} " +
                 $"import={importId} elapsedMs={stopwatch.ElapsedMilliseconds}: {ex}");
             ShowFeedback(new(
-                ex.Message,
+                DescribeImportFailure(ex, droppedFiles.Length),
                 WidgetFeedbackSeverity.Error,
                 "native-file-drop-error"));
             return false;
@@ -3993,6 +4021,24 @@ public sealed partial class FileSurfaceContent :
                 $"elapsedMs={stopwatch.ElapsedMilliseconds}");
         }
     }
+
+    /// <summary>
+    /// Localized import-failure feedback. Transfer-exception messages are
+    /// English diagnostics aimed at the log and must not reach the toast;
+    /// partial results instead surface the counts the user can act on.
+    /// </summary>
+    private string DescribeImportFailure(
+        Exception exception,
+        int requestedCount) =>
+        exception is FileService.IFileTransferWithCompletedResults
+            {
+                CompletedResults: { } completed
+            }
+            ? _localizationService.Format(
+                "Widget.ImportPartialFailure",
+                completed.Count,
+                requestedCount)
+            : _localizationService.T("Widget.ImportFailed");
 
     private void HandleSurfaceRealTimeReorder(
         DragPayloadSnapshot payload,
@@ -4421,21 +4467,7 @@ public sealed partial class FileSurfaceContent :
 
     private Microsoft.UI.Xaml.Media.Brush? ResolveBrush(string key)
     {
-        for (DependencyObject? current = this;
-             current is not null;
-             current = VisualTreeHelper.GetParent(current))
-        {
-            if (current is FrameworkElement element &&
-                element.Resources.TryGetValue(key, out object? scopedValue) &&
-                scopedValue is Microsoft.UI.Xaml.Media.Brush scopedBrush)
-            {
-                return scopedBrush;
-            }
-        }
-
-        return Application.Current.Resources.TryGetValue(key, out object? value)
-            ? value as Microsoft.UI.Xaml.Media.Brush
-            : null;
+        return NeutralInteractionBrush.ResolveThemedResource(key, this);
     }
 
     private async void Root_KeyDown(object sender, KeyRoutedEventArgs e)
@@ -5299,7 +5331,7 @@ public sealed partial class FileSurfaceContent :
         {
             App.Log($"[WidgetSurface] File action failed id={WidgetId}: {ex}");
             ShowFeedback(new(
-                ex.Message,
+                T("Widget.FileActionFailed"),
                 WidgetFeedbackSeverity.Error,
                 "file-action-error"));
         }

@@ -611,6 +611,331 @@ public sealed class FileServiceTests : IDisposable
         Assert.Equal(100d, completed.Percentage);
     }
 
+    [Fact]
+    public async Task ExecuteTransferPlanAsync_AbortedDirectoryMove_RemovesPartialDestination()
+    {
+        var service = new FileService();
+        string sourceDirectory = Directory.CreateDirectory(
+            Path.Combine(_tempRoot, "move-source")).FullName;
+        File.WriteAllText(Path.Combine(sourceDirectory, "a.txt"), "a");
+        string lockedFile = Path.Combine(sourceDirectory, "locked.txt");
+        File.WriteAllText(lockedFile, "locked");
+        // A pre-existing destination directory forces the copy-first
+        // fallback: the same-volume atomic rename would carry the lock
+        // along instead of failing on it.
+        string destinationDirectory = Directory.CreateDirectory(
+            Path.Combine(_tempRoot, "move-destination")).FullName;
+
+        var decisions = new List<FileService.FileTransferItemError>();
+        await using (var lockStream = new FileStream(
+                         lockedFile, FileMode.Open, FileAccess.Read, FileShare.None))
+        {
+            FileService.FileTransferCanceledException canceled =
+                await Assert.ThrowsAsync<FileService.FileTransferCanceledException>(() =>
+                    service.ExecuteTransferPlanAsync(
+                        [new FileService.FileTransferPlan(
+                            sourceDirectory,
+                            destinationDirectory)],
+                        move: true,
+                        onItemError: error =>
+                        {
+                            decisions.Add(error);
+                            return Task.FromResult(
+                                FileService.FileTransferItemAction.Abort);
+                        }));
+            Assert.Empty(canceled.CompletedResults);
+        }
+
+        Assert.Single(decisions);
+        // The destination directory itself pre-existed this operation (the
+        // test created it to force the copy-first path), so it stays — but
+        // every file the aborted copy wrote inside it must be gone: nothing
+        // tracks them, and a retry would meet them as stale destinations.
+        Assert.True(Directory.Exists(destinationDirectory));
+        Assert.Empty(Directory.EnumerateFileSystemEntries(destinationDirectory));
+        Assert.True(File.Exists(Path.Combine(sourceDirectory, "a.txt")));
+        Assert.True(File.Exists(lockedFile));
+    }
+
+    [Fact]
+    public async Task ExecuteTransferPlanAsync_AbortedDirectoryMove_PreservesForeignFile()
+    {
+        // The destination starts empty, the copy begins, and a foreign file
+        // lands in the tree mid-copy. When the copy then fails, cleanup may
+        // only remove the objects THIS operation created — foreign content
+        // must survive untouched. Regression test for the path-based
+        // recursive delete that would have taken foreign.txt down with the
+        // partial tree.
+        var service = new FileService();
+        string sourceDirectory = Directory.CreateDirectory(
+            Path.Combine(_tempRoot, "foreign-move-source")).FullName;
+        File.WriteAllText(Path.Combine(sourceDirectory, "01.txt"), "a");
+        // A large file widens the copy window so the foreign file provably
+        // lands while the operation is mid-flight.
+        string bigSource = Path.Combine(sourceDirectory, "02-big.bin");
+        await using (FileStream big = File.Create(bigSource))
+        {
+            big.SetLength(64L * 1024 * 1024);
+        }
+        string lockedFile = Path.Combine(sourceDirectory, "zz-locked.txt");
+        File.WriteAllText(lockedFile, "locked");
+        // Pre-existing empty destination forces the copy-first fallback.
+        string destinationDirectory = Directory.CreateDirectory(
+            Path.Combine(_tempRoot, "foreign-move-dest")).FullName;
+        string foreignFile = Path.Combine(destinationDirectory, "foreign.txt");
+        string copiedBigPath = Path.Combine(destinationDirectory, "02-big.bin");
+
+        // The foreign file lands the moment the big destination file exists —
+        // i.e. provably while the copy is still running.
+        var foreignWriter = Task.Run(async () =>
+        {
+            while (!File.Exists(copiedBigPath) &&
+                   !File.Exists(foreignFile))
+            {
+                await Task.Delay(1);
+            }
+
+            File.WriteAllText(foreignFile, "not deskbox data");
+        });
+
+        await using (var lockStream = new FileStream(
+                         lockedFile, FileMode.Open, FileAccess.Read, FileShare.None))
+        {
+            await Assert.ThrowsAsync<FileService.FileTransferCanceledException>(() =>
+                service.ExecuteTransferPlanAsync(
+                    [new FileService.FileTransferPlan(
+                        sourceDirectory,
+                        destinationDirectory)],
+                    move: true,
+                    onItemError: _ => Task.FromResult(
+                        FileService.FileTransferItemAction.Abort)));
+        }
+
+        await foreignWriter;
+        Assert.True(
+            File.Exists(foreignFile),
+            "a foreign file dropped into the destination mid-copy is not " +
+            "ours to delete");
+        Assert.False(
+            File.Exists(copiedBigPath),
+            "the partial copy's own files are still removed");
+        Assert.False(
+            File.Exists(Path.Combine(destinationDirectory, "01.txt")));
+        // The pre-existing root stays — now holding only the foreign file.
+        Assert.Single(Directory.EnumerateFileSystemEntries(destinationDirectory));
+        Assert.True(File.Exists(Path.Combine(sourceDirectory, "01.txt")));
+        Assert.True(File.Exists(bigSource));
+        Assert.True(File.Exists(lockedFile));
+    }
+
+    [Fact]
+    public async Task ExecuteTransferPlanAsync_AbortedDirectoryMove_PreservesForeignDirectory()
+    {
+        // Same ownership rule as the foreign file: an EMPTY directory a
+        // foreign actor drops into the destination mid-copy is not ours —
+        // cleanup may only remove directories this operation provably
+        // created, never a re-enumerated empty tree.
+        var service = new FileService();
+        string sourceDirectory = Directory.CreateDirectory(
+            Path.Combine(_tempRoot, "foreign-dir-move-source")).FullName;
+        File.WriteAllText(Path.Combine(sourceDirectory, "01.txt"), "a");
+        string bigSource = Path.Combine(sourceDirectory, "02-big.bin");
+        await using (FileStream big = File.Create(bigSource))
+        {
+            big.SetLength(64L * 1024 * 1024);
+        }
+        string lockedFile = Path.Combine(sourceDirectory, "zz-locked.txt");
+        File.WriteAllText(lockedFile, "locked");
+        string destinationDirectory = Directory.CreateDirectory(
+            Path.Combine(_tempRoot, "foreign-dir-move-dest")).FullName;
+        string foreignDirectory = Path.Combine(destinationDirectory, "ForeignEmpty");
+        string copiedBigPath = Path.Combine(destinationDirectory, "02-big.bin");
+
+        var foreignWriter = Task.Run(async () =>
+        {
+            while (!File.Exists(copiedBigPath) &&
+                   !Directory.Exists(foreignDirectory))
+            {
+                await Task.Delay(1);
+            }
+
+            Directory.CreateDirectory(foreignDirectory);
+        });
+
+        await using (var lockStream = new FileStream(
+                         lockedFile, FileMode.Open, FileAccess.Read, FileShare.None))
+        {
+            await Assert.ThrowsAsync<FileService.FileTransferCanceledException>(() =>
+                service.ExecuteTransferPlanAsync(
+                    [new FileService.FileTransferPlan(
+                        sourceDirectory,
+                        destinationDirectory)],
+                    move: true,
+                    onItemError: _ => Task.FromResult(
+                        FileService.FileTransferItemAction.Abort)));
+        }
+
+        await foreignWriter;
+        Assert.True(
+            Directory.Exists(foreignDirectory),
+            "a foreign directory dropped into the destination mid-copy is " +
+            "not ours to delete — even while empty");
+        Assert.False(File.Exists(copiedBigPath));
+        Assert.Single(Directory.EnumerateFileSystemEntries(destinationDirectory));
+        Assert.True(File.Exists(lockedFile));
+    }
+
+    [Fact]
+    public async Task ExecuteTransferPlanAsync_AbortedDirectoryMove_UnremovablePartialEscalates()
+    {
+        // A partial destination file that cannot be removed (held open by
+        // another process) must escalate to a batch-level
+        // FileTransferDestinationCleanupException — never reach the
+        // per-item error decision, where "Skip" would silently leave an
+        // untracked half-copied tree behind.
+        var service = new FileService();
+        string sourceDirectory = Directory.CreateDirectory(
+            Path.Combine(_tempRoot, "escalate-move-source")).FullName;
+        File.WriteAllText(Path.Combine(sourceDirectory, "01.txt"), "a");
+        string bigSource = Path.Combine(sourceDirectory, "02-big.bin");
+        await using (FileStream big = File.Create(bigSource))
+        {
+            big.SetLength(64L * 1024 * 1024);
+        }
+        string lockedFile = Path.Combine(sourceDirectory, "zz-locked.txt");
+        File.WriteAllText(lockedFile, "locked");
+        string destinationDirectory = Directory.CreateDirectory(
+            Path.Combine(_tempRoot, "escalate-move-dest")).FullName;
+        string copiedSmallPath = Path.Combine(destinationDirectory, "01.txt");
+
+        // Hold the already-copied destination file open (read share only)
+        // for the rest of the transfer: the big sibling's copy window gives
+        // this plenty of time to land before the locked source fails.
+        using var holdCts = new CancellationTokenSource();
+        FileStream? heldDest = null;
+        var holder = Task.Run(async () =>
+        {
+            while (!holdCts.IsCancellationRequested && heldDest is null)
+            {
+                if (File.Exists(copiedSmallPath))
+                {
+                    try
+                    {
+                        heldDest = new FileStream(
+                            copiedSmallPath, FileMode.Open,
+                            FileAccess.Read, FileShare.Read);
+                    }
+                    catch (IOException)
+                    {
+                        // Copier still holds it exclusively — retry.
+                    }
+                }
+
+                await Task.Delay(1);
+            }
+        });
+
+        var decisions = new List<FileService.FileTransferItemError>();
+        FileService.FileTransferDestinationCleanupException failure;
+        try
+        {
+            await using (var lockStream = new FileStream(
+                             lockedFile, FileMode.Open, FileAccess.Read, FileShare.None))
+            {
+                // The item-level cleanup failure escalates out of the
+                // per-item decision entirely and lands as the batch's
+                // partial-failure wrapper — Skip is never offered.
+                FileService.FileTransferPartialFailureException partial =
+                    await Assert.ThrowsAsync<FileService.FileTransferPartialFailureException>(
+                        () => service.ExecuteTransferPlanAsync(
+                            [new FileService.FileTransferPlan(
+                                sourceDirectory,
+                                destinationDirectory)],
+                            move: true,
+                            onItemError: error =>
+                            {
+                                decisions.Add(error);
+                                return Task.FromResult(
+                                    FileService.FileTransferItemAction.Skip);
+                            }));
+                failure = Assert.IsType<FileService.FileTransferDestinationCleanupException>(
+                    partial.InnerException);
+            }
+        }
+        finally
+        {
+            await holdCts.CancelAsync();
+            await holder;
+            heldDest?.Dispose();
+        }
+
+        Assert.Empty(decisions);
+        Assert.Equal(1, failure.StrandedFileCount);
+        Assert.Equal(destinationDirectory, failure.DestinationDirectory);
+        Assert.True(
+            File.Exists(copiedSmallPath),
+            "the unremovable partial copy is still there — tracked by the " +
+            "exception, not silently skipped");
+        Assert.True(File.Exists(Path.Combine(sourceDirectory, "01.txt")));
+        Assert.True(File.Exists(lockedFile));
+    }
+
+    [Fact]
+    public async Task RelocateDirectoryAsync_RemovesOwnEmptyDestinationAfterAllSkipped()
+    {
+        // A destination this call created and never populated is litter —
+        // it goes away when every entry was skipped.
+        var service = new FileService();
+        string sourceDirectory = Directory.CreateDirectory(
+            Path.Combine(_tempRoot, "relocate-own-source")).FullName;
+        string lockedFile = Path.Combine(sourceDirectory, "locked.txt");
+        File.WriteAllText(lockedFile, "x");
+        string destinationDirectory = Path.Combine(_tempRoot, "relocate-own-dest");
+
+        await using var lockStream = new FileStream(
+            lockedFile, FileMode.Open, FileAccess.Read, FileShare.None);
+        FileService.DirectoryMoveReport report = await service.RelocateDirectoryAsync(
+            sourceDirectory,
+            destinationDirectory,
+            progress: null,
+            CancellationToken.None,
+            onItemError: _ => Task.FromResult(
+                FileService.FileTransferItemAction.Skip));
+
+        Assert.Single(report.SkippedItems);
+        Assert.False(Directory.Exists(destinationDirectory),
+            "the empty destination this call created is litter");
+    }
+
+    [Fact]
+    public async Task RelocateDirectoryAsync_PreservesForeignEmptyDestinationAfterAllSkipped()
+    {
+        // Ownership is decided by the atomic create, not a pre-check: a
+        // destination that already existed — whoever made it — survives
+        // even though it is still empty after every entry was skipped.
+        var service = new FileService();
+        string sourceDirectory = Directory.CreateDirectory(
+            Path.Combine(_tempRoot, "relocate-foreign-source")).FullName;
+        string lockedFile = Path.Combine(sourceDirectory, "locked.txt");
+        File.WriteAllText(lockedFile, "x");
+        string destinationDirectory = Directory.CreateDirectory(
+            Path.Combine(_tempRoot, "relocate-foreign-dest")).FullName;
+
+        await using var lockStream = new FileStream(
+            lockedFile, FileMode.Open, FileAccess.Read, FileShare.None);
+        FileService.DirectoryMoveReport report = await service.RelocateDirectoryAsync(
+            sourceDirectory,
+            destinationDirectory,
+            progress: null,
+            CancellationToken.None,
+            onItemError: _ => Task.FromResult(
+                FileService.FileTransferItemAction.Skip));
+
+        Assert.Single(report.SkippedItems);
+        Assert.True(Directory.Exists(destinationDirectory),
+            "a destination this call did not create stays — even when empty");
+    }
+
     [Theory]
     [InlineData(@"E:\source.bin", @"E:\folder\destination.bin", true)]
     [InlineData(@"F:\source.bin", @"E:\folder\destination.bin", false)]
@@ -2037,7 +2362,7 @@ public sealed class FileServiceTests : IDisposable
             "src/DeskBox/Services/FileService.TransferProgress.cs"));
         string copyCore = Slice(
             progressSource,
-            "private static async Task<(FileStream Stream, FileTransferSourceIdentity? Identity)> CopyFileCoreAsync",
+            "private static async Task<(FileStream Stream, FileTransferSourceIdentity? DestinationIdentity)> CopyFileCoreAsync",
             "private static void TryDisposeQuietly");
         // The destination is created once with delete access and shared with
         // nobody; the caller owns the commit, and failures delete through

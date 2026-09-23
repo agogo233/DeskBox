@@ -331,6 +331,44 @@ public sealed class WidgetZOrderRestoreContractTests
         Assert.Contains("window.ForceRestoreDesktopLayerFromManager();", trayRestore, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void IdleNormalization_IsShadowGatedAndNeverAppliesAReorderThatIsAlreadyCurrent()
+    {
+        string zorder = File.ReadAllText(TestPaths.FromRepository(
+            "src/DeskBox/Services/WidgetManager.ZOrder.cs"));
+        string method = SliceMethod(
+            zorder,
+            "private bool NormalizeIdleWidgetZOrder",
+            "private static IReadOnlyList<IDesktopWidgetWindow> GetWindowsInIdleHighestFirstOrder");
+        string queue = SliceMethod(
+            zorder,
+            "internal void QueueIdleWidgetZOrderNormalization",
+            "private long TrackTemporarilyRaisedWidgets");
+        string layerService = File.ReadAllText(TestPaths.FromRepository(
+            "src/DeskBox/Services/WidgetLayerService.cs"));
+        string apply = SliceMethod(
+            layerService,
+            "public static bool ApplyPeerOrderHighestToLowest",
+            "private static bool ApplyWindowOrderHighestToLowest");
+
+        // The idle order exists only to keep upper shadows off lower widgets:
+        // with Windows drop shadows disabled both the queue and the executor
+        // must bail before touching HWND z-order.
+        Assert.Contains("TryGetWindowDropShadowEnabled", method, StringComparison.Ordinal);
+        Assert.Contains("ShouldNormalizeIdlePeerOrder", method, StringComparison.Ordinal);
+        Assert.Contains("ShouldNormalizeIdlePeerOrder", queue, StringComparison.Ordinal);
+
+        // Ordering on transient animation bounds replays as a second, visible
+        // reorder once the windows settle, so normalization defers instead.
+        Assert.Contains("IsBoundsTransitionActive", method, StringComparison.Ordinal);
+
+        // Reordering still repaints overlap regions even when nothing changes,
+        // so an already-correct order must short-circuit before SetWindowPos.
+        Assert.Contains("IsPeerOrderAlreadyApplied", apply, StringComparison.Ordinal);
+        Assert.DoesNotContain("MoveToDesktopBottom", method, StringComparison.Ordinal);
+        Assert.DoesNotContain("SetWindowToBottom", method, StringComparison.Ordinal);
+    }
+
     private static string SliceMethod(string source, string startMarker, string endMarker)
     {
         int start = source.IndexOf(startMarker, StringComparison.Ordinal);

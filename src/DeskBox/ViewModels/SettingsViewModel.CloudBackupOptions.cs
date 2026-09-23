@@ -6,8 +6,13 @@ using Microsoft.UI.Xaml;
 
 namespace DeskBox.ViewModels;
 
-/// <summary>One remote snapshot row in the cloud-backup restore list.</summary>
-public sealed class CloudBackupRemoteSnapshotItem
+/// <summary>
+/// One remote snapshot row in the cloud-backup restore list. Title/Details
+/// are rendered through compiled {x:Bind} (AOT-safe); the generated
+/// bindable metadata stays as a safety net for any future {Binding} use.
+/// </summary>
+[WinRT.GeneratedBindableCustomProperty]
+public sealed partial class CloudBackupRemoteSnapshotItem
 {
     internal CloudBackupRemoteSnapshotItem(string name, string title, string details)
     {
@@ -339,17 +344,38 @@ public partial class SettingsViewModel
         }
     }
 
-    /// <summary>Last successful upload, formatted for the status row.</summary>
+    /// <summary>Last successful upload — plus the latest failure when it is newer, so a silently-broken scheduled backup can't hide behind a stale success.</summary>
     public string CloudBackupStatusText
     {
         get
         {
-            long ticks = _settingsService.Settings.CloudBackup.CloudBackupLastSuccessUtcTicks;
-            return ticks > 0
+            long successTicks = _settingsService.Settings.CloudBackup.CloudBackupLastSuccessUtcTicks;
+            long failureTicks = _settingsService.Settings.CloudBackup.CloudBackupLastFailureUtcTicks;
+            string status = successTicks > 0
                 ? _localizationService.Format(
                     "Settings.CloudBackup.LastSuccess",
-                    new DateTimeOffset(ticks, TimeSpan.Zero).ToLocalTime().ToString("g"))
+                    new DateTimeOffset(successTicks, TimeSpan.Zero).ToLocalTime().ToString("g"))
                 : _localizationService.T("Settings.CloudBackup.LastSuccess.Never");
+
+            if (failureTicks > successTicks)
+            {
+                status += " · " + _localizationService.Format(
+                    "Settings.CloudBackup.LastFailure",
+                    new DateTimeOffset(failureTicks, TimeSpan.Zero).ToLocalTime().ToString("g"));
+            }
+
+            // An accepted-but-never-listed upload is stamped separately: it
+            // is not a failure, yet the snapshot may never have landed —
+            // show it alongside the success instead of hiding behind it.
+            long unverifiedTicks = _settingsService.Settings.CloudBackup.CloudBackupLastUnverifiedUtcTicks;
+            if (unverifiedTicks > 0)
+            {
+                status += " · " + _localizationService.Format(
+                    "Settings.CloudBackup.LastUnverified",
+                    new DateTimeOffset(unverifiedTicks, TimeSpan.Zero).ToLocalTime().ToString("g"));
+            }
+
+            return status;
         }
     }
 

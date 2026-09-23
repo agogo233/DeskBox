@@ -1,6 +1,7 @@
 using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text.Json;
+using DeskBox.Core.Persistence;
 using DeskBox.Models;
 using DeskBox.Services;
 
@@ -64,6 +65,46 @@ public sealed class DeskBoxDataBackupServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task ExportBackupAsync_CopiesSettingsPairUnderFileWriteLock()
+    {
+        // A plain settings save commits settings.json + widget-layout.json
+        // under the settings file-write gate WITHOUT touching
+        // OperationGate. The snapshot must wait on that gate too, or it can
+        // tear the pair mid-save into a combination that never existed.
+        string dataDirectory = Directory.CreateDirectory(Path.Combine(_appDataRoot, "data")).FullName;
+        await File.WriteAllTextAsync(Path.Combine(dataDirectory, "settings.json"), "{\"language\":\"en-US\"}");
+        await File.WriteAllTextAsync(
+            Path.Combine(dataDirectory, "widget-layout.json"),
+            "{\"schemaVersion\":1,\"layout\":{\"widgets\":[]}}");
+        var service = new DeskBoxDataBackupService(_appDataRoot);
+
+        SemaphoreSlim writeLock = SettingsService.FileWriteLockFor(dataDirectory);
+        await writeLock.WaitAsync();
+        Task<string> backup;
+        try
+        {
+            backup = service.ExportBackupAsync(_exportRoot);
+            // Give the export time to reach the metadata copy; it must be
+            // blocked on the write gate, not racing it.
+            await Task.Delay(750);
+            Assert.False(
+                backup.IsCompleted,
+                "the snapshot must wait for the settings write gate before " +
+                "copying the settings/layout pair");
+        }
+        finally
+        {
+            writeLock.Release();
+        }
+
+        string backupPath = await backup;
+        Assert.True(File.Exists(backupPath));
+        using ZipArchive archive = ZipFile.OpenRead(backupPath);
+        Assert.NotNull(archive.GetEntry("data/settings.json"));
+        Assert.NotNull(archive.GetEntry("data/widget-layout.json"));
+    }
+
+    [Fact]
     public async Task ExportBackupAsync_IncludesManifestDataAndNestedAttachments()
     {
         string dataDirectory = Directory.CreateDirectory(Path.Combine(_appDataRoot, "data")).FullName;
@@ -86,6 +127,16 @@ public sealed class DeskBoxDataBackupServiceTests : IDisposable
         await File.WriteAllTextAsync(
             Path.Combine(dataDirectory, "desktop-organization-recovery.json.bak"), "{}");
         await File.WriteAllTextAsync(Path.Combine(dataDirectory, "ignored.tmp"), "partial");
+        // WidgetStyle restore's two-file transaction journal is in-flight
+        // machine state, not user data — it must never ride into a backup.
+        await File.WriteAllTextAsync(
+            Path.Combine(dataDirectory, "settings.json.style-restore.pending"), "{}");
+        await File.WriteAllTextAsync(
+            Path.Combine(dataDirectory, "settings.json.style-restore.committed"), "{}");
+        await File.WriteAllTextAsync(
+            Path.Combine(dataDirectory, "settings.json.style-restore.orig"), "{}");
+        await File.WriteAllTextAsync(
+            Path.Combine(dataDirectory, "widget-layout.json.style-restore.orig"), "{}");
         string thumbnailDirectory = Directory.CreateDirectory(
             Path.Combine(dataDirectory, "quick-capture", "thumbnails")).FullName;
         string exportDirectory = Directory.CreateDirectory(
@@ -98,6 +149,15 @@ public sealed class DeskBoxDataBackupServiceTests : IDisposable
         await File.WriteAllTextAsync(
             Path.Combine(dataDirectory, "weather-cache.json"),
             "{\"schemaVersion\":2}");
+        // Device-local sync protocol state must never travel with a backup.
+        string syncOutbox = Directory.CreateDirectory(
+            Path.Combine(dataDirectory, "sync", "outbox", "todo-data")).FullName;
+        await File.WriteAllTextAsync(
+            Path.Combine(dataDirectory, "sync", "state.json"),
+            "{\"schemaVersion\":1}");
+        await File.WriteAllTextAsync(
+            Path.Combine(syncOutbox, "op-1.json"),
+            "{\"domain\":\"todo-data\"}");
         var service = new DeskBoxDataBackupService(_appDataRoot);
 
         string backupPath = await service.ExportBackupAsync(_exportRoot);
@@ -114,10 +174,16 @@ public sealed class DeskBoxDataBackupServiceTests : IDisposable
         Assert.Null(archive.GetEntry("data/settings.json.bak"));
         Assert.Null(archive.GetEntry("data/desktop-organization-recovery.json.bak"));
         Assert.Null(archive.GetEntry("data/ignored.tmp"));
+        Assert.Null(archive.GetEntry("data/settings.json.style-restore.pending"));
+        Assert.Null(archive.GetEntry("data/settings.json.style-restore.committed"));
+        Assert.Null(archive.GetEntry("data/settings.json.style-restore.orig"));
+        Assert.Null(archive.GetEntry("data/widget-layout.json.style-restore.orig"));
         Assert.Null(archive.GetEntry("data/quick-capture/thumbnails/cached.png"));
         Assert.Null(archive.GetEntry("data/quick-capture/exports/temporary.txt"));
         Assert.Null(archive.GetEntry("data/cache/glance/images/wallpaper.jpg"));
         Assert.Null(archive.GetEntry("data/weather-cache.json"));
+        Assert.Null(archive.GetEntry("data/sync/state.json"));
+        Assert.Null(archive.GetEntry("data/sync/outbox/todo-data/op-1.json"));
         ZipArchiveEntry manifestEntry = Assert.IsType<ZipArchiveEntry>(archive.GetEntry("manifest.json"));
         string manifestJson;
         using (var reader = new StreamReader(manifestEntry.Open()))
@@ -866,8 +932,12 @@ public sealed class DeskBoxDataBackupServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task PrepareRestoreAsync_RejectsBackupFromNewerDeskBoxVersion()
+    public async Task PrepareRestoreAsync_AllowsBackupFromNewerDeskBoxVersion_WithWarningFlag()
     {
+        // The schema version is the compatibility gate, not the app version:
+        // a staggered rollout would otherwise strand every device that has
+        // not updated yet. The preparation flags the newer version so the
+        // confirm dialog can warn.
         string archivePath = Path.Combine(_exportRoot, "newer-version.zip");
         using (ZipArchive archive = ZipFile.Open(archivePath, ZipArchiveMode.Create))
         {
@@ -880,8 +950,11 @@ public sealed class DeskBoxDataBackupServiceTests : IDisposable
 
         var service = new DeskBoxDataBackupService(_appDataRoot);
 
-        await Assert.ThrowsAsync<InvalidDataException>(() => service.PrepareRestoreAsync(archivePath));
-        Assert.False(File.Exists(service.PendingRestoreMarkerPath));
+        DeskBoxRestorePreparation preparation = await service.PrepareRestoreAsync(archivePath);
+        Assert.True(preparation.IsFromNewerAppVersion);
+        Assert.True(File.Exists(service.PendingRestoreMarkerPath));
+
+        await service.CancelPendingRestoreAsync();
     }
 
     [Fact]
@@ -901,6 +974,146 @@ public sealed class DeskBoxDataBackupServiceTests : IDisposable
 
         await Assert.ThrowsAsync<InvalidDataException>(() => service.PrepareRestoreAsync(archivePath));
         Assert.False(File.Exists(service.PendingRestoreMarkerPath));
+    }
+
+    [Fact]
+    public async Task PrepareRestoreAsync_AcceptsPreRestoreBackupWithoutSettings()
+    {
+        // A pre-restore safety archive can legitimately lack settings.json —
+        // it captured whatever survived on a device that lost it. Refusing
+        // to restore it would strand the very data it exists to protect.
+        string archivePath = Path.Combine(_exportRoot, "pre-restore-no-settings.zip");
+        using (ZipArchive archive = ZipFile.Open(archivePath, ZipArchiveMode.Create))
+        {
+            WriteEntry(
+                archive,
+                "manifest.json",
+                "{\"schemaVersion\":1,\"kind\":\"pre-restore\",\"createdAtUtc\":\"2026-07-01T00:00:00Z\",\"appVersion\":\"1.2.9\"}");
+            WriteEntry(archive, "data/surviving-note.txt", "data that outlived settings");
+        }
+
+        var service = new DeskBoxDataBackupService(_appDataRoot);
+
+        DeskBoxRestorePreparation preparation = await service.PrepareRestoreAsync(archivePath);
+
+        Assert.True(File.Exists(service.PendingRestoreMarkerPath));
+
+        DeskBoxRestoreApplyResult applied = await service.ApplyPendingRestoreAsync();
+        Assert.True(applied.Succeeded);
+        Assert.True(File.Exists(Path.Combine(_appDataRoot, "data", "surviving-note.txt")));
+    }
+
+    [Fact]
+    public async Task ApplyPendingRestoreAsync_SkipsSafetyNetWhenOnlyExcludedFilesRemain()
+    {
+        // device.id and sync/ are filtered out of backups, so a data
+        // directory holding only them must not trigger a pre-restore
+        // archive — the filtered snapshot would be empty and its
+        // validation would fail the very restore it protects.
+        string sourceRoot = Directory.CreateDirectory(Path.Combine(_tempRoot, "restore-source")).FullName;
+        string sourceData = Directory.CreateDirectory(Path.Combine(sourceRoot, "data")).FullName;
+        await File.WriteAllTextAsync(Path.Combine(sourceData, "settings.json"), "{\"theme\":\"Dark\"}");
+        string archivePath = await new DeskBoxDataBackupService(sourceRoot).ExportBackupAsync(_exportRoot);
+
+        string currentData = Directory.CreateDirectory(Path.Combine(_appDataRoot, "data")).FullName;
+        await File.WriteAllTextAsync(Path.Combine(currentData, "device.id"), "device-id");
+        Directory.CreateDirectory(Path.Combine(currentData, "sync"));
+        await File.WriteAllTextAsync(Path.Combine(currentData, "sync", "state.json"), "{}");
+        var service = new DeskBoxDataBackupService(_appDataRoot);
+        await service.PrepareRestoreAsync(archivePath);
+
+        DeskBoxRestoreApplyResult result = await service.ApplyPendingRestoreAsync();
+
+        Assert.True(result.Succeeded);
+        Assert.False(
+            Directory.Exists(service.PreRestoreBackupDirectory) &&
+            Directory.EnumerateFiles(service.PreRestoreBackupDirectory, "*.zip").Any(),
+            "no safety archive when nothing back-uppable exists");
+        Assert.Contains("Dark", await File.ReadAllTextAsync(Path.Combine(currentData, "settings.json")));
+    }
+
+    [Fact]
+    public async Task ScopedRestore_RepeatedFailuresKeepOriginalSafetyBackup()
+    {
+        // A scoped restore retries on every launch — but only
+        // MaxScopedRestoreApplyAttempts times. While it retries, each
+        // attempt must reuse the FIRST pre-restore snapshot — the only
+        // one holding pre-restore data — instead of stacking
+        // post-restore archives that eventually prune the original away.
+        string dataDir = Directory.CreateDirectory(
+            Path.Combine(_appDataRoot, "data")).FullName;
+        await File.WriteAllTextAsync(
+            Path.Combine(dataDir, "settings.json"),
+            """{"language":"xx-ORIGINAL","widgetOpacity":0.9}""");
+
+        // A layout stamped by a newer schema makes the style apply throw
+        // AFTER the safety net — every attempt fails deterministically.
+        var slice = new WidgetLayoutSettingsSlice
+        {
+            Widgets = [new WidgetConfig { Id = "w1", WidgetKind = WidgetKind.Todo }]
+        };
+        await File.WriteAllTextAsync(
+            Path.Combine(dataDir, "widget-layout.json"),
+            JsonSerializer.Serialize(
+                new WidgetLayoutDocument { SchemaVersion = 99, Layout = slice },
+                WidgetLayoutJsonContext.Default.WidgetLayoutDocument));
+
+        var cloudSettings = new AppSettings { WidgetOpacity = 0.42 };
+        string backupPath = await new DeskBoxDataBackupService(_appDataRoot)
+            .ExportScopedBackupAsync(
+                _exportRoot,
+                CloudBackupDomain.WidgetStyle,
+                _ => Task.FromResult<byte[]?>(
+                    WidgetStyleBackupProjection.Serialize(cloudSettings)));
+
+        var service = new DeskBoxDataBackupService(_appDataRoot);
+        await service.PrepareScopedRestoreAsync(
+            backupPath, CloudBackupDomain.WidgetStyle);
+
+        // Attempts below the cap keep the marker (with a bumped counter)
+        // so the next launch retries.
+        for (int attempt = 1; attempt <= 2; attempt++)
+        {
+            DeskBoxRestoreApplyResult result = await service.ApplyPendingRestoreAsync();
+            Assert.False(result.Succeeded, $"attempt {attempt} should keep failing");
+            Assert.DoesNotContain("abandoned", result.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+            Assert.True(File.Exists(service.PendingRestoreMarkerPath));
+            using JsonDocument marker = JsonDocument.Parse(
+                await File.ReadAllTextAsync(service.PendingRestoreMarkerPath));
+            Assert.Equal(
+                attempt,
+                marker.RootElement.GetProperty("applyAttemptCount").GetInt32());
+        }
+
+        // The third failed apply gives up: marker and staging are
+        // cleared so a deterministically broken archive cannot block
+        // scheduled uploads forever.
+        string stagingRoot;
+        using (JsonDocument marker = JsonDocument.Parse(
+            await File.ReadAllTextAsync(service.PendingRestoreMarkerPath)))
+        {
+            stagingRoot = marker.RootElement.GetProperty("stagingRoot").GetString()!;
+        }
+
+        DeskBoxRestoreApplyResult abandoned = await service.ApplyPendingRestoreAsync();
+
+        Assert.True(abandoned.HadPendingRestore);
+        Assert.False(abandoned.Succeeded);
+        Assert.Contains("abandoned", abandoned.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.False(File.Exists(service.PendingRestoreMarkerPath));
+        Assert.False(Directory.Exists(stagingRoot));
+
+        // The pre-restore safety net survives the whole retry cycle:
+        // exactly one archive, holding the ORIGINAL pre-restore state.
+        string archive = Assert.Single(
+            Directory.GetFiles(service.PreRestoreBackupDirectory, "DeskBox-PreRestore-*.zip"));
+
+        using var zip = new ZipArchive(File.OpenRead(archive), ZipArchiveMode.Read);
+        ZipArchiveEntry? settingsEntry = zip.GetEntry("data/settings.json");
+        Assert.NotNull(settingsEntry);
+        using var reader = new StreamReader(settingsEntry!.Open());
+        string archivedSettings = await reader.ReadToEndAsync();
+        Assert.Contains("xx-ORIGINAL", archivedSettings);
     }
 
     [Fact]

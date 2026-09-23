@@ -2379,6 +2379,19 @@ svc:Localized.DescriptionKey="Settings.DefaultWidth.Description"
                                         OnContent="" OffContent="" MinWidth="0"
                                         IsOn="{Binding ImmediateHiddenWorkingSetTrimEnabled, Mode=TwoWay}" />
                                 </toolkit:SettingsCard>
+                                <toolkit:SettingsCard
+                                    HorizontalContentAlignment="Right"
+                                    IsEnabled="{Binding IdleWorkingSetTrimEnabled}"
+                                    svc:Localized.DescriptionKey="Settings.Performance.QuiescenceWorkingSetTrim.Description"
+                                    svc:Localized.HeaderKey="Settings.Performance.QuiescenceWorkingSetTrim.Title">
+                                    <toolkit:SettingsCard.HeaderIcon>
+                                        <FontIcon Glyph="&#xE950;" />
+                                    </toolkit:SettingsCard.HeaderIcon>
+                                    <ToggleSwitch
+                                        AutomationProperties.AutomationId="QuiescenceWorkingSetTrimToggle"
+                                        OnContent="" OffContent="" MinWidth="0"
+                                        IsOn="{Binding QuiescenceWorkingSetTrimEnabled, Mode=TwoWay}" />
+                                </toolkit:SettingsCard>
                             </toolkit:SettingsExpander.Items>
                         </toolkit:SettingsExpander>
 
@@ -2619,6 +2632,26 @@ svc:Localized.DescriptionKey="Settings.DefaultWidth.Description"
                     Style="{StaticResource SectionPanelStyle}">
                     <StackPanel Margin="0,8,0,0" Spacing="4">
 
+                        <InfoBar
+                            IsClosable="False"
+                            IsOpen="True"
+                            IsIconVisible="True"
+                            Severity="Informational">
+                            <InfoBar.Content>
+                                <StackPanel Margin="4,10,14,10" Spacing="2">
+                                    <TextBlock
+                                        FontSize="14"
+                                        FontWeight="SemiBold"
+                                        svc:Localized.Key="Settings.CloudBackup.SyncNotice.Title" />
+                                    <TextBlock
+                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                        FontSize="12"
+                                        TextWrapping="WrapWholeWords"
+                                        svc:Localized.Key="Settings.CloudBackup.SyncNotice.Description" />
+                                </StackPanel>
+                            </InfoBar.Content>
+                        </InfoBar>
+
                         <toolkit:SettingsCard
                             HorizontalContentAlignment="Right"
                             svc:Localized.DescriptionKey="Settings.CloudBackup.Provider.Description"
@@ -2677,7 +2710,6 @@ svc:Localized.DescriptionKey="Settings.DefaultWidth.Description"
                                     </Button>
                                     <TextBlock Grid.Column="1" VerticalAlignment="Center" Style="{StaticResource SettingDescriptionTextStyle}" Text="{Binding CloudBackupConnectionStatusText}" TextWrapping="Wrap" />
                                 </Grid>
-                                <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" TextWrapping="Wrap" svc:Localized.Key="Settings.CloudBackup.OfficialCloudHint" />
                             </StackPanel>
                         </toolkit:SettingsCard>
 
@@ -2760,18 +2792,24 @@ svc:Localized.DescriptionKey="Settings.DefaultWidth.Description"
                                     </Button>
                                 </StackPanel>
                                 <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" Text="{Binding CloudBackupStatusText}" TextWrapping="Wrap" />
-                                <ListView x:Name="CloudBackupSnapshotsList" SelectionMode="None" IsItemClickEnabled="False" IsEnabled="{Binding CloudBackupActionsEnabled}" ItemsSource="{Binding CloudBackupRemoteSnapshots}">
+                                <TextBlock x:Name="CloudBackupSnapshotsEmptyHint" Style="{StaticResource SettingDescriptionTextStyle}" Visibility="Collapsed" svc:Localized.Key="Settings.CloudBackup.SnapshotList.Empty" />
+                                <ListView x:Name="CloudBackupSnapshotsList" SelectionMode="None" IsItemClickEnabled="False" IsEnabled="{Binding CloudBackupActionsEnabled}">
                                     <ListView.ItemTemplate>
-                                        <DataTemplate>
+                                        <DataTemplate x:DataType="viewModels:CloudBackupRemoteSnapshotItem">
                                             <Border Padding="10,8" Margin="0,2" Background="{ThemeResource CardBackgroundFillColorSecondaryBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="4">
                                                 <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
                                                     <StackPanel Grid.Column="0" Spacing="2">
-                                                        <TextBlock FontWeight="SemiBold" Text="{Binding Title}" TextTrimming="CharacterEllipsis" />
-                                                        <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" Text="{Binding Details}" TextWrapping="Wrap" />
+                                                        <TextBlock FontWeight="SemiBold" Text="{x:Bind Title, Mode=OneTime}" TextTrimming="CharacterEllipsis" />
+                                                        <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" Text="{x:Bind Details, Mode=OneTime}" TextWrapping="Wrap" />
                                                     </StackPanel>
-                                                    <Button Grid.Column="1" Click="CloudBackupRestoreSnapshotButton_Click" Style="{StaticResource ActionButtonStyle}">
-                                                        <TextBlock svc:Localized.Key="Settings.CloudBackup.Restore" />
-                                                    </Button>
+                                                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                                        <Button Click="CloudBackupRestoreSnapshotButton_Click" Style="{StaticResource ActionButtonStyle}">
+                                                            <TextBlock svc:Localized.Key="Settings.CloudBackup.Restore" />
+                                                        </Button>
+                                                        <Button Click="CloudBackupDeleteSnapshotButton_Click" Style="{StaticResource ActionButtonStyle}">
+                                                            <TextBlock svc:Localized.Key="Common.Delete" />
+                                                        </Button>
+                                                    </StackPanel>
                                                 </Grid>
                                             </Border>
                                         </DataTemplate>

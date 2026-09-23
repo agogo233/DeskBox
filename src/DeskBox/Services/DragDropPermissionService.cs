@@ -241,7 +241,11 @@ public static class DragDropPermissionService
                     continue;
                 }
 
-                CreateOrUpdateShortcut(shortcut.Path, currentExePath, shortcut.Arguments);
+                CreateOrUpdateShortcut(
+                    shortcut.Path,
+                    currentExePath,
+                    shortcut.Arguments,
+                    DeskBoxIconPath);
                 repairedCount++;
                 App.Log($"[DragDropPermission] Rewrote shortcut '{shortcut.Path}' target='{currentExePath}' args='{shortcut.Arguments}'");
             }
@@ -677,7 +681,17 @@ public static class DragDropPermissionService
     }
 #endif
 
-    internal static void CreateOrUpdateShortcut(string shortcutPath, string targetPath, string arguments)
+    // Icon of the DeskBox application itself, for shortcuts whose target is
+    // DeskBox.exe. Shortcuts to user files must pass null instead so the
+    // system renders the target's own icon (see Shell Links docs).
+    internal static readonly string DeskBoxIconPath =
+        Path.Combine(AppContext.BaseDirectory, "Assets", "deskbox.ico");
+
+    internal static void CreateOrUpdateShortcut(
+        string shortcutPath,
+        string targetPath,
+        string arguments,
+        string? iconPath)
     {
         string? directory = Path.GetDirectoryName(shortcutPath);
         if (!string.IsNullOrWhiteSpace(directory))
@@ -690,13 +704,14 @@ public static class DragDropPermissionService
         // icon (embedded icon for executables, type association for documents)
         // instead of stamping every shortcut with the DeskBox branding.
         string iconPath = string.Empty;
+        string effectiveIconPath = iconPath ?? string.Empty;
 #if DESKBOX_NATIVE_AOT
         var metadata = new ShortcutInfo(
             targetPath,
             string.Empty,
             arguments,
             workingDirectory,
-            iconPath,
+            effectiveIconPath,
             0);
         ShortcutNativeWriteCallResult native =
             ShortcutNativeBackend.WriteShortcut(shortcutPath, metadata);
@@ -716,7 +731,7 @@ public static class DragDropPermissionService
                 string.Empty,
                 arguments,
                 workingDirectory,
-                iconPath,
+                effectiveIconPath,
                 0);
             ShortcutNativeWriteCallResult native =
                 ShortcutNativeBackend.WriteShortcut(shortcutPath, metadata);
@@ -749,14 +764,16 @@ public static class DragDropPermissionService
         string targetPath,
         string arguments,
         string workingDirectory,
-        string iconPath)
+        string? iconPath)
     {
         var shellLink = (IShellLinkW)(object)new ShellLink();
         shellLink.SetPath(targetPath);
         shellLink.SetArguments(arguments);
         shellLink.SetWorkingDirectory(workingDirectory);
-        if (!string.IsNullOrEmpty(iconPath))
+        if (!string.IsNullOrWhiteSpace(iconPath))
         {
+            // No icon location means the system uses the target's own icon
+            // plus the shortcut overlay — the Explorer-native default.
             shellLink.SetIconLocation(iconPath, 0);
         }
 

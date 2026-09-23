@@ -15,8 +15,15 @@ public sealed partial class TodoWidgetViewModel
         SelectedDetailItem = null;
         IsCreatingDetailItem = false;
         Items.Clear();
+        _tombstones.Clear();
         foreach (var item in data.Items.OrderBy(item => item.SortOrder).ThenByDescending(item => item.UpdatedAt))
         {
+            if (item.IsDeleted)
+            {
+                _tombstones.Add(item);
+                continue;
+            }
+
             Items.Add(new TodoItemViewModel(item, _localizationService));
         }
 

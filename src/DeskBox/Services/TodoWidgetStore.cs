@@ -12,6 +12,9 @@ namespace DeskBox.Services;
 [JsonSerializable(
     typeof(TodoWidgetData),
     TypeInfoPropertyName = "StoreData")]
+[JsonSerializable(
+    typeof(TodoItem),
+    TypeInfoPropertyName = "TodoItem")]
 internal sealed partial class TodoJsonContext : JsonSerializerContext
 {
 }
@@ -352,13 +355,169 @@ public sealed class TodoWidgetStore
         }
     }
 
-    private static string SanitizeWidgetId(string widgetId)
+    internal static string SanitizeWidgetId(string widgetId)
     {
         string trimmed = widgetId.Trim();
         char[] invalidChars = Path.GetInvalidFileNameChars();
         var safeChars = trimmed.Select(ch => invalidChars.Contains(ch) ? '_' : ch).ToArray();
         string safe = new(safeChars);
         return string.IsNullOrWhiteSpace(safe) ? Guid.NewGuid().ToString("N") : safe;
+    }
+
+    /// <summary>
+    /// Adopts an orphaned todo store for a freshly created Todo widget.
+    ///
+    /// Orphaned widget directories under data/widgets/&lt;id&gt;/ arise when a
+    /// cloud restore lands a source widget id that does not exist on this
+    /// device (the "unmapped" branch — data is preserved on disk but no
+    /// widget reads it). Without adoption that data stays invisible forever:
+    /// a Todo widget created later gets a NEW id and reads an empty store.
+    ///
+    /// Claimed-id exclusion is what makes this safe: a directory whose id is
+    /// a live widget or sits in DeletedWidgetIds belongs to something the
+    /// user still has — or deliberately deleted (deletion tombstones the id
+    /// AND removes the directory; the tombstone also covers leftover
+    /// directories that survived with extra files). Only directories whose
+    /// id this device never owned are eligible, which is exactly the set a
+    /// cross-device restore produces.
+    /// </summary>
+    /// <returns>The adopted source widget id, or null when nothing was
+    /// adoptable. Best-effort — never throws.</returns>
+    public static async Task<string?> TryAdoptOrphanedStoreAsync(
+        string widgetsDataRoot,
+        string targetWidgetId,
+        IReadOnlySet<string> claimedWidgetIds,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            if (!Directory.Exists(widgetsDataRoot))
+            {
+                return null;
+            }
+
+            string targetId = SanitizeWidgetId(targetWidgetId);
+            string? candidateDir = null;
+            DateTime candidateWriteUtc = DateTime.MinValue;
+
+            foreach (string dir in Directory.EnumerateDirectories(widgetsDataRoot))
+            {
+                string dirId = Path.GetFileName(dir);
+                if (string.IsNullOrWhiteSpace(dirId) ||
+                    string.Equals(dirId, targetId, StringComparison.OrdinalIgnoreCase) ||
+                    claimedWidgetIds.Contains(dirId))
+                {
+                    continue;
+                }
+
+                string storePath = Path.Combine(dir, "todo.json");
+                if (!File.Exists(storePath))
+                {
+                    continue;
+                }
+
+                // Only stores holding at least one live item are worth
+                // resurrecting; an empty or all-deleted orphan stays put.
+                if (!await OrphanedStoreHasLiveItemAsync(storePath, cancellationToken))
+                {
+                    continue;
+                }
+
+                DateTime writeUtc = File.GetLastWriteTimeUtc(storePath);
+                if (candidateDir is null || writeUtc > candidateWriteUtc)
+                {
+                    candidateDir = dir;
+                    candidateWriteUtc = writeUtc;
+                }
+            }
+
+            if (candidateDir is null)
+            {
+                return null;
+            }
+
+            string targetDir = Path.Combine(widgetsDataRoot, targetId);
+            if (Directory.Exists(targetDir))
+            {
+                // A fresh widget id should have no directory yet; only an
+                // already-empty shell may be replaced — never merge into or
+                // overwrite a directory that carries anything.
+                if (Directory.EnumerateFileSystemEntries(targetDir).Any())
+                {
+                    return null;
+                }
+
+                Directory.Delete(targetDir);
+            }
+
+            string adoptedId = Path.GetFileName(candidateDir);
+            Directory.Move(candidateDir, targetDir);
+            await RebaseManagedAttachmentPathsAsync(
+                widgetsDataRoot, adoptedId, targetDir, cancellationToken);
+            App.Log(
+                $"[TodoWidgetStore] Adopted orphaned todo store '{adoptedId}' for new widget '{targetId}'.");
+            return adoptedId;
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[TodoWidgetStore] Orphaned store adoption failed: {ex.Message}");
+            return null;
+        }
+    }
+
+    private static async Task<bool> OrphanedStoreHasLiveItemAsync(
+        string storePath,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            TodoWidgetData? data = JsonSerializer.Deserialize(
+                await File.ReadAllTextAsync(storePath, cancellationToken),
+                TodoJsonContext.Default.StoreData);
+            return data?.Items?.Any(item => item is not null && !item.IsDeleted) == true;
+        }
+        catch (Exception ex) when (ex is JsonException or IOException or InvalidDataException)
+        {
+            App.Log($"[TodoWidgetStore] Skipped unreadable orphaned store '{storePath}': {ex.Message}");
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// After the directory move, managed attachment FilePaths still carry
+    /// the source widget id — rewrite the widgets/&lt;old&gt;/ prefix onto
+    /// the new one. Unmanaged/external paths are never touched.
+    /// </summary>
+    private static async Task RebaseManagedAttachmentPathsAsync(
+        string widgetsDataRoot,
+        string sourceWidgetId,
+        string targetDir,
+        CancellationToken cancellationToken)
+    {
+        string oldPrefix = Path.GetFullPath(
+                               Path.Combine(widgetsDataRoot, sourceWidgetId)) +
+                           Path.DirectorySeparatorChar;
+        string newPrefix = Path.GetFullPath(targetDir) + Path.DirectorySeparatorChar;
+
+        var store = new TodoWidgetStore(widgetsDataRoot, Path.GetFileName(targetDir));
+        TodoWidgetData data = await store.LoadAsync();
+        bool changed = false;
+        foreach (TodoAttachment attachment in (data.Items ?? [])
+                     .SelectMany(item => item.Attachments ?? [])
+                     .Where(attachment => attachment is not null && attachment.IsManagedCopy))
+        {
+            if (!string.IsNullOrWhiteSpace(attachment.FilePath) &&
+                attachment.FilePath.StartsWith(oldPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                attachment.FilePath = newPrefix + attachment.FilePath[oldPrefix.Length..];
+                changed = true;
+            }
+        }
+
+        if (changed)
+        {
+            await store.SaveAsync(data);
+        }
     }
 
 }

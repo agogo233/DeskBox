@@ -452,6 +452,39 @@ public static class WidgetLayerService
         return verified;
     }
 
+    private static bool IsPeerOrderAlreadyApplied(IReadOnlyList<IntPtr> handles)
+    {
+        var peers = new HashSet<IntPtr>(handles);
+        var peersAboveHighest = new List<IntPtr>();
+        IntPtr cursor = Win32Helper.GetWindow(handles[0], Win32Helper.GW_HWNDPREV);
+        while (cursor != IntPtr.Zero)
+        {
+            if (peers.Contains(cursor))
+            {
+                peersAboveHighest.Add(cursor);
+            }
+
+            cursor = Win32Helper.GetWindow(cursor, Win32Helper.GW_HWNDPREV);
+        }
+
+        var orderFromHighest = new List<IntPtr>();
+        cursor = handles[0];
+        while (cursor != IntPtr.Zero)
+        {
+            if (peers.Contains(cursor))
+            {
+                orderFromHighest.Add(cursor);
+            }
+
+            cursor = Win32Helper.GetWindow(cursor, Win32Helper.GW_HWNDNEXT);
+        }
+
+        return IdleWidgetZOrderPolicy.MatchesRequestedOrder(
+            handles,
+            peersAboveHighest,
+            orderFromHighest);
+    }
+
     public static bool IsHighestPeer(
         IntPtr windowHandle,
         IReadOnlyCollection<IntPtr> peerWindowHandles)
@@ -627,6 +660,17 @@ public static class WidgetLayerService
             .ToList();
         if (handles.Count < 2)
         {
+            return true;
+        }
+
+        // Reordering HWNDs repaints overlapping shadow regions even when the
+        // relative peer order is already correct, so a no-op transaction must
+        // never reach SetWindowPos.
+        if (IsPeerOrderAlreadyApplied(handles))
+        {
+            App.LogVerbose(
+                $"[ZOrder] Peer order unchanged count={handles.Count} " +
+                $"highest=0x{handles[0].ToInt64():X}");
             return true;
         }
 

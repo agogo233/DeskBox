@@ -2848,14 +2848,15 @@ public sealed partial class QuickCaptureSurfaceContent :
         border.BorderThickness = new Thickness(active ? 1 : 0);
     }
 
-    private static Brush ResolveBrush(string key, Color fallback)
+    private Brush ResolveBrush(string key, Color fallback)
     {
-        return Application.Current.Resources.TryGetValue(
-                   key,
-                   out object? value) &&
-               value is Brush brush
-            ? brush
-            : new SolidColorBrush(fallback);
+        // A bare Application.Resources lookup resolves theme dictionaries
+        // against the application theme (the system theme captured at
+        // startup), so it kept returning the light card brush after the
+        // widget was overridden to dark — the light veil over the list and
+        // detail surfaces. Resolve by this element's own theme instead.
+        return NeutralInteractionBrush.ResolveThemedResource(key, this) ??
+               new SolidColorBrush(fallback);
     }
 
     private void UpdateSelectedViewVisual()

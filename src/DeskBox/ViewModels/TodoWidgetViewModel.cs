@@ -74,6 +74,11 @@ public sealed partial class TodoWidgetViewModel : ObservableObject, IDisposable
     private TodoItemViewModel? _selectedDetailItem;
     private bool _isCreatingDetailItem;
     private TodoUndoSnapshot? _undoSnapshot;
+    // Soft-deleted items kept out of Items but persisted on save: a merge
+    // restore treats an absent id as "unknown to this device" and would
+    // resurrect deleted items. Live ids win over tombstones at save time.
+    private readonly List<TodoItem> _tombstones = [];
+    private const int MaxRetainedTombstones = 500;
     private bool _isInitialized;
     private bool _isDisposed;
     private readonly HashSet<string> _expandedRecurringHistoryGroupKeys = new(StringComparer.Ordinal);

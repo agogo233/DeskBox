@@ -1,6 +1,9 @@
+using System.Collections.Concurrent;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using System.Runtime.CompilerServices;
+using DeskBox.Core.Persistence;
 using DeskBox.FileSafety;
 using DeskBox.Helpers;
 using DeskBox.Models;
@@ -381,6 +384,8 @@ public const int DefaultSearchMaxResults = 100;
                 [nameof(AppSettings.CloudBackupQuickCaptureDataEnabled)] = DefaultPreferencePreservationReason.UserChoice,
                 [nameof(AppSettings.CloudBackupWidgetStyleEnabled)] = DefaultPreferencePreservationReason.UserChoice,
                 [nameof(AppSettings.CloudBackupLastSuccessUtcTicks)] = DefaultPreferencePreservationReason.RuntimeState,
+                [nameof(AppSettings.CloudBackupLastFailureUtcTicks)] = DefaultPreferencePreservationReason.RuntimeState,
+                [nameof(AppSettings.CloudBackupLastUnverifiedUtcTicks)] = DefaultPreferencePreservationReason.RuntimeState,
                 [nameof(AppSettings.ManagedStorageDesktopShortcutEnabled)] = DefaultPreferencePreservationReason.UserChoice,
                 [nameof(AppSettings.ManagedStorageDesktopShortcutPath)] = DefaultPreferencePreservationReason.SystemIntegration,
                 [nameof(AppSettings.HasCompletedOnboarding)] = DefaultPreferencePreservationReason.RuntimeState,
@@ -395,7 +400,23 @@ public const int DefaultSearchMaxResults = 100;
     private readonly string _settingsPath;
     private AppSettings _settings = new();
     private readonly object _lock = new();
-    private readonly SemaphoreSlim _fileWriteLock = new(1, 1);
+
+    // The settings.json / widget-layout.json commit pair is protected by a
+    // per-data-directory gate shared with coherent-snapshot readers:
+    // DeskBoxDataBackupService takes the same gate while copying the pair
+    // into a backup, and two service instances pointed at one directory
+    // serialize instead of racing the same files.
+    private static readonly ConcurrentDictionary<string, SemaphoreSlim> s_fileWriteLocks =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    internal static SemaphoreSlim FileWriteLockFor(string dataDirectory) =>
+        s_fileWriteLocks.GetOrAdd(
+            Path.GetFullPath(dataDirectory).TrimEnd(
+                Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+            static _ => new SemaphoreSlim(1, 1));
+
+    private SemaphoreSlim FileWriteLock =>
+        FileWriteLockFor(Path.GetDirectoryName(_settingsPath)!);
     private readonly object _debounceLock = new();
     private CancellationTokenSource? _debounceCts;
     private CancellationTokenSource? _appearancePreviewCts;
@@ -449,6 +470,8 @@ public const int DefaultSearchMaxResults = 100;
             PerformanceSettingsPolicy.DefaultIdleWorkingSetTrimEnabled;
         settings.ImmediateHiddenWorkingSetTrimEnabled =
             PerformanceSettingsPolicy.DefaultImmediateHiddenWorkingSetTrimEnabled;
+        settings.Performance.QuiescenceWorkingSetTrimEnabled =
+            PerformanceSettingsPolicy.DefaultQuiescenceWorkingSetTrimEnabled;
         settings.PerformanceCacheBudget =
             PerformanceSettingsPolicy.DefaultCacheBudget;
         settings.EnableContinuousDecorativeAnimations =
@@ -480,7 +503,7 @@ public const int DefaultSearchMaxResults = 100;
         settings.InteractiveWidgetChromeMode = WidgetChromeModeStandard;
         settings.WidgetCollapseBehavior = WidgetCollapseBehaviorExpanded;
         settings.WidgetGroupDefaultNavigationStyle =
-            WidgetGroupNavigationStyles.Stack;
+            WidgetGroupNavigationStyles.Tabs;
         settings.WidgetGroupDefaultTitleDisplayMode =
             WidgetGroupTitleDisplayModes.IconAndText;
         settings.WidgetGroupWheelSwitchEnabled = true;
@@ -639,6 +662,8 @@ settings.FocusClickedWidgetOnRaise = false;
         _settingsPath = InitializeSettingsPath(DeskBoxDataPathService.Current.DataDirectory);
         OrganizationHistory = new DesktopOrganizationHistoryStore(
             Path.Combine(Path.GetDirectoryName(_settingsPath)!, "desktop-organization-history.json"));
+        Layout = new WidgetLayoutStore(
+            Path.Combine(Path.GetDirectoryName(_settingsPath)!, "widget-layout.json"));
     }
 
     internal SettingsService(string dataDir)
@@ -646,6 +671,8 @@ settings.FocusClickedWidgetOnRaise = false;
         _settingsPath = InitializeSettingsPath(dataDir);
         OrganizationHistory = new DesktopOrganizationHistoryStore(
             Path.Combine(dataDir, "desktop-organization-history.json"));
+        Layout = new WidgetLayoutStore(
+            Path.Combine(dataDir, "widget-layout.json"));
     }
 
     /// <summary>
@@ -655,6 +682,16 @@ settings.FocusClickedWidgetOnRaise = false;
     /// migrated inside <see cref="LoadAsync"/>.
     /// </summary>
     public DesktopOrganizationHistoryStore OrganizationHistory { get; }
+
+    /// <summary>
+    /// Device-domain store owning widget-layout.json — widget configs, groups,
+    /// per-topology layouts, deletion tombstones and group-navigation defaults.
+    /// Loaded and adopted inside <see cref="LoadAsync"/>. While it reports
+    /// non-authoritative the settings writer keeps emitting the layout keys
+    /// so an interrupted migration loses nothing; once authoritative the
+    /// writer strips them (single owner, no dual-write).
+    /// </summary>
+    public WidgetLayoutStore Layout { get; }
 
     private static string InitializeSettingsPath(string dataDir)
     {
@@ -763,6 +800,31 @@ settings.FocusClickedWidgetOnRaise = false;
                 changed |= DataBackupSettingsPolicy.Normalize(_settings);
             }
 
+            // Device-layer migration: widget-layout.json either loads its own
+            // data (which then wins over any legacy keys still inside
+            // settings.json) or adopts the migrated, normalized legacy slice.
+            // While adoption is pending the settings writer keeps the layout
+            // keys so nothing is lost; once authoritative the writer strips
+            // them and the layout file is the single owner.
+            WidgetLayoutLoadResult layoutResult =
+                await Layout.LoadAsync(_settings.WidgetLayout);
+            lock (_lock)
+            {
+                _settings.WidgetLayout.CopyFrom(layoutResult.Data);
+                if (layoutResult.Authoritative)
+                {
+                    // File-won data has not seen this session's normalize
+                    // passes — re-run the ones that own layout members
+                    // (idempotent on an adopted seed, safe unconditionally).
+                    changed |= NormalizeWidgetContentSettings(_settings);
+                    changed |= NormalizeFeatureWidgetSettings(_settings);
+                    changed |= NormalizeWidgetTopologyLayouts(_settings);
+                    changed |= NormalizeDeletionSettings(_settings);
+                }
+
+                changed |= layoutResult.NeedsPersist;
+            }
+
             // Local-layer migration: the FileSafety-domain history store
             // adopts the legacy settings list only once its own file is
             // durable. If the migration write failed, the legacy list stays
@@ -787,6 +849,21 @@ settings.FocusClickedWidgetOnRaise = false;
             lock (_lock) _settings = new AppSettings();
             ApplyDefaultPreferences(_settings);
             _settings.HasResolvedInitialFileWidgetSetup = true;
+            try
+            {
+                // The layout file survives a settings.json failure
+                // independently — re-adopt it so one corrupt file does not
+                // take the whole desktop down with it.
+                WidgetLayoutLoadResult layoutResult =
+                    await Layout.LoadAsync(_settings.WidgetLayout);
+                lock (_lock) _settings.WidgetLayout.CopyFrom(layoutResult.Data);
+            }
+            catch (Exception layoutEx) when (layoutEx is not OperationCanceledException)
+            {
+                App.Log(
+                    $"[SettingsService] Layout recovery after settings failure failed: " +
+                    layoutEx.Message);
+            }
         }
     }
 
@@ -863,12 +940,93 @@ settings.FocusClickedWidgetOnRaise = false;
 
     private async Task<bool> SaveToFileOnlyAsync()
     {
-        await _fileWriteLock.WaitAsync();
+        await FileWriteLock.WaitAsync();
         try
         {
-            await ResilientJsonStore.SaveAsync(
-                _settingsPath,
-                WriteSettingsTempFileAsync);
+            // Layout first when the device store is authoritative: it owns the
+            // durable layout state, and a crash between the two commits still
+            // leaves a consistent pair (newer layout file plus an older
+            // settings file that no longer carries those keys anyway). A file
+            // stamped by a NEWER schema than this build understands is never
+            // overwritten — the typed slice cannot represent its unknown
+            // fields. That read-only stance must be honest: layout mutations
+            // made this session cannot persist anywhere, so the save reports
+            // failure (and keeps the settings keys) instead of a false
+            // success that silently discards the changes.
+            bool layoutSaved = true;
+            bool layoutCommitted = false;
+            string layoutFailureReason = "widget-layout.json commit failed";
+            if (Layout.IsAuthoritative)
+            {
+                if (Layout.CanWrite)
+                {
+                    layoutSaved = await Layout.SaveCheckedAsync(WriteLayoutTempFileAsync);
+                    layoutCommitted = layoutSaved;
+                }
+                else
+                {
+                    layoutSaved = false;
+                    layoutFailureReason =
+                        $"widget-layout.json schema {Layout.LoadedSchemaVersion} is newer " +
+                        "than this build understands; layout changes cannot persist";
+                    App.Log($"[SettingsService] Save refused: {layoutFailureReason}");
+                }
+            }
+
+            // Fail-closed: when the layout commit failed, the layout slice
+            // exists only in memory — the settings file must keep carrying
+            // the keys so the data survives to the next successful save.
+            bool stripLayoutKeys = Layout.IsAuthoritative && layoutSaved;
+            try
+            {
+                await ResilientJsonStore.SaveAsync(
+                    _settingsPath,
+                    tempPath => WriteSettingsTempFileAsync(tempPath, stripLayoutKeys));
+            }
+            catch
+            {
+                // The two stores cannot commit atomically, so callers treat
+                // a false result as "nothing persisted". That contract is
+                // only honest if the layout commit is undone too — restore
+                // the layout primary to its pre-commit bytes (held in .bak
+                // by the commit that just ran) so the durable pair stays
+                // consistent instead of pointing half at the new state.
+                if (layoutCommitted)
+                {
+                    try
+                    {
+                        Layout.RevertLastCommit();
+                    }
+                    catch (Exception revertException)
+                    {
+                        App.Log(
+                            $"[SettingsService] Settings commit failed and the " +
+                            $"layout rollback failed too: {revertException}");
+                    }
+                }
+
+                throw;
+            }
+            if (!layoutSaved)
+            {
+                var failure = new SettingsPersistenceFailure(
+                    "save",
+                    layoutFailureReason,
+                    DateTimeOffset.UtcNow);
+                LastPersistenceFailure = failure;
+                try
+                {
+                    PersistenceFailed?.Invoke(failure);
+                }
+                catch (Exception notificationException)
+                {
+                    App.Log(
+                        $"[SettingsService] Persistence failure observer threw: " +
+                        notificationException);
+                }
+                return false;
+            }
+
             LastPersistenceFailure = null;
             return true;
         }
@@ -894,7 +1052,7 @@ settings.FocusClickedWidgetOnRaise = false;
         }
         finally
         {
-            _fileWriteLock.Release();
+            FileWriteLock.Release();
         }
     }
 
@@ -909,10 +1067,10 @@ settings.FocusClickedWidgetOnRaise = false;
     /// pass and the serialization itself run under <c>_lock</c>, so one
     /// save still corresponds to exactly one coherent snapshot; only the
     /// destination of the encoder changed. The synchronous encode runs on a
-    /// pool thread (the caller already holds _fileWriteLock) so UI-thread
+    /// pool thread (the caller already holds FileWriteLock) so UI-thread
     /// savers pay the same lock time as before, not the encode.
     /// </summary>
-    private Task WriteSettingsTempFileAsync(string tempPath) => Task.Run(() =>
+    private Task WriteSettingsTempFileAsync(string tempPath, bool stripLayoutKeys) => Task.Run(() =>
     {
         using var stream = new FileStream(
             tempPath,
@@ -934,10 +1092,63 @@ settings.FocusClickedWidgetOnRaise = false;
             NormalizeQuickCaptureSettings(_settings);
             NormalizeTodoSettings(_settings);
             NormalizeWeatherSettings(_settings);
+            if (stripLayoutKeys)
+            {
+                // Write-time projection: while the layout store owns the
+                // device domain, its 11 wire keys are stripped from
+                // settings.json. The typed facade keeps serializing for
+                // migrations, style backups and round-trip baselines — only
+                // the file view changes — and the strip set is derived from
+                // the slice's own wire names. The DOM detour (vs. streaming)
+                // is the price of key removal without a second serializer
+                // profile; it runs on a pool thread under the same lock.
+                JsonObject settingsDom = JsonSerializer.SerializeToNode(
+                        _settings,
+                        SettingsJsonContext.Default.AppSettings)!
+                    .AsObject();
+                foreach (string layoutKey in WidgetLayoutStore.SettingsWireKeys)
+                {
+                    settingsDom.Remove(layoutKey);
+                }
+
+                using var writer = new Utf8JsonWriter(
+                    stream,
+                    new JsonWriterOptions { Indented = true });
+                settingsDom.WriteTo(writer);
+                writer.Flush();
+            }
+            else
+            {
+                JsonSerializer.Serialize(
+                    stream,
+                    _settings,
+                    SettingsJsonContext.Default.AppSettings);
+            }
+        }
+
+        stream.Flush();
+    });
+
+    /// <summary>
+    /// Streams the locked layout slice into the device store's temp file,
+    /// under the same <c>_lock</c> that gives settings.json its
+    /// coherent-snapshot contract — one save commits one consistent pair of
+    /// files.
+    /// </summary>
+    private Task WriteLayoutTempFileAsync(string tempPath) => Task.Run(() =>
+    {
+        using var stream = new FileStream(
+            tempPath,
+            FileMode.Create,
+            FileAccess.Write,
+            FileShare.None,
+            bufferSize: 64 * 1024);
+        lock (_lock)
+        {
             JsonSerializer.Serialize(
                 stream,
-                _settings,
-                SettingsJsonContext.Default.AppSettings);
+                new WidgetLayoutDocument { Layout = _settings.WidgetLayout },
+                WidgetLayoutJsonContext.Default.WidgetLayoutDocument);
         }
 
         stream.Flush();

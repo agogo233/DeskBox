@@ -1141,7 +1141,7 @@ public sealed partial class FileSurfaceContent
     /// the files.
     /// </summary>
     private bool ShouldLaunchFromCompletedInternalDrag(
-        DragItemsCompletedEventArgs e,
+        DataPackageOperation dropResult,
         bool fromStackPopover)
     {
         bool hovered = _internalLaunchHoverItem is not null;
@@ -1157,7 +1157,7 @@ public sealed partial class FileSurfaceContent
 
         return !fromStackPopover &&
             ShortcutLaunchPolicy.ShouldLaunchFromCompletedInternalDrag(
-                e.DropResult,
+                dropResult,
                 hovered,
                 atPoint);
     }

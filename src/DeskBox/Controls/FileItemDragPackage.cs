@@ -34,6 +34,37 @@ public static class FileItemDragPackage
             ? ManagedShortcutSupportedOperations
             : SupportedOperations;
 
+    /// <summary>
+    /// ListViewBase item drags never forward DragStartingEventArgs.AllowedOperations
+    /// to the underlying drag operation, so the operation mask advertised to
+    /// external OLE drop targets is exactly RequestedOperation (None yields an
+    /// undroppable drag). A lone Move makes every Copy-only target
+    /// (Chromium/Electron drop zones, WM_DROPFILES games, WinForms) reject the
+    /// drop. The full mask is therefore requested whenever the payload is a
+    /// native Shell data object that hides the resulting multi-bit preferred
+    /// drop effect from Explorer; the target then applies the standard
+    /// same-volume-move / cross-volume-copy defaults. Managed shortcuts keep
+    /// Move so dragging them back to the desktop restores instead of copies,
+    /// and the StorageItems fallback keeps Move because its preferred effect
+    /// cannot be hidden.
+    /// Windows 10 stays on the single Move value: the hiding layer cannot
+    /// reach Win10 Explorer (the multi-bit preference leaks and every plain
+    /// drop prompts for an operation), so the wide mask is Win11-only until
+    /// a self-driven DoDragDrop becomes viable (see the drag contract doc,
+    /// 8.1.1b experiment log). The OS gate is injectable so tests can pin
+    /// both branches regardless of the host they run on.
+    /// </summary>
+    internal static DataPackageOperation ResolveRequestedOperation(
+        bool isManagedShortcutDrag,
+        bool hidesPreferredDropEffect,
+        bool? isWindows11OrLater = null) =>
+        !isManagedShortcutDrag &&
+            hidesPreferredDropEffect &&
+            (isWindows11OrLater ??
+                Services.WindowsCompatibilityService.IsWindows11OrLater)
+            ? SupportedOperations
+            : PreferredOperation;
+
     public static IReadOnlyList<WidgetItem> ResolveDraggedItems(
         IReadOnlyList<WidgetItem> eventItems,
         IReadOnlyList<WidgetItem> selectedItems)
@@ -60,7 +91,8 @@ public static class FileItemDragPackage
         string sourceWidgetId,
         Func<IEnumerable<string>, IReadOnlyList<IStorageItem>> getStorageItems,
         Func<IReadOnlyList<string>, string> getTitle,
-        out FileItemDragPackageResult result)
+        out FileItemDragPackageResult result,
+        bool isManagedShortcutDrag = false)
     {
         result = default;
         if (draggedItems.Count == 0)
@@ -79,62 +111,57 @@ public static class FileItemDragPackage
             return false;
         }
 
-        // WinRT's StorageFile broker can reject .lnk files (including ones
-        // whose filesystem attributes look normal). More importantly, this
-        // event is raised on the UI STA, so synchronously waiting for that
-        // broker can deadlock the drag/drop message loop. Wrap a native Shell
-        // IDataObject before attempting that broker so Explorer receives the
-        // original filesystem item and owns its desktop drop position.
-        bool requiresStorageBrokerBypass =
-            NativeShellFileDragProvider.RequiresStorageBrokerBypass(
-                sourcePaths);
+        // Prefer a native Shell IDataObject for every file drag. It is what
+        // Explorer itself produces, so external targets see the same formats
+        // and Explorer owns the desktop drop position. It also sidesteps the
+        // WinRT StorageFile broker, which can reject .lnk files (including
+        // ones whose filesystem attributes look normal) and which this UI-STA
+        // event would otherwise have to wait on synchronously. Regular files
+        // additionally hide the preferred drop effect so the full operation
+        // mask can be requested (see ResolveRequestedOperation).
+        bool hidePreferredDropEffect = !isManagedShortcutDrag;
         bool usesNativeShellDataObject =
-            requiresStorageBrokerBypass &&
-            NativeShellFileDragProvider.TryAttach(dataPackage, sourcePaths);
+            NativeShellFileDragProvider.TryAttach(
+                dataPackage,
+                sourcePaths,
+                hidePreferredDropEffect);
         IReadOnlyList<IStorageItem> storageItems = [];
-        if (requiresStorageBrokerBypass && !usesNativeShellDataObject)
-        {
-            App.Log(
-                $"[DragStart] Canceled broker-blocked file drag because a " +
-                $"native Shell payload could not be created paths=" +
-                $"{sourcePaths.Length}");
-            return false;
-        }
-
         if (!usesNativeShellDataObject)
         {
+            if (NativeShellFileDragProvider.RequiresStorageBrokerBypass(
+                    sourcePaths))
+            {
+                App.Log(
+                    $"[DragStart] Canceled broker-blocked file drag because " +
+                    $"a native Shell payload could not be created paths=" +
+                    $"{sourcePaths.Length}");
+                return false;
+            }
+
+            // Never advertise a partial selection or fall back to a
+            // coordinate-free filesystem move after Drop.
             storageItems = getStorageItems(sourcePaths);
-            if (storageItems.Count == sourcePaths.Length)
+            if (storageItems.Count != sourcePaths.Length)
             {
-                dataPackage.SetStorageItems(storageItems, readOnly: false);
+                App.Log(
+                    $"[DragStart] Canceled file drag because only a " +
+                    $"partial StorageItems payload was available " +
+                    $"paths={sourcePaths.Length}");
+                return false;
             }
-            else
-            {
-                // Never advertise a partial selection or fall back to a
-                // coordinate-free filesystem move after Drop. A native Shell
-                // data object can represent the same existing paths without
-                // involving the StorageItem broker.
-                usesNativeShellDataObject =
-                    NativeShellFileDragProvider.TryAttach(
-                        dataPackage,
-                        sourcePaths);
-                storageItems = [];
-                if (!usesNativeShellDataObject)
-                {
-                    App.Log(
-                        $"[DragStart] Canceled file drag because only a " +
-                        $"partial StorageItems payload was available " +
-                        $"paths={sourcePaths.Length}");
-                    return false;
-                }
-            }
+
+            dataPackage.SetStorageItems(storageItems, readOnly: false);
         }
 
-        // RequestedOperation is one preferred action. The full capability
-        // set belongs to DragStartingEventArgs.AllowedOperations; combining
-        // the flags here makes Windows 10 Explorer ask the user to choose an
-        // operation for every otherwise ordinary left-button drop.
-        dataPackage.RequestedOperation = PreferredOperation;
+        // For ListViewBase item drags RequestedOperation is the external
+        // allowed-operation mask. Multiple flags are only safe when the
+        // resulting preferred drop effect is hidden from Explorer; otherwise
+        // Windows 10 asks the user to choose an operation for every ordinary
+        // left-button drop.
+        dataPackage.RequestedOperation = ResolveRequestedOperation(
+            isManagedShortcutDrag,
+            hidesPreferredDropEffect:
+                usesNativeShellDataObject && hidePreferredDropEffect);
 
         dataPackage.Properties[DeskBoxDragData.SourceWidgetIdProperty] =
             sourceWidgetId;
@@ -143,8 +170,10 @@ public static class FileItemDragPackage
         dataPackage.Properties[
             DeskBoxDragData.InternalFileDragTokenProperty] =
             DeskBoxDragData.InternalFileDragToken;
+        // No text representation: Chromium turns CF_UNICODETEXT paths into
+        // text/plain plus text/uri-list, and Electron drop zones then treat
+        // the drag as text or a link instead of files. Explorer offers none.
         dataPackage.Properties.Title = getTitle(sourcePaths);
-        dataPackage.SetText(string.Join(Environment.NewLine, sourcePaths));
 
         result = new FileItemDragPackageResult(
             sourcePaths,

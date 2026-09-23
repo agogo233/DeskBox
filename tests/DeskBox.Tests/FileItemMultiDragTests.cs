@@ -13,18 +13,63 @@ public sealed class FileItemMultiDragTests
     [Theory]
     [InlineData(
         false,
+        true,
+        true,
+        DataPackageOperation.Copy | DataPackageOperation.Move |
+            DataPackageOperation.Link,
+        DataPackageOperation.Copy | DataPackageOperation.Move |
+            DataPackageOperation.Link)]
+    [InlineData(
+        false,
+        false,
+        true,
+        DataPackageOperation.Move,
         DataPackageOperation.Copy | DataPackageOperation.Move |
             DataPackageOperation.Link)]
     [InlineData(
         true,
+        false,
+        true,
+        DataPackageOperation.Move,
         DataPackageOperation.Move | DataPackageOperation.Link)]
-    public void SourceDragOperations_KeepOnePreferredMoveAndSafeCapabilities(
+    [InlineData(
+        true,
+        true,
+        true,
+        DataPackageOperation.Move,
+        DataPackageOperation.Move | DataPackageOperation.Link)]
+    [InlineData(
+        false,
+        true,
+        false,
+        DataPackageOperation.Move,
+        DataPackageOperation.Copy | DataPackageOperation.Move |
+            DataPackageOperation.Link)]
+    [InlineData(
+        true,
+        true,
+        false,
+        DataPackageOperation.Move,
+        DataPackageOperation.Move | DataPackageOperation.Link)]
+    public void SourceDragOperations_RequestFullMaskOnlyWhenPreferredEffectHidden(
         bool isManagedShortcutDrag,
+        bool hidesPreferredDropEffect,
+        bool isWindows11OrLater,
+        DataPackageOperation expectedRequested,
         DataPackageOperation expectedAllowed)
     {
+        // ListViewBase item drags expose RequestedOperation as the external
+        // allowed mask (None makes the drag undroppable). A lone Move makes
+        // every Copy-only drop target (Electron, WM_DROPFILES games) reject
+        // the drop, but a multi-bit request is only safe when its preferred
+        // drop effect is hidden from Explorer — and only on Win11, where the
+        // hiding layer actually reaches Explorer.
         Assert.Equal(
-            DataPackageOperation.Move,
-            FileItemDragPackage.PreferredOperation);
+            expectedRequested,
+            FileItemDragPackage.ResolveRequestedOperation(
+                isManagedShortcutDrag,
+                hidesPreferredDropEffect,
+                isWindows11OrLater));
         Assert.Equal(
             expectedAllowed,
             FileItemDragPackage.ResolveSupportedOperations(
@@ -377,13 +422,57 @@ public sealed class FileItemMultiDragTests
 
             Assert.True(prepared);
             Assert.Equal([firstPath, secondPath], result.SourcePaths);
+            Assert.True(result.UsesNativeShellDataObject);
+            // The OS-gated mapping itself is pinned by the theory above with
+            // an explicit gate value; here it only matters that TryPrepare
+            // wires the resolver's answer into the package untouched.
             Assert.Equal(
-                DataPackageOperation.Move,
+                FileItemDragPackage.ResolveRequestedOperation(
+                    isManagedShortcutDrag: false,
+                    hidesPreferredDropEffect: true),
                 dataPackage.GetView().RequestedOperation);
+            // Chromium maps CF_UNICODETEXT to text/plain + text/uri-list and
+            // Electron drop zones then stop treating the drag as files.
+            Assert.False(dataPackage.GetView().Contains(StandardDataFormats.Text));
             Assert.True(dataPackage.Properties.TryGetValue(
                 DeskBoxDragData.SourcePathsProperty,
                 out object? payload));
             Assert.Equal([firstPath, secondPath], Assert.IsType<string[]>(payload));
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void TryPrepare_ManagedShortcutDragKeepsMoveAsRequestedOperation()
+    {
+        string tempDirectory = Path.Combine(
+            Path.GetTempPath(),
+            "DeskBox.Tests",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDirectory);
+        string shortcutPath = Path.Combine(tempDirectory, "Managed app.lnk");
+        File.WriteAllBytes(shortcutPath, [0x4C, 0x00, 0x00, 0x00]);
+
+        try
+        {
+            var dataPackage = new DataPackage();
+
+            bool prepared = FileItemDragPackage.TryPrepare(
+                dataPackage,
+                [CreateItem(shortcutPath)],
+                "source-widget",
+                _ => Array.Empty<IStorageItem>(),
+                paths => paths.Count.ToString(),
+                out _,
+                isManagedShortcutDrag: true);
+
+            Assert.True(prepared);
+            Assert.Equal(
+                DataPackageOperation.Move,
+                dataPackage.GetView().RequestedOperation);
         }
         finally
         {

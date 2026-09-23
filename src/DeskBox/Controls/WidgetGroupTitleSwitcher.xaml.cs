@@ -999,16 +999,12 @@ public sealed partial class WidgetGroupTitleSwitcher : UserControl
         DetachScaleTransform.ScaleY = 1;
     }
 
-    private static Brush ResolveThemeBrush(
+    private Brush ResolveThemeBrush(
         string resourceKey,
         Brush fallback)
     {
-        return Application.Current.Resources.TryGetValue(
-                   resourceKey,
-                   out object? resource) &&
-               resource is Brush brush
-            ? brush
-            : fallback;
+        return NeutralInteractionBrush.ResolveThemedResource(resourceKey, this) ??
+               fallback;
     }
 
     private void UpdateAccessibility(IdentitySnapshot identity)

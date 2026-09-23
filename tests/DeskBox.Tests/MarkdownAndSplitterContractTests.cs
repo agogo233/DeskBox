@@ -155,7 +155,10 @@ public sealed class MarkdownAndSplitterContractTests
             "_contentForeground = Foreground ?? BrushResource(\"TextFillColorPrimaryBrush\")",
             reader,
             StringComparison.Ordinal);
-        Assert.Contains("VisualTreeHelper.GetParent(current)", reader, StringComparison.Ordinal);
+        Assert.Contains(
+            "NeutralInteractionBrush.ResolveThemedResource",
+            reader,
+            StringComparison.Ordinal);
         Assert.Contains("_semanticForeground = UsesDarkTheme", reader, StringComparison.Ordinal);
         Assert.Contains("AccentTextFillColorPrimaryBrush", reader, StringComparison.Ordinal);
         Assert.Contains("CreateLightThemeSemanticForeground", reader, StringComparison.Ordinal);

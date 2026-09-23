@@ -49,9 +49,16 @@ internal static partial class NativeShellFileDragProvider
     [LibraryImport("ole32.dll")]
     private static partial void CoTaskMemFree(nint value);
 
+    /// <param name="hidePreferredDropEffect">
+    /// Hide the CFSTR_PREFERREDDROPEFFECT value WinUI copies from
+    /// DataPackage.RequestedOperation from out-of-process drop targets so a
+    /// multi-bit request can widen the external allowed-operation mask
+    /// without making Explorer prompt for the operation on every drop.
+    /// </param>
     internal static bool TryAttach(
         DataPackage dataPackage,
-        IReadOnlyList<string> sourcePaths)
+        IReadOnlyList<string> sourcePaths,
+        bool hidePreferredDropEffect = false)
     {
         ArgumentNullException.ThrowIfNull(dataPackage);
         if (!CanAttachPaths(sourcePaths))
@@ -60,6 +67,7 @@ internal static partial class NativeShellFileDragProvider
         }
 
         nint shellDataObject = 0;
+        nint filterDataObject = 0;
         try
         {
             shellDataObject = CreateShellDataObject(sourcePaths);
@@ -71,7 +79,16 @@ internal static partial class NativeShellFileDragProvider
                 return false;
             }
 
-            int result = SetDataObject(dataPackage, shellDataObject);
+            nint attachedDataObject = shellDataObject;
+            if (hidePreferredDropEffect)
+            {
+                filterDataObject =
+                    PreferredDropEffectFilterDataObject.CreateInterfacePointer(
+                        shellDataObject);
+                attachedDataObject = filterDataObject;
+            }
+
+            int result = SetDataObject(dataPackage, attachedDataObject);
             if (result < 0)
             {
                 App.Log(
@@ -82,7 +99,8 @@ internal static partial class NativeShellFileDragProvider
 
             App.LogVerbose(
                 $"[DragStart] Attached native Shell file data object " +
-                $"paths={sourcePaths.Count}");
+                $"paths={sourcePaths.Count} " +
+                $"hidePreferredDropEffect={hidePreferredDropEffect}");
             return true;
         }
         catch (Exception ex)
@@ -94,6 +112,8 @@ internal static partial class NativeShellFileDragProvider
         }
         finally
         {
+            PreferredDropEffectFilterDataObject.ReleaseInterfacePointer(
+                filterDataObject);
             ReleaseInterface(shellDataObject);
         }
     }
@@ -164,7 +184,7 @@ internal static partial class NativeShellFileDragProvider
         return AreExistingShortcuts(sourcePaths, fileExists);
     }
 
-    private static unsafe nint CreateShellDataObject(
+    internal static unsafe nint CreateShellDataObject(
         IReadOnlyList<string> sourcePaths)
     {
         string[] normalizedPaths = sourcePaths
@@ -322,7 +342,7 @@ internal static partial class NativeShellFileDragProvider
         return result;
     }
 
-    private static unsafe void ReleaseInterface(nint unknown)
+    internal static unsafe void ReleaseInterface(nint unknown)
     {
         if (unknown == 0)
         {

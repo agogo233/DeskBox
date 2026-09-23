@@ -5,13 +5,18 @@ namespace DeskBox.Tests;
 public sealed class WidgetGroupNavigationInteractionPolicyTests
 {
     [Theory]
-    [InlineData(null)]
-    [InlineData("Auto")]
-    [InlineData("invalid")]
-    public void RemovedAutoAndInvalidStyles_ResolveToStack(string? style)
+    [InlineData(null, WidgetGroupNavigationStyles.Tabs)]
+    [InlineData("invalid", WidgetGroupNavigationStyles.Tabs)]
+    [InlineData("Auto", WidgetGroupNavigationStyles.Stack)]
+    public void RemovedAutoAndInvalidStyles_ResolveToDefaultOrStack(
+        string? style,
+        string expected)
     {
+        // Invalid or removed values fall back to the default style (Tabs);
+        // legacy "Auto" was the pre-Tabs name for the stacked look and keeps
+        // its meaning instead of being treated as invalid.
         Assert.Equal(
-            WidgetGroupNavigationStyles.Stack,
+            expected,
             WidgetGroupNavigationInteractionPolicy.ResolveEffectiveStyle(
                 style,
                 memberCount: 3,

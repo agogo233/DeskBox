@@ -439,11 +439,12 @@ public sealed class QuickCaptureServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task DeleteItemAsync_RemovesMatchingItemOnly()
+    public async Task DeleteItemAsync_TombstonesMatchingItemOnly()
     {
         var service = CreateService();
         var first = await service.AddItemAsync("first");
         var second = await service.AddItemAsync("second");
+        await Task.Delay(5);
 
         var deleted = await service.DeleteItemAsync(second.Id);
         var data = await service.GetDataAsync();
@@ -451,25 +452,62 @@ public sealed class QuickCaptureServiceTests : IDisposable
         Assert.NotNull(deleted);
         Assert.Equal(second.Id, deleted.Item.Id);
         Assert.False(deleted.IsRecent);
-        var item = Assert.Single(data.Items);
-        Assert.Equal(first.Id, item.Id);
+        // Read API: the deleted entry is gone from the live view; the
+        // untouched record stays visible.
+        var remaining = Assert.Single(data.Items.Where(item => !item.IsDeleted));
+        Assert.Equal(first.Id, remaining.Id);
+
+        // Underlying store: the delete persists as a tombstone with a
+        // refreshed timestamp, not a physical removal.
+        QuickCaptureStoreData persisted = await new QuickCaptureStore(_storeRoot).LoadAsync();
+        var tombstone = Assert.Single(persisted.Items.Where(item => item.Id == second.Id));
+        Assert.True(tombstone.IsDeleted);
+        Assert.True(tombstone.UpdatedAt > second.UpdatedAt);
+        // Content stripping: the payload leaves the store file with the
+        // delete — only id + timestamps remain for merge protection, so a
+        // cloud backup of the store cannot leak deleted content.
+        Assert.True(string.IsNullOrWhiteSpace(tombstone.Body));
+        Assert.True(string.IsNullOrWhiteSpace(tombstone.Title));
+        Assert.True(string.IsNullOrWhiteSpace(tombstone.ImagePath));
+        Assert.Empty(tombstone.Attachments);
+        var untouched = Assert.Single(persisted.Items.Where(item => item.Id == first.Id));
+        Assert.False(untouched.IsDeleted);
     }
 
     [Fact]
-    public async Task DeleteItemsAsync_RemovesSelectedRecordsAndNormalizesOrder()
+    public async Task DeleteItemsAsync_TombstonesSelectedRecordsAndNormalizesOrder()
     {
         var service = CreateService();
         var first = await service.AddItemAsync("first");
         var second = await service.AddItemAsync("second");
         var third = await service.AddItemAsync("third");
+        await Task.Delay(5);
 
         var deleted = await service.DeleteItemsAsync([first.Id, third.Id], isRecent: false);
         var data = await service.GetDataAsync();
 
         Assert.Equal(2, deleted.Count);
-        var remaining = Assert.Single(data.Items);
+        // Read API: only the untouched record stays visible.
+        var remaining = Assert.Single(data.Items.Where(item => !item.IsDeleted));
         Assert.Equal(second.Id, remaining.Id);
-        Assert.Equal(0, remaining.SortOrder);
+        // Sort orders stay normalized across the whole list (live + tombstones).
+        Assert.Equal(
+            Enumerable.Range(0, data.Items.Count),
+            data.Items.Select(item => item.SortOrder));
+
+        // Underlying store: both deletes persist as tombstones with
+        // refreshed timestamps; the untouched record stays live.
+        QuickCaptureStoreData persisted = await new QuickCaptureStore(_storeRoot).LoadAsync();
+        Assert.False(persisted.Items.Single(item => item.Id == second.Id).IsDeleted);
+        foreach (var original in new[] { first, third })
+        {
+            var tombstone = Assert.Single(persisted.Items.Where(item => item.Id == original.Id));
+            Assert.True(tombstone.IsDeleted);
+            Assert.True(tombstone.UpdatedAt > original.UpdatedAt);
+            // Content stripping: deletes must not leave payload in the file.
+            Assert.True(string.IsNullOrWhiteSpace(tombstone.Body));
+            Assert.Empty(tombstone.Attachments);
+        }
     }
 
     [Fact]
@@ -488,18 +526,72 @@ public sealed class QuickCaptureServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task ClearAsync_RemovesAllItems()
+    public async Task UndoDelete_RestoresItemOverTombstone()
     {
         var service = CreateService();
-        await service.AddItemAsync("first");
-        await service.AddItemAsync("second");
-        await service.AddRecentClipboardItemAsync("recent", QuickCaptureService.DefaultRecentLimit);
+        var item = await service.AddItemAsync("undo me");
+
+        var deleted = await service.DeleteItemAsync(item.Id);
+        var tombstone = (await service.GetDataAsync())
+            .Items.Single(entry => string.Equals(entry.Id, item.Id, StringComparison.Ordinal));
+        Assert.True(tombstone.IsDeleted);
+        await Task.Delay(5);
+
+        bool restored = await service.RestoreDeletedItemAsync(deleted);
+        var data = await service.GetDataAsync();
+
+        Assert.True(restored);
+        // The undo resurrects the tombstone in place: exactly one entry
+        // remains and it is live — no tombstone left behind.
+        QuickCaptureItem resurrected = Assert.Single(data.Items);
+        Assert.Equal(item.Id, resurrected.Id);
+        Assert.Equal("undo me", resurrected.Body);
+        Assert.False(resurrected.IsDeleted);
+        Assert.True(resurrected.UpdatedAt > tombstone.UpdatedAt);
+
+        // Persisted: the store holds the live record, not a tombstone.
+        QuickCaptureStoreData persisted = await new QuickCaptureStore(_storeRoot).LoadAsync();
+        QuickCaptureItem stored = Assert.Single(persisted.Items.Where(entry => entry.Id == item.Id));
+        Assert.False(stored.IsDeleted);
+    }
+
+    [Fact]
+    public async Task ClearAsync_ReplacesAllItemsWithTombstoneStubs()
+    {
+        var service = CreateService();
+        var first = await service.AddItemAsync("first");
+        var second = await service.AddItemAsync("second");
+        var recent = await service.AddRecentClipboardItemAsync("recent", QuickCaptureService.DefaultRecentLimit);
+        await Task.Delay(5);
 
         await service.ClearAsync();
         var data = await service.GetDataAsync();
 
-        Assert.Empty(data.Items);
-        Assert.Empty(data.RecentItems);
+        // Read API: records and recents are empty.
+        Assert.Empty(data.Items.Where(item => !item.IsDeleted));
+        Assert.Empty(data.RecentItems.Where(item => !item.IsDeleted));
+
+        // Underlying store: every original entry leaves a content-stripped
+        // tombstone stub (id + timestamps only) so a later merge restore
+        // cannot resurrect the wiped items.
+        QuickCaptureStoreData persisted = await new QuickCaptureStore(_storeRoot).LoadAsync();
+        Assert.Equal(2, persisted.Items.Count);
+        foreach (var original in new[] { first, second })
+        {
+            var stub = Assert.Single(persisted.Items.Where(item => item.Id == original.Id));
+            Assert.True(stub.IsDeleted);
+            Assert.True(string.IsNullOrWhiteSpace(stub.Body));
+            Assert.True(string.IsNullOrWhiteSpace(stub.Title));
+            Assert.Empty(stub.Attachments);
+            Assert.Equal(original.CreatedAt, stub.CreatedAt);
+            Assert.True(stub.UpdatedAt > original.UpdatedAt);
+        }
+
+        var recentStub = Assert.Single(persisted.RecentItems);
+        Assert.Equal(recent!.Id, recentStub.Id);
+        Assert.True(recentStub.IsDeleted);
+        Assert.True(recentStub.IsRecent);
+        Assert.True(string.IsNullOrWhiteSpace(recentStub.Body));
     }
 
     [Fact]
@@ -850,11 +942,12 @@ public sealed class QuickCaptureServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task DeleteRecentItemAsync_OnlyRemovesRecentItem()
+    public async Task DeleteRecentItemAsync_TombstonesOnlyRecentItem()
     {
         var service = CreateService();
-        await service.AddItemAsync("record");
+        var record = await service.AddItemAsync("record");
         var recent = await service.AddRecentClipboardItemAsync("recent", QuickCaptureService.DefaultRecentLimit);
+        await Task.Delay(5);
 
         var deleted = await service.DeleteRecentItemAsync(recent!.Id);
         var data = await service.GetDataAsync();
@@ -862,22 +955,79 @@ public sealed class QuickCaptureServiceTests : IDisposable
         Assert.NotNull(deleted);
         Assert.Equal(recent.Id, deleted.Item.Id);
         Assert.True(deleted.IsRecent);
-        Assert.Single(data.Items);
-        Assert.Empty(data.RecentItems);
+        // Read API: the recent entry is gone; the main list is untouched.
+        Assert.Empty(data.RecentItems.Where(item => !item.IsDeleted));
+        var liveRecord = Assert.Single(data.Items.Where(item => !item.IsDeleted));
+        Assert.Equal(record.Id, liveRecord.Id);
+
+        // Underlying store: the tombstone stays in the recents segment while
+        // the main list keeps its live record.
+        QuickCaptureStoreData persisted = await new QuickCaptureStore(_storeRoot).LoadAsync();
+        var tombstone = Assert.Single(persisted.RecentItems.Where(item => item.Id == recent.Id));
+        Assert.True(tombstone.IsDeleted);
+        Assert.True(tombstone.UpdatedAt > recent.UpdatedAt);
+        // Content stripping: deletes must not leave payload in the file.
+        Assert.True(string.IsNullOrWhiteSpace(tombstone.Body));
+        Assert.Empty(tombstone.Attachments);
+        var storedRecord = Assert.Single(persisted.Items.Where(item => item.Id == record.Id));
+        Assert.False(storedRecord.IsDeleted);
     }
 
     [Fact]
-    public async Task ClearRecentAsync_DoesNotClearRecords()
+    public async Task ClearRecentAsync_TombstonesRecentsWithoutTouchingRecords()
     {
         var service = CreateService();
-        await service.AddItemAsync("record");
-        await service.AddRecentClipboardItemAsync("recent", QuickCaptureService.DefaultRecentLimit);
+        var record = await service.AddItemAsync("record");
+        var recent = await service.AddRecentClipboardItemAsync("recent", QuickCaptureService.DefaultRecentLimit);
+        await Task.Delay(5);
 
         await service.ClearRecentAsync();
         var data = await service.GetDataAsync();
 
-        Assert.Single(data.Items);
-        Assert.Empty(data.RecentItems);
+        // Read API: recents wiped, records untouched.
+        Assert.Empty(data.RecentItems.Where(item => !item.IsDeleted));
+        var liveRecord = Assert.Single(data.Items.Where(item => !item.IsDeleted));
+        Assert.Equal(record.Id, liveRecord.Id);
+
+        // Underlying store: recents carry only a content-stripped tombstone
+        // stub; the main list keeps its live content.
+        QuickCaptureStoreData persisted = await new QuickCaptureStore(_storeRoot).LoadAsync();
+        var storedRecord = Assert.Single(persisted.Items);
+        Assert.Equal(record.Id, storedRecord.Id);
+        Assert.False(storedRecord.IsDeleted);
+        Assert.Equal("record", storedRecord.Body);
+        var recentStub = Assert.Single(persisted.RecentItems);
+        Assert.Equal(recent!.Id, recentStub.Id);
+        Assert.True(recentStub.IsDeleted);
+        Assert.True(string.IsNullOrWhiteSpace(recentStub.Body));
+    }
+
+    [Fact]
+    public async Task DeleteRecentItem_TombstoneSurvivesRecentsTrim()
+    {
+        var service = CreateService();
+        var doomed = await service.AddRecentClipboardItemAsync("doomed", QuickCaptureService.MaxRecentLimit);
+        Assert.NotNull(doomed);
+
+        await service.DeleteRecentItemAsync(doomed.Id);
+        // Push the live window past the hard cap so the trim runs on every
+        // add and again on reload.
+        for (int index = 0; index <= QuickCaptureService.MaxRecentLimit; index++)
+        {
+            await service.AddRecentClipboardItemAsync($"filler {index}", QuickCaptureService.MaxRecentLimit);
+        }
+
+        QuickCaptureStoreData reloaded = await new QuickCaptureStore(_storeRoot).LoadAsync();
+
+        // The tombstone still rides outside the live window...
+        QuickCaptureItem tombstone = Assert.Single(reloaded.RecentItems.Where(item => item.IsDeleted));
+        Assert.Equal(doomed.Id, tombstone.Id);
+        Assert.True(tombstone.IsRecent);
+        // ...and it does not consume a live slot: exactly the cap's worth of
+        // live entries survive, none of them the deleted one.
+        var liveItems = reloaded.RecentItems.Where(item => !item.IsDeleted).ToList();
+        Assert.Equal(QuickCaptureService.MaxRecentLimit, liveItems.Count);
+        Assert.DoesNotContain(liveItems, item => item.Id == doomed.Id);
     }
 
     [Fact]

@@ -76,9 +76,10 @@ DeskBox 的文件拖拽分为两类，绝不能混为一套操作：
 
 文件载荷还会提供以下一种系统数据形式：
 
-- 普通文件优先使用 `StorageItems`；
-- `.lnk` 或 Storage broker 无法完整表示的路径使用原生 Shell `IDataObject`；
-- 无法完整提供所选文件时取消拖拽，禁止只拖出部分选择。
+- 所有文件、文件夹和 `.lnk` 优先使用原生 Shell `IDataObject`（`SHCreateDataObject`，格式与资源管理器拖拽完全一致：`CF_HDROP`、`Shell IDList Array`、`FileNameW` 等）；普通文件外面再套一层 `PreferredDropEffectFilterDataObject`，对**其他进程**隐藏 `Preferred DropEffect`（见 4.1）；
+- 只有路径不在同一父目录等原生对象无法表示的情况才回退 `StorageItems`；
+- 无法完整提供所选文件时取消拖拽，禁止只拖出部分选择；
+- **不写入文本格式**（`SetText`）。Chromium 会把 `CF_UNICODETEXT` 里的路径同时映射成 `text/plain` 和 `text/uri-list`，Electron 应用（WorkBuddy 等）的拖放区看到这两个类型就按文本/链接处理而不是文件；资源管理器的拖拽只有 `Files`。
 
 ### 3.1 `.lnk` 的特殊边界
 
@@ -90,13 +91,24 @@ DeskBox 的文件拖拽分为两类，绝不能混为一套操作：
 
 这三个值含义不同：
 
-- `DataPackage.RequestedOperation`：源端偏好的**单个**操作；文件拖拽固定为 `Move`。
-- `DragStartingEventArgs.AllowedOperations`：源端能力集合；普通文件为 `Copy | Move | Link`，托管快捷方式为 `Move | Link`。
+- `DataPackage.RequestedOperation`：在 `ListViewBase` 项目拖拽里它**就是对外允许集合**。普通文件/文件夹走原生 Shell 载荷时为 `Copy | Move | Link`（其多位偏好效果对外进程隐藏），托管快捷方式和 `StorageItems` 回退为 `Move`（`FileItemDragPackage.ResolveRequestedOperation`）。
+- `DragStartingEventArgs.AllowedOperations`：源端能力集合；普通文件为 `Copy | Move | Link`，托管快捷方式为 `Move | Link`。**在 `ListViewBase` 内置项目拖拽里这个值不会传给底层拖拽操作**，见 4.1。
 - `DragEventArgs.AcceptedOperation`：目标在当前 `DragOver` 或最终 `Drop` 接受的操作。
 
-### 4.1 为什么 RequestedOperation 必须只有 Move
+### 4.1 为什么 RequestedOperation 决定对外允许集合，以及如何安全地写入多个位
 
-Windows 10 会把 `RequestedOperation = Copy | Move | Link` 理解成没有明确默认动作，普通左键拖出也可能弹出“复制到当前位置 / 移动到当前位置 / 创建快捷方式”的选择菜单。能力集合应放在 `AllowedOperations`，不能塞进 `RequestedOperation`。
+两个 WinUI 事实（源码 `ListViewBase_Partial_Reorder.cpp`、`UIElement_Partial_DragDrop.cpp`）：
+
+1. `ListViewBase` 项目拖拽把 `DragStarting` 抛在项容器上，挂在 `GridView`/`ListView` 上的 `Items_DragStarting` 不会触发；即使触发，该路径也不会把 `AllowedOperations` 写入 `DragOperation`。只有 `UIElement.StartDragAsync` 路径会写，并且值恰好是 `Copy | Move | Link` 时 XAML 会跳过不写。
+2. 因此外部 OLE 目标看到的允许集合就是 `RequestedOperation` 本身（实测：`Move` → 只允许 `Move`；`None` → 允许集合为空，任何目标都拒收）。`RequestedOperation = Move` 时，所有在 `DragEnter` 回答 `DROPEFFECT_COPY` 的目标（Chromium/Electron 网页拖放区、`WM_DROPFILES` 游戏、WinForms、默认 `IDropTarget` 实现）都会被 OLE 判为不允许，光标变禁止且不产生 `Drop`。微信之类沿用源端 effect 的目标才碰巧能收。
+
+要对外暴露与资源管理器一致的 `Copy | Move | Link`，就只能把这三个位写进 `RequestedOperation`。但 WinUI 会把该值以 `Preferred DropEffect` 格式写进数据对象，而 Windows 10 资源管理器把多位偏好效果理解成没有明确默认动作，普通左键拖出会弹出“复制到当前位置 / 移动到当前位置 / 创建快捷方式”菜单（8.1）。所以普通文件：
+
+- 载荷用原生 Shell `IDataObject`，外面套 `PreferredDropEffectFilterDataObject`；
+- 该包装用 `CoGetCallerTID` 区分调用方：**进程内**（WinUI 自己读回 `RequestedOperation`、DeskBox 内部目标）照常返回；**其他进程**读 `Preferred DropEffect` 时返回 `DV_E_FORMATETC`，Explorer 因此按同盘移动/跨盘复制、Shift/Ctrl/Alt 修饰键的标准规则决定；
+- 不能整体吞掉 `SetData(Preferred DropEffect)`：WinUI 会把 `RequestedOperation` 读回成 `None`，允许集合随之变空。
+
+托管快捷方式保留单个 `Move`，让“拖回桌面即还原”维持移动语义；`StorageItems` 回退路径没有包装层可隐藏偏好效果，同样保留 `Move`。
 
 ### 4.2 为什么反馈策略与完成策略必须分开
 
@@ -215,7 +227,41 @@ WinUI 的拖拽完成时刻可能晚于物理鼠标松开。2026-09-04 的两次
 
 根因：把 `Copy | Move | Link` 同时写入 `RequestedOperation`。
 
-正确做法：`RequestedOperation=Move`，完整能力集合写入 `AllowedOperations`。
+正确做法：多位 `RequestedOperation` 只能配合对外进程隐藏 `Preferred DropEffect` 的原生 Shell 载荷使用；无法隐藏时保持单个 `Move`，见 4.1。
+
+### 8.1.1 格子拖出的文件微信能收，Electron 应用（WorkBuddy）和游戏收不到
+
+根因一：`RequestedOperation=Move` 在 `ListViewBase` 项目拖拽中就是对外允许集合。用一个只回答 `Copy` 的 WinForms 探针验证：DeskBox 拖出时 `AllowedEffect=Move`、`CF_HDROP` 可读，但没有 `Drop`；资源管理器拖出同一文件为 `Copy, Move, Link` 且 `Drop` 正常。日志表现为 `stage=SourceCompleted ... dropResult=None`，且 `stage=SourceStarting` 从未出现。
+
+根因二：载荷里的 `SetText(路径)` 被 Chromium 映射成 `text/plain` + `text/uri-list`，WorkBuddy 拖放区据此不再按文件处理（用一个打印 `dataTransfer.types` 的网页验证：DeskBox 为 `[text/plain, text/uri-list, Files]`，资源管理器为 `[Files]`）。
+
+正确做法：普通文件走原生 Shell 载荷 + `PreferredDropEffectFilterDataObject`，`RequestedOperation=Copy | Move | Link`；文件拖拽不再写入文本格式。
+
+排除过的方案：`RequestedOperation=None`——允许集合直接变空，任何目标都拒收。
+
+#### 8.1.1b 自起 DoDragDrop 实验记录（2026-09-20，三轮全部失败，已归档）
+
+目标：绕开 WinUI"允许集=RequestedOperation=preferred"三位一体耦合——`dwOKEffects=7` 参数直给允许集 + preferred=Move 单值亲手写入，两旋钮解耦（Win10 不弹菜单 + WorkBuddy 可收同时成立）。实现完整落在 `NativeFileDragOut`（保留为死代码）。
+
+| 轮次 | 方案 | 结果 |
+|---|---|---|
+| 1 | UI 线程同步 DoDragDrop | 饿死：`QueryContinueDrag` 零调用、永不返回、持有系统级 OLE 拖拽锁（全系统拖拽失效，杀进程恢复） |
+| 2 | 专职 STA 线程（`DeskBox-NativeDragLoop` + OleInitialize） | 同样饿死 |
+| 3 | UI 线程 `ReleaseCapture()` 后再起（API 返回 True） | 同样饿死——线程捕获确实释放了，输入仍不进循环 |
+
+**机制定论**：`DragItemsStarting.Cancel` 只取消 WinUI 会话，指针按住期间 **XAML 输入岛独占鼠标输入流且不走 Win32 capture 路由**（ReleaseCapture 成功仍饿死是直接证据）——DoDragDrop 的模态循环无论跑在哪个线程都拿不到输入。`SHDoDragDrop` 同理被否决（内部同样基于 DoDragDrop，输入模型相同）。这是 WinUI 输入架构与 WinForms/WPF 的本质差异，后两者自起拖拽的先例不适用。
+
+**复活条件**（未来再战）：不能在"指针按住的 XAML 手势期间"起拖——要么完全自管手势（关 CanDragItems、自行 PointerPressed/Moved 检测，代价是失去全部内建拖拽语义）、要么等 WinAppSDK 输入架构提供释放通道。诊断基建已沉淀：QueryContinueDrag 计数打点 + 15s 看门狗 + `DropProbe.exe`（`D:\VMShare`，外部读者探针）。
+
+**当前止血**：`FileItemDragPackage.ResolveRequestedOperation` 加 Win11 门控——Win11 多位+隐藏层（行为已真机验证：不弹菜单、默认移动、WorkBuddy 可收）；Win10 退单值 Move（无弹菜单，Copy-only 目标拒收=正式版本来的状态）。工程教训：**运行中实例锁 exe 会让 dotnet build 显示"0 个错误"但静默不写文件**——重启验证前必须核对 exe mtime > 源码 mtime（本次两轮假验证的根因）。
+
+#### 8.1.1a 未文档化假设与探针结论（2026-09-20）
+
+- `CoGetCallerTID` 官方文档只覆盖"正在服务 COM 调用"两态：S_OK=同进程调用方、S_FALSE=跨进程调用方（跨机器也是 S_FALSE）。**未文档化的"无 COM 调用上下文"实测返回 S_OK 且 tid=0**（裸线程与已初始化 MTA 均如此，见 `tests/DeskBox.Tests/CoGetCallerTidProbeTests.cs`）——因此进程内直调（WinUI 掩码推导、内部直调）不会被误判为跨进程，`S_FALSE` 的唯一来源就是真跨进程调用。探针以契约测试形式锁定；WinAppSDK 升级后若拖拽允许集合异常，先跑该测试与 verbose 日志（`[DragStart] Preferred DropEffect read in-process`）定位。
+- 官方明示 `CoGetCallerTID` 返回信息可被伪造、不得用于安全决策。本用途是 UX 级格式过滤（隐藏与否均不构成提权面），非安全边界。
+- 包装器对象由 `PreferredDropEffectFilterDataObject` 内静态单槽显式持有到下一场拖拽，CCW 生存不再单独依赖 WinUI `IDataObjectProvider` 未文档化的 AddRef 合约。
+- 行为决策记录：隐藏 preferred effect 后，拖出到资源管理器的默认操作与 Explorer 原生拖拽一致——同卷移动、跨卷复制；旧版 `preferred=Move` 按官方 cut 语义可能让遵循该格式的目标"复制后删源"，新版一律只复制（更安全）。**跨卷拖出从移动变复制是预期变化**，真机矩阵确认后此条即为最终口径。
+- 治理项（后续收敛）：`RegisterClipboardFormat` 在 `NativeDropDescriptionWriter`/`NativeDropTarget`/`ShellClipboardHelper` 仍有 3 处历史私有声明（均在 P/Invoke 棘轮预算内）；新代码一律走 `Win32Helper.GetRegisteredClipboardFormat`，旧三处收敛时可同步缩 `PlatformInteropExpectedViolations` 预算。
 
 ### 8.2 `.lnk` 在格子/叠放内排序后进入回收站
 
@@ -255,25 +301,26 @@ WinUI 的拖拽完成时刻可能晚于物理鼠标松开。2026-09-04 的两次
 
 ## 9. 一定不要踩的坑
 
-1. 不要把多个标志重新写进 `DataPackage.RequestedOperation`。
-2. 不要因为内部 `DragOver` 显示 `Move`，就让内部 `Drop` 也返回 `Move`。
-3. 不要假设 `UIElement.DragStarting` 一定会在 `ListViewBase` 内置项目拖拽中触发。
-4. 不要只在 `Root_DragEnter` 清理或验证载荷缓存。
-5. 不要把“出现高亮/插入线”当成元数据已经提交。
-6. 不要在 `DragOver` 就设置“内部已处理”；只有 `Drop` 或受边界保护的释放恢复真正提交后才能设置。
-7. 不要把 `_activeDragHandledAsStackMembership` 当成仅表示叠放加入；它当前保护所有内部编排免受源端清理。
-8. 不要在内部加入/移出/排序时调用文件移动 API。
-9. 不要在真实跨格移动完成前返回 `Move`，也不要在 DeskBox 已完成移动后再让 Shell 二次清理。
-10. 不要对 `.lnk` 在 UI 线程同步调用 Storage broker；优先原生 Shell 载荷。
-11. 不要用弹窗成员列表的坐标配合主窗口句柄判断鼠标位置。
-12. 不要让根表面插入线覆盖文件夹或叠放子目标；子目标存在时必须禁止根排序恢复。
-13. 不要用叠放投影集合判断格子空状态。
-14. 不要只测试一种叠放打开模式，或只在 Win11 上验证 Win10 行为。
-15. 不要以管理员身份启动 DeskBox 做拖放验证；不同完整性级别会让 Windows 拦截拖放，形成错误结论。
-16. 不要为了允许父子映射而修改或绕过 `EnsureSafeDirectoryTransfers`；只放宽格子映射关系校验。
-17. 不要让托管目录复制递归进入 junction、符号链接或已经访问过的物理目录。
-18. 不要把“两个格子 ID 不同”等同于一定需要文件传输；源项目已经位于有效目标目录时必须无操作。
-19. 不要为了让文件夹快捷方式可在格子内打开而把 `WidgetItem.IsFolder` 改为 `true`，也不要把拖拽源路径从 `.lnk` 改成 `TargetPath`。
+1. 不要把普通文件拖拽的 `RequestedOperation` 改回单个 `Move`（对外只允许 `Move`）或 `None`（对外什么都不允许）；多位值必须配合 `PreferredDropEffectFilterDataObject`。
+2. 不要给文件拖拽 `SetText`，否则 Electron 拖放区不再把它当文件。
+3. 不要因为内部 `DragOver` 显示 `Move`，就让内部 `Drop` 也返回 `Move`。
+4. 不要假设 `UIElement.DragStarting` 一定会在 `ListViewBase` 内置项目拖拽中触发。
+5. 不要只在 `Root_DragEnter` 清理或验证载荷缓存。
+6. 不要把“出现高亮/插入线”当成元数据已经提交。
+7. 不要在 `DragOver` 就设置“内部已处理”；只有 `Drop` 或受边界保护的释放恢复真正提交后才能设置。
+8. 不要把 `_activeDragHandledAsStackMembership` 当成仅表示叠放加入；它当前保护所有内部编排免受源端清理。
+9. 不要在内部加入/移出/排序时调用文件移动 API。
+10. 不要在真实跨格移动完成前返回 `Move`，也不要在 DeskBox 已完成移动后再让 Shell 二次清理。
+11. 不要对 `.lnk` 在 UI 线程同步调用 Storage broker；优先原生 Shell 载荷。
+12. 不要用弹窗成员列表的坐标配合主窗口句柄判断鼠标位置。
+13. 不要让根表面插入线覆盖文件夹或叠放子目标；子目标存在时必须禁止根排序恢复。
+14. 不要用叠放投影集合判断格子空状态。
+15. 不要只测试一种叠放打开模式，或只在 Win11 上验证 Win10 行为。
+16. 不要以管理员身份启动 DeskBox 做拖放验证；不同完整性级别会让 Windows 拦截拖放，形成错误结论。
+17. 不要为了允许父子映射而修改或绕过 `EnsureSafeDirectoryTransfers`；只放宽格子映射关系校验。
+18. 不要让托管目录复制递归进入 junction、符号链接或已经访问过的物理目录。
+19. 不要把“两个格子 ID 不同”等同于一定需要文件传输；源项目已经位于有效目标目录时必须无操作。
+20. 不要为了让文件夹快捷方式可在格子内打开而把 `WidgetItem.IsFolder` 改为 `true`，也不要把拖拽源路径从 `.lnk` 改成 `TargetPath`。
 
 ## 10. 日志判读
 

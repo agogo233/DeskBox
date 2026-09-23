@@ -68,6 +68,62 @@ public sealed class IdleWidgetZOrderPolicyTests
         Assert.Equal(new long[] { 2, 1 }, Handles(ordered));
     }
 
+    [Fact]
+    public void ShouldNormalizeIdlePeerOrder_OnlyRunsWhileDropShadowsAreEnabled()
+    {
+        Assert.True(IdleWidgetZOrderPolicy.ShouldNormalizeIdlePeerOrder(
+            windowDropShadowEnabled: true));
+        Assert.False(IdleWidgetZOrderPolicy.ShouldNormalizeIdlePeerOrder(
+            windowDropShadowEnabled: false));
+    }
+
+    [Fact]
+    public void MatchesRequestedOrder_AcceptsAlreadyAppliedOrder()
+    {
+        var requested = Handles(10, 20, 30);
+
+        Assert.True(IdleWidgetZOrderPolicy.MatchesRequestedOrder(
+            requested,
+            peersObservedAboveHighest: Array.Empty<IntPtr>(),
+            peersObservedFromHighestDown: Handles(10, 20, 30)));
+    }
+
+    [Fact]
+    public void MatchesRequestedOrder_RejectsPeerAboveRequestedHighest()
+    {
+        var requested = Handles(10, 20, 30);
+
+        Assert.False(IdleWidgetZOrderPolicy.MatchesRequestedOrder(
+            requested,
+            peersObservedAboveHighest: Handles(30),
+            peersObservedFromHighestDown: Handles(10, 20, 30)));
+    }
+
+    [Fact]
+    public void MatchesRequestedOrder_RejectsSwappedPeerOrder()
+    {
+        var requested = Handles(10, 20, 30);
+
+        Assert.False(IdleWidgetZOrderPolicy.MatchesRequestedOrder(
+            requested,
+            peersObservedAboveHighest: Array.Empty<IntPtr>(),
+            peersObservedFromHighestDown: Handles(10, 30, 20)));
+    }
+
+    [Fact]
+    public void MatchesRequestedOrder_RejectsMissingPeer()
+    {
+        var requested = Handles(10, 20, 30);
+
+        Assert.False(IdleWidgetZOrderPolicy.MatchesRequestedOrder(
+            requested,
+            peersObservedAboveHighest: Array.Empty<IntPtr>(),
+            peersObservedFromHighestDown: Handles(10, 20)));
+    }
+
+    private static IntPtr[] Handles(params long[] handles) =>
+        handles.Select(handle => new IntPtr(handle)).ToArray();
+
     private static IdleWidgetZOrderCandidate Candidate(
         long handle,
         double top,

@@ -160,7 +160,8 @@ public partial class App
         DragDropPermissionService.CreateOrUpdateShortcut(
             applicationLink,
             firstTarget,
-            "--first");
+            "--first",
+            DragDropPermissionService.DeskBoxIconPath);
         ShortcutInfo? first = ShortcutHelper.ReadStoredMetadata(applicationLink);
         Require(
             first is not null &&
@@ -172,7 +173,8 @@ public partial class App
         DragDropPermissionService.CreateOrUpdateShortcut(
             applicationLink,
             secondTarget,
-            "--second");
+            "--second",
+            DragDropPermissionService.DeskBoxIconPath);
         ShortcutInfo? second = ShortcutHelper.ReadStoredMetadata(applicationLink);
         Require(
             second is not null &&
@@ -252,7 +254,11 @@ public partial class App
         string replacementPath = Path.Combine(root, "shell-ui-replacement.txt");
         string shortcutPath = Path.Combine(root, "shell-ui.lnk");
         File.WriteAllText(targetPath, "shell UI target");
-        DragDropPermissionService.CreateOrUpdateShortcut(shortcutPath, targetPath, "--shell-ui");
+        DragDropPermissionService.CreateOrUpdateShortcut(
+            shortcutPath,
+            targetPath,
+            "--shell-ui",
+            DragDropPermissionService.DeskBoxIconPath);
 
         if (scenario == AotShortcutSmokeScenario.UiRepair)
         {

@@ -83,6 +83,80 @@ public sealed class WidgetCompactExpansionDirectionPolicyTests
     }
 
     [Fact]
+    public void ResolveAdaptive_FixedDownNearBottom_KeepsDirectionAndShrinksSize()
+    {
+        var workArea = new Windows.Graphics.RectInt32(0, 0, 1920, 1080);
+        var compact = new Windows.Graphics.RectInt32(800, 1020, 300, 52);
+        var requested = new Windows.Graphics.SizeInt32(600, 500);
+
+        var layout = WidgetCompactExpansionDirectionPolicy.ResolveAdaptive(
+            compact,
+            requested,
+            workArea,
+            [WidgetCompactExpansionAnchor.LeftTop, WidgetCompactExpansionAnchor.RightTop],
+            SettingsService.WidgetCompactExpansionDirectionDown);
+
+        Assert.True(layout.CanExpand);
+        Assert.True(layout.IsSizeConstrained);
+        Assert.Equal(WidgetCompactExpansionAnchor.LeftTop, layout.Anchor);
+        Assert.Equal(60, layout.ExpandedBounds.Height);
+    }
+
+    [Fact]
+    public void ResolveAdaptive_AutoNearBottom_FlipsToUpwardAnchorAtFullSize()
+    {
+        var workArea = new Windows.Graphics.RectInt32(0, 0, 1920, 1080);
+        var compact = new Windows.Graphics.RectInt32(800, 1020, 300, 52);
+        var requested = new Windows.Graphics.SizeInt32(600, 500);
+
+        var layout = WidgetCompactExpansionDirectionPolicy.ResolveAdaptive(
+            compact,
+            requested,
+            workArea,
+            [
+                WidgetCompactExpansionAnchor.LeftBottom,
+                WidgetCompactExpansionAnchor.RightBottom,
+                WidgetCompactExpansionAnchor.LeftTop,
+                WidgetCompactExpansionAnchor.RightTop
+            ],
+            SettingsService.WidgetCompactExpansionDirectionAuto);
+
+        Assert.True(layout.CanExpand);
+        Assert.False(layout.IsSizeConstrained);
+        Assert.Equal(500, layout.ExpandedBounds.Height);
+        Assert.True(layout.Anchor is
+            WidgetCompactExpansionAnchor.LeftBottom or
+            WidgetCompactExpansionAnchor.RightBottom);
+    }
+
+    [Fact]
+    public void PerWidgetOverride_RoundTripsThroughConfigMetadata()
+    {
+        var config = new DeskBox.Models.WidgetConfig();
+
+        Assert.Null(WidgetCompactExpansionDirectionPolicy.GetOverride(config));
+        Assert.Equal(
+            SettingsService.WidgetCompactExpansionDirectionDown,
+            WidgetCompactExpansionDirectionPolicy.ResolveEffective(config, "Down"));
+
+        WidgetCompactExpansionDirectionPolicy.SetOverride(
+            config, SettingsService.WidgetCompactExpansionDirectionUp);
+
+        Assert.Equal(
+            SettingsService.WidgetCompactExpansionDirectionUp,
+            WidgetCompactExpansionDirectionPolicy.GetOverride(config));
+        Assert.Equal(
+            SettingsService.WidgetCompactExpansionDirectionUp,
+            WidgetCompactExpansionDirectionPolicy.ResolveEffective(config, "Down"));
+
+        WidgetCompactExpansionDirectionPolicy.SetOverride(config, null);
+
+        Assert.Null(WidgetCompactExpansionDirectionPolicy.GetOverride(config));
+        Assert.False(config.Metadata.ContainsKey(
+            WidgetCompactExpansionDirectionPolicy.OverrideMetadataKey));
+    }
+
+    [Fact]
     public void SettingsPage_ExposesThreeDirectionOptionsAndBindsTheSelection()
     {
         string xaml = File.ReadAllText(TestPaths.FromRepository(

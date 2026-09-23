@@ -18,6 +18,13 @@ public sealed partial class OnboardingWindow
     private bool _hasHiddenWidgetsDuringPractice;
     private bool _hasCompletedVisibilityPractice;
     private bool _isSynchronizingTaskStorageEntryToggles;
+    private int _storageEntryStateRefreshGeneration;
+
+    // Quick Access enumeration goes through Explorer's shell namespace and can
+    // stall for a long time (disconnected shares, stale Recent items, busy
+    // explorer.exe). Never wait on it from the UI thread, and stop waiting
+    // after this long so the guide stays interactive.
+    private static readonly TimeSpan StorageEntryStateQueryTimeout = TimeSpan.FromSeconds(8);
 
     private void SetupTaskStep1()
     {
@@ -47,21 +54,61 @@ public sealed partial class OnboardingWindow
         string storagePath = SettingsService.NormalizeManagedStorageRootPath(
             _settingsService.Settings.DefaultManagedStorageRootPath);
         TaskStep3StoragePathText.Text = storagePath;
+        _ = RefreshTaskStep3StorageEntryStateAsync(storagePath);
+    }
+
+    private async Task RefreshTaskStep3StorageEntryStateAsync(string storagePath)
+    {
+        int generation = ++_storageEntryStateRefreshGeneration;
+        TaskStep3QuickAccessToggle.IsEnabled = false;
+        TaskStep3DesktopShortcutToggle.IsEnabled = false;
+
+        ManagedStorageDesktopShortcutService shortcutService =
+            global::DeskBox.App.Current.ManagedStorageDesktopShortcutService;
+        Task<QuickAccessStateResult> pinStateTask = ExplorerQuickAccessHelper
+            .GetQuickAccessPinStateAsync(storagePath)
+            .WaitAsync(StorageEntryStateQueryTimeout);
+        Task<bool> shortcutTask = Task.Run(shortcutService.HasShortcut)
+            .WaitAsync(StorageEntryStateQueryTimeout);
+
+        bool isPinned = false;
+        try
+        {
+            isPinned = (await pinStateTask).State == QuickAccessPinState.Pinned;
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[Onboarding] Quick Access pin state query failed: {ex.Message}");
+        }
+
+        bool hasShortcut = false;
+        try
+        {
+            hasShortcut = await shortcutTask;
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[Onboarding] Desktop shortcut state query failed: {ex.Message}");
+        }
+
+        if (_isClosed || generation != _storageEntryStateRefreshGeneration)
+        {
+            return;
+        }
 
         _isSynchronizingTaskStorageEntryToggles = true;
         try
         {
-            TaskStep3QuickAccessToggle.IsOn =
-                ExplorerQuickAccessHelper.GetQuickAccessPinState(storagePath, out _) ==
-                QuickAccessPinState.Pinned;
-            TaskStep3DesktopShortcutToggle.IsOn =
-                global::DeskBox.App.Current.ManagedStorageDesktopShortcutService
-                    .HasShortcut();
+            TaskStep3QuickAccessToggle.IsOn = isPinned;
+            TaskStep3DesktopShortcutToggle.IsOn = hasShortcut;
         }
         finally
         {
             _isSynchronizingTaskStorageEntryToggles = false;
         }
+
+        TaskStep3QuickAccessToggle.IsEnabled = true;
+        TaskStep3DesktopShortcutToggle.IsEnabled = true;
     }
 
     private async void TaskStep3QuickAccessToggle_Toggled(

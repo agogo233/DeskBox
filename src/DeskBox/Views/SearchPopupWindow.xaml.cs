@@ -2484,10 +2484,8 @@ public sealed partial class SearchPopupWindow : Window
         return Math.Max(1, (int)Math.Floor(width / 110));
     }
 
-    private static Microsoft.UI.Xaml.Media.Brush? ResolveThemeBrush(string key) =>
-        Application.Current.Resources.TryGetValue(key, out object? value)
-            ? value as Microsoft.UI.Xaml.Media.Brush
-            : null;
+    private Microsoft.UI.Xaml.Media.Brush? ResolveThemeBrush(string key) =>
+        NeutralInteractionBrush.ResolveThemedResource(key, RootGrid);
 
     // ── Legacy: kept for compatibility ──
 
@@ -2644,10 +2642,11 @@ public sealed partial class SearchPopupWindow : Window
     {
         icon.Visibility = active ? Visibility.Visible : Visibility.Collapsed;
         icon.Glyph = ascending ? "\uE74A" : "\uE74B";
-        label.Foreground = ResolveThemeBrush(
+        label.Foreground = NeutralInteractionBrush.ResolveThemedResource(
             active
                 ? "TextFillColorPrimaryBrush"
-                : "TextFillColorSecondaryBrush");
+                : "TextFillColorSecondaryBrush",
+            label);
     }
 
     // Result row interaction (hover, click, drag, and context menu).

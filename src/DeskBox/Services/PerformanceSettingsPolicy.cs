@@ -73,6 +73,7 @@ public static class PerformanceSettingsPolicy
         HiddenCacheCleanupScopeAllRecreatable;
     public const bool DefaultIdleWorkingSetTrimEnabled = true;
     public const bool DefaultImmediateHiddenWorkingSetTrimEnabled = true;
+    public const bool DefaultQuiescenceWorkingSetTrimEnabled = true;
     public const bool DefaultContinuousDecorativeAnimationsEnabled = true;
     public const bool DefaultTextMarqueeAnimationsEnabled = true;
     public const bool DefaultVinylRotationAnimationsEnabled = true;

@@ -75,7 +75,7 @@ public sealed class WidgetFirstRunGuideFactoryTests : IDisposable
         var localization = TestServices.CreateLocalizationService(
             SettingsService.LanguageChinese);
         var service = new QuickCaptureService(new QuickCaptureStore(_dataRoot));
-        await service.AddItemAsync("existing item");
+        var existing = await service.AddItemAsync("existing item");
 
         await service.ClearAsync();
 
@@ -87,9 +87,15 @@ public sealed class WidgetFirstRunGuideFactoryTests : IDisposable
             localization));
 
         QuickCaptureStoreData data = await service.GetDataAsync();
-        QuickCaptureItem guide = Assert.Single(data.Items);
+        // The wipe left a tombstone stub behind: only live entries count, so
+        // exactly the guide is visible.
+        QuickCaptureItem guide = Assert.Single(data.Items.Where(item => !item.IsDeleted));
         Assert.Equal("从这里开始记录", guide.Title);
         Assert.Equal(TextContentFormat.Markdown, guide.ContentFormat);
+        // The stub stays on disk and does not block the guide from reseeding.
+        QuickCaptureItem tombstone = Assert.Single(data.Items.Where(item => item.IsDeleted));
+        Assert.Equal(existing.Id, tombstone.Id);
+        Assert.True(string.IsNullOrWhiteSpace(tombstone.Body));
     }
 
     [Fact]

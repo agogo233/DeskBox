@@ -221,6 +221,18 @@ public sealed class NativeDropTarget : IDisposable
     }
 
     /// <summary>
+    /// Returns the widget id currently hosted by this drop target's window, or
+    /// null when unknown. A native drag-out stamped with the same id is the
+    /// drag returning to its own widget: the drag is refused (no launch, no
+    /// import, no relocation) so the source files stay untouched.
+    /// </summary>
+    internal Func<string?>? SelfDragSourceWidgetProvider { get; set; }
+
+    private bool _isSelfSourceDrag;
+
+    private const uint DropeffectNone = 0;
+
+    /// <summary>
     /// Whether the current drag payload contains file drop data (CF_HDROP).
     /// Valid between DragEnter and DragLeave/Drop.
     /// </summary>
@@ -360,6 +372,7 @@ public sealed class NativeDropTarget : IDisposable
         uint allowedEffects = effect;
         InspectDragData(dataObject);
         PeekDropPaths(dataObject);
+        _isSelfSourceDrag = IsSelfSourceDrag(dataObject);
         _dragPathHints = HasFileData && !HasVirtualFileData
             ? TryExtractHDropPathHints(dataObject)
             : [];
@@ -375,6 +388,15 @@ public sealed class NativeDropTarget : IDisposable
             followWindows: GetFollowWindowsSetting(),
             shortcutOutsideDesktop: GetShortcutOutsideDesktopSetting(),
             sourcesOnDesktop: ResolveSourcesOnDesktop(_peekedDropPaths));
+        if (_isSelfSourceDrag)
+        {
+            // The drag left this widget and came back; nothing here may
+            // accept it. 1a scope: reorder-through-native-drag is not wired
+            // yet, so the honest feedback is the "no drop" cursor.
+            effect = DropeffectNone;
+            return S_OK;
+        }
+
         if (HasFileData)
         {
             RetainActiveDataObject(dataObject);
@@ -403,6 +425,12 @@ public sealed class NativeDropTarget : IDisposable
             followWindows: GetFollowWindowsSetting(),
             shortcutOutsideDesktop: GetShortcutOutsideDesktopSetting(),
             sourcesOnDesktop: ResolveSourcesOnDesktop(_peekedDropPaths));
+        if (_isSelfSourceDrag)
+        {
+            effect = DropeffectNone;
+            return S_OK;
+        }
+
         UpdateShellVisual(point, effect);
         return S_OK;
     }
@@ -422,6 +450,23 @@ public sealed class NativeDropTarget : IDisposable
         POINT point,
         ref uint effect)
     {
+        if (_isSelfSourceDrag)
+        {
+            // The drag returned to its own widget: refuse before the launch
+            // delegate and the import pipeline can touch anything, and keep
+            // the source files exactly where they are.
+            ClearActiveDropDescriptionAndReleaseDataObject();
+            _shellVisualActive = false;
+            ResetDragDataState();
+            _rightButtonDragActive = false;
+            _isSelfSourceDrag = false;
+            effect = DropeffectNone;
+            App.Log(
+                "[DropTarget] NativeDrop refused self-source drag " +
+                "(returned to its own widget)");
+            return S_OK;
+        }
+
         uint allowedEffects = effect;
         bool shellApplicationDrop = HasShellApplicationData;
         bool virtualFileDrop = HasVirtualFileData;
@@ -702,6 +747,27 @@ public sealed class NativeDropTarget : IDisposable
         HasShellApplicationData = false;
         _peekedDropPaths = [];
         _dragPathHints = [];
+        _isSelfSourceDrag = false;
+    }
+
+    private bool IsSelfSourceDrag(nint dataObject)
+    {
+        if (SelfDragSourceWidgetProvider is null)
+        {
+            return false;
+        }
+
+        if (!NativeFileDragOut.TryReadSourceTag(
+                dataObject,
+                out string sourceWidgetId,
+                out _))
+        {
+            return false;
+        }
+
+        string? hostedWidgetId = SelfDragSourceWidgetProvider();
+        return hostedWidgetId is not null &&
+            string.Equals(sourceWidgetId, hostedWidgetId, StringComparison.Ordinal);
     }
 
     private bool ShouldUseShellVisual()

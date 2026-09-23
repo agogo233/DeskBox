@@ -42,6 +42,14 @@ public static class WindowsCompatibilityService
     /// </summary>
     public static event Action? TextScaleFactorChanged;
 
+    /// <summary>
+    /// Raised when the system transparency-effects switch flips. Only
+    /// available on Win11 22H2+ (UniversalApiContract 14); on older builds
+    /// the event contract is absent and this never fires. The callback can
+    /// arrive off the UI thread — marshal before touching UI.
+    /// </summary>
+    public static event Action? AdvancedEffectsEnabledChanged;
+
     public static int OsBuild => s_osBuild.Value;
 
     public static bool IsWindows11OrLater => OsBuild >= Windows11Build;
@@ -346,6 +354,13 @@ public static class WindowsCompatibilityService
                         UiSettings_Changed;
                     settings.TextScaleFactorChanged +=
                         UiSettings_TextScaleFactorChanged;
+                    if (Windows.Foundation.Metadata.ApiInformation.IsEventPresent(
+                            "Windows.UI.ViewManagement.UISettings",
+                            "AdvancedEffectsEnabledChanged"))
+                    {
+                        settings.AdvancedEffectsEnabledChanged +=
+                            UiSettings_AdvancedEffectsEnabledChanged;
+                    }
                     s_uiSettings = settings;
                 }
                 catch
@@ -399,6 +414,11 @@ public static class WindowsCompatibilityService
         UISettings sender,
         object args) =>
         TextScaleFactorChanged?.Invoke();
+
+    private static void UiSettings_AdvancedEffectsEnabledChanged(
+        UISettings sender,
+        object args) =>
+        AdvancedEffectsEnabledChanged?.Invoke();
 
     private static void AccessibilitySettings_Changed(
         AccessibilitySettings sender,

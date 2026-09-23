@@ -12,6 +12,9 @@ namespace DeskBox.Services;
 [JsonSerializable(
     typeof(QuickCaptureStoreData),
     TypeInfoPropertyName = "StoreData")]
+[JsonSerializable(
+    typeof(QuickCaptureItem),
+    TypeInfoPropertyName = "QuickCaptureItem")]
 internal sealed partial class QuickCaptureJsonContext : JsonSerializerContext
 {
 }
@@ -75,23 +78,35 @@ public sealed class QuickCaptureStore
         NormalizeItems(data.Items, isRecent: false);
         NormalizeItems(data.RecentItems, isRecent: true);
 
-        data.Items = data.Items
+        data.Items = PruneTombstones(data.Items
             .Where(IsValidItem)
             .GroupBy(item => item.Id, StringComparer.Ordinal)
             .Select(group => group.First())
             .OrderBy(item => item.SortOrder)
             .ThenByDescending(item => item.UpdatedAt)
-            .ToList();
+            .ToList());
         NormalizePinnedSortOrders(data.Items);
 
-        data.RecentItems = data.RecentItems
-            .Where(IsValidItem)
+        // Live entries fill the recent window on their own; tombstones ride
+        // outside it (deduped by id, newest UpdatedAt wins) so loading cannot
+        // squeeze delete protection out of the list. PruneTombstones still
+        // caps the retained stub count.
+        var liveRecentItems = data.RecentItems
+            .Where(item => IsValidItem(item) && !item.IsDeleted)
             .GroupBy(GetDeduplicationKey, StringComparer.Ordinal)
             .Select(group => group.OrderBy(item => item.SortOrder).ThenByDescending(item => item.UpdatedAt).First())
             .OrderBy(item => item.SortOrder)
             .ThenByDescending(item => item.UpdatedAt)
             .Take(QuickCaptureService.MaxRecentLimit)
             .ToList();
+        var tombstoneRecentItems = data.RecentItems
+            .Where(item => item is not null && item.IsDeleted)
+            .GroupBy(item => item.Id, StringComparer.Ordinal)
+            .Select(group => group.OrderByDescending(item => item.UpdatedAt).First())
+            .ToList();
+        data.RecentItems = PruneTombstones(liveRecentItems
+            .Concat(tombstoneRecentItems)
+            .ToList());
 
         NormalizeSortOrders(data.Items);
         NormalizeSortOrders(data.RecentItems);
@@ -182,10 +197,33 @@ public sealed class QuickCaptureStore
     private static bool IsValidItem(QuickCaptureItem? item)
     {
         return item is not null &&
-               (!string.IsNullOrWhiteSpace(item.Title) ||
+               (item.IsDeleted ||
+                !string.IsNullOrWhiteSpace(item.Title) ||
                 !string.IsNullOrWhiteSpace(item.Body) ||
                 item.Attachments.Count > 0 ||
                 (item.Type == QuickCaptureItemType.Image && !string.IsNullOrWhiteSpace(item.ImagePath)));
+    }
+
+    // Tombstones are the only records allowed to outlive their content —
+    // cap them so delete-heavy stores do not accumulate stubs forever.
+    private const int MaxRetainedTombstones = 500;
+
+    private static List<QuickCaptureItem> PruneTombstones(List<QuickCaptureItem> items)
+    {
+        if (items.Count(item => item.IsDeleted) <= MaxRetainedTombstones)
+        {
+            return items;
+        }
+
+        var retainedIds = items
+            .Where(item => item.IsDeleted)
+            .OrderByDescending(item => item.UpdatedAt)
+            .Take(MaxRetainedTombstones)
+            .Select(item => item.Id)
+            .ToHashSet(StringComparer.Ordinal);
+        return items
+            .Where(item => !item.IsDeleted || retainedIds.Contains(item.Id))
+            .ToList();
     }
 
     private static void NormalizeAttachments(List<TodoAttachment> attachments)
@@ -209,6 +247,13 @@ public sealed class QuickCaptureStore
 
     private static string GetDeduplicationKey(QuickCaptureItem item)
     {
+        // Stripped tombstones share empty content keys — dedup them by id
+        // so distinct deletes never collapse into one record.
+        if (item.IsDeleted)
+        {
+            return $"deleted:{item.Id}";
+        }
+
         if (!string.IsNullOrWhiteSpace(item.ContentHash))
         {
             return item.ContentHash;

@@ -90,6 +90,27 @@ public sealed class CloudBackupTransportTests : IDisposable
     }
 
     [Fact]
+    public async Task List_ParsesJianguoyunShapedMultistatus()
+    {
+        // Captured from dav.jianguoyun.com: lowercase prefix, vendor namespace,
+        // collection href WITHOUT a trailing slash, empty resourcetype for files.
+        const string multistatus =
+            """
+            <?xml version="1.0" encoding="UTF-8" standalone="no"?><d:multistatus xmlns:d="DAV:" xmlns:s="http://ns.jianguoyun.com"><d:response><d:href>/dav/DeskBox/backups</d:href><d:propstat><d:prop><d:getetag/><d:getcontenttype>httpd/unix-directory</d:getcontenttype><d:displayname>backups</d:displayname><d:getcontentlength>0</d:getcontentlength><d:getlastmodified>Sat, 19 Sep 2026 13:10:00 GMT</d:getlastmodified><d:resourcetype><d:collection/></d:resourcetype></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response><d:response><d:href>/dav/DeskBox/backups/DeskBox-CloudBackup-20260920T162455Z-48221e43.zip</d:href><d:propstat><d:prop><d:getetag>rErap3U7trvdPsbTKxpZxg</d:getetag><d:getcontenttype>application/zip</d:getcontenttype><d:displayname>DeskBox-CloudBackup-20260920T162455Z-48221e43.zip</d:displayname><d:getcontentlength>18282</d:getcontentlength><d:getlastmodified>Sun, 20 Sep 2026 16:24:54 GMT</d:getlastmodified><d:resourcetype/></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response></d:multistatus>
+            """;
+        var handler = new RecordingHandler(_ => XmlResponse(HttpStatusCode.MultiStatus, multistatus));
+        var transport = new WebDavBackupTransport(Options(), handler);
+
+        IReadOnlyList<CloudBackupRemoteEntry> entries = await transport.ListAsync("DeskBox/backups");
+
+        CloudBackupRemoteEntry file = Assert.Single(entries);
+        Assert.Equal("DeskBox-CloudBackup-20260920T162455Z-48221e43.zip", file.Name);
+        Assert.Equal(18282, file.Length);
+        Assert.False(file.IsCollection);
+        Assert.Equal(new DateTimeOffset(2026, 9, 20, 16, 24, 54, TimeSpan.Zero), file.LastModified);
+    }
+
+    [Fact]
     public async Task EnsureDirectory_MkcolProgressively_ToleratesExisting()
     {
         var handler = new RecordingHandler(request =>
@@ -412,6 +433,265 @@ public sealed class CloudBackupTransportTests : IDisposable
     }
 
     [Fact]
+    public async Task RunBackupNow_WhenAnotherRunInFlight_ReturnsAlreadyInProgress()
+    {
+        // The manual path must refuse to queue behind an in-flight upload —
+        // blocking would freeze the settings section for the whole upload.
+        var started = new TaskCompletionSource();
+        var release = new TaskCompletionSource();
+        var transport = new FakeCloudBackupTransport
+        {
+            UploadHook = async _ =>
+            {
+                started.TrySetResult();
+                await release.Task;
+            }
+        };
+        SeedTodoData();
+        (CloudBackupService service, _) = CreateService(transport);
+        service.UpdateOptions(ConfiguredOptions());
+
+        Task<CloudBackupRunResult> first = service.RunBackupNowAsync();
+        await started.Task;
+
+        CloudBackupRunResult second = await service.RunBackupNowAsync();
+
+        Assert.True(second.AlreadyInProgress);
+        Assert.False(second.Uploaded);
+
+        release.SetResult();
+        Assert.True((await first).Uploaded);
+    }
+
+    [Fact]
+    public async Task ScheduledRun_Failure_StampsLastFailure_AndFlagsStreakStart()
+    {
+        SeedTodoData();
+        var transport = new FakeCloudBackupTransport { FailOn = op => op.EndsWith(".zip") };
+        (CloudBackupService service, SettingsService settings) = CreateService(transport);
+        service.UpdateOptions(ConfiguredOptions());
+        var events = new List<CloudBackupRunCompletedInfo>();
+        service.BackupRunCompleted += events.Add;
+
+        await service.RunScheduledIfDueAsync();
+
+        Assert.True(settings.Settings.CloudBackup.CloudBackupLastFailureUtcTicks > 0);
+        CloudBackupRunCompletedInfo first = Assert.Single(events);
+        Assert.False(first.Uploaded);
+        Assert.True(first.WasScheduled);
+        Assert.True(first.IsFirstFailureSinceSuccess);
+
+        // A second failure in the same streak does not re-flag. The
+        // spacing floor is cleared between runs — the throttle itself is
+        // pinned by RunScheduledIfDue_SecondAttemptWithinSpacingFloor_IsSkipped.
+        service.ResetScheduledAttemptSpacingForTesting();
+        await service.RunScheduledIfDueAsync();
+        Assert.Equal(2, events.Count);
+        Assert.False(events[1].IsFirstFailureSinceSuccess);
+    }
+
+    [Fact]
+    public async Task RunScheduledIfDue_SecondAttemptWithinSpacingFloor_IsSkipped()
+    {
+        SeedTodoData();
+        var transport = new FakeCloudBackupTransport { FailOn = op => op.EndsWith(".zip") };
+        (CloudBackupService service, SettingsService settings) = CreateService(transport);
+        service.UpdateOptions(ConfiguredOptions(lastSuccess: DateTimeOffset.MinValue));
+        var events = new List<CloudBackupRunCompletedInfo>();
+        service.BackupRunCompleted += events.Add;
+
+        await service.RunScheduledIfDueAsync();
+
+        // Still interval-due (the failed attempt stamped no success), but
+        // the 10-minute attempt-spacing floor must swallow the same-tick
+        // second tick — no second run, no second completion event.
+        await service.RunScheduledIfDueAsync();
+
+        CloudBackupRunCompletedInfo failure = Assert.Single(events);
+        Assert.False(failure.Uploaded);
+        Assert.True(settings.Settings.CloudBackup.CloudBackupLastFailureUtcTicks > 0);
+    }
+
+    [Fact]
+    public async Task RunBackupNow_Failure_StampsLastFailure_AndRethrows()
+    {
+        SeedTodoData();
+        var transport = new FakeCloudBackupTransport { FailOn = op => op.EndsWith(".zip") };
+        (CloudBackupService service, SettingsService settings) = CreateService(transport);
+        service.UpdateOptions(ConfiguredOptions());
+        var events = new List<CloudBackupRunCompletedInfo>();
+        service.BackupRunCompleted += events.Add;
+
+        await Assert.ThrowsAsync<CloudBackupTransportException>(() => service.RunBackupNowAsync());
+
+        Assert.True(settings.Settings.CloudBackup.CloudBackupLastFailureUtcTicks > 0);
+        CloudBackupRunCompletedInfo info = Assert.Single(events);
+        Assert.False(info.Uploaded);
+        Assert.False(info.WasScheduled);
+    }
+
+    [Fact]
+    public async Task SuccessfulRun_ClearsLastFailureTicks()
+    {
+        SeedTodoData();
+        bool failUploads = true;
+        var transport = new FakeCloudBackupTransport
+        {
+            FailOn = op => failUploads && op.EndsWith(".zip")
+        };
+        (CloudBackupService service, SettingsService settings) = CreateService(transport);
+        service.UpdateOptions(ConfiguredOptions());
+        await service.RunScheduledIfDueAsync();
+        Assert.True(settings.Settings.CloudBackup.CloudBackupLastFailureUtcTicks > 0);
+
+        failUploads = false;
+        CloudBackupRunResult result = await service.RunBackupNowAsync();
+
+        Assert.True(result.Uploaded);
+        Assert.Equal(0, settings.Settings.CloudBackup.CloudBackupLastFailureUtcTicks);
+    }
+
+    [Fact]
+    public async Task BackupRunCompleted_OnManualSuccess_CarriesRemotePath()
+    {
+        SeedTodoData();
+        var transport = new FakeCloudBackupTransport();
+        (CloudBackupService service, _) = CreateService(transport);
+        service.UpdateOptions(ConfiguredOptions());
+        var events = new List<CloudBackupRunCompletedInfo>();
+        service.BackupRunCompleted += events.Add;
+
+        CloudBackupRunResult result = await service.RunBackupNowAsync();
+
+        CloudBackupRunCompletedInfo info = Assert.Single(events);
+        Assert.True(info.Uploaded);
+        Assert.False(info.WasScheduled);
+        Assert.Equal(result.RemoteFilePath, info.RemoteFilePath);
+    }
+
+    [Fact]
+    public async Task UpdateOptions_DestinationChange_ClearsFailureTick()
+    {
+        SeedTodoData();
+        var transport = new FakeCloudBackupTransport { FailOn = op => op.EndsWith(".zip") };
+        (CloudBackupService service, SettingsService settings) = CreateService(transport);
+        service.UpdateOptions(ConfiguredOptions());
+        await service.RunScheduledIfDueAsync();
+        Assert.True(settings.Settings.CloudBackup.CloudBackupLastFailureUtcTicks > 0);
+
+        // A failure stamped on the old endpoint must not follow the user
+        // to a destination that has never run.
+        service.UpdateOptions(ConfiguredOptions() with { ServerUrl = "https://other.example.com/" });
+
+        Assert.Equal(0, settings.Settings.CloudBackup.CloudBackupLastFailureUtcTicks);
+    }
+
+    [Fact]
+    public async Task DeleteRemoteSnapshot_RemovesFile()
+    {
+        var transport = new FakeCloudBackupTransport();
+        transport.Files["DeskBox/backups/DeskBox-CloudBackup-20260910T110000Z-abcd1234.zip"] = [1, 2, 3];
+        (CloudBackupService service, _) = CreateService(transport);
+        service.UpdateOptions(ConfiguredOptions());
+
+        await service.DeleteRemoteSnapshotAsync("DeskBox-CloudBackup-20260910T110000Z-abcd1234.zip");
+
+        Assert.Empty(transport.Files);
+    }
+
+    [Fact]
+    public async Task DeleteRemoteSnapshot_RejectsUnsafeName()
+    {
+        var transport = new FakeCloudBackupTransport();
+        (CloudBackupService service, _) = CreateService(transport);
+        service.UpdateOptions(ConfiguredOptions());
+
+        await Assert.ThrowsAsync<ArgumentException>(
+            () => service.DeleteRemoteSnapshotAsync("../secrets.zip"));
+        await Assert.ThrowsAsync<ArgumentException>(
+            () => service.DeleteRemoteSnapshotAsync("sub/dir.zip"));
+    }
+
+    [Fact]
+    public async Task RunBackupNow_VerificationSizeMismatch_SucceedsUnverified()
+    {
+        SeedTodoData();
+        var transport = new FakeCloudBackupTransport { ReportedLengthOverride = 1 };
+        (CloudBackupService service, SettingsService settings) = CreateService(transport);
+        service.UpdateOptions(ConfiguredOptions());
+        service.VerificationRetryDelayMs = [0, 0, 0];
+
+        CloudBackupRunResult result = await service.RunBackupNowAsync();
+
+        // The PUT was accepted — a lying listing must not convert that
+        // into a failure (failure stamp + streak toast + re-upload on
+        // the next interval). It degrades to success-with-flag instead.
+        Assert.True(result.Uploaded);
+        Assert.True(result.UploadUnverified);
+        Assert.True(settings.Settings.CloudBackup.CloudBackupLastSuccessUtcTicks > 0);
+        Assert.Equal(0, settings.Settings.CloudBackup.CloudBackupLastFailureUtcTicks);
+    }
+
+    [Fact]
+    public async Task RunBackupNow_VerificationMissing_SucceedsUnverified()
+    {
+        SeedTodoData();
+        var transport = new FakeCloudBackupTransport { ExcludeFromListing = _ => true };
+        (CloudBackupService service, _) = CreateService(transport);
+        service.UpdateOptions(ConfiguredOptions());
+        service.VerificationRetryDelayMs = [0, 0, 0];
+
+        CloudBackupRunResult result = await service.RunBackupNowAsync();
+
+        // A never-listed upload still counts: eventually-consistent DAV
+        // backends accept the PUT and lag on listing it.
+        Assert.True(result.Uploaded);
+        Assert.True(result.UploadUnverified);
+    }
+
+    [Fact]
+    public async Task RunBackupNow_UnverifiedUpload_IsNotAFailureEvent()
+    {
+        SeedTodoData();
+        var transport = new FakeCloudBackupTransport { ExcludeFromListing = _ => true };
+        (CloudBackupService service, SettingsService settings) = CreateService(transport);
+        service.UpdateOptions(ConfiguredOptions());
+        service.VerificationRetryDelayMs = [0, 0, 0];
+        var events = new List<CloudBackupRunCompletedInfo>();
+        service.BackupRunCompleted += events.Add;
+
+        CloudBackupRunResult result = await service.RunBackupNowAsync();
+
+        // The degraded run must not look like a failure to the event
+        // consumers — IsFirstFailureSinceSuccess drives the streak toast.
+        Assert.True(result.Uploaded);
+        CloudBackupRunCompletedInfo info = Assert.Single(events);
+        Assert.True(info.Uploaded);
+        Assert.True(info.UploadUnverified);
+        Assert.False(info.IsFirstFailureSinceSuccess);
+        Assert.Equal(0, settings.Settings.CloudBackup.CloudBackupLastFailureUtcTicks);
+    }
+
+    [Fact]
+    public async Task ListRemoteSnapshots_OrdersByEmbeddedTimestampNotName()
+    {
+        // Raw name order puts 'T' ahead of '-', so a UTC name ALWAYS sorts
+        // above a legacy local-time name regardless of actual time. The
+        // list must order by the embedded timestamp instead: here the
+        // legacy file (12:00) is NEWER than the UTC file (11:00).
+        var transport = new FakeCloudBackupTransport();
+        transport.Files["DeskBox/backups/DeskBox-CloudBackup-20260910T110000Z-abcd1234.zip"] = [1];
+        transport.Files["DeskBox/backups/DeskBox-CloudBackup-20260910-120000.zip"] = [1];
+        (CloudBackupService service, _) = CreateService(transport);
+        service.UpdateOptions(ConfiguredOptions());
+
+        IReadOnlyList<CloudBackupRemoteEntry> list = await service.ListRemoteSnapshotsAsync();
+
+        Assert.Equal(2, list.Count);
+        Assert.Equal("DeskBox-CloudBackup-20260910-120000.zip", list[0].Name);
+    }
+
+    [Fact]
     public void UpdateOptions_DestinationChange_ResetsLastSuccess()
     {
         var transport = new FakeCloudBackupTransport();
@@ -545,7 +825,75 @@ public sealed class CloudBackupTransportTests : IDisposable
         CloudBackupRunResult result = await service.RunBackupNowAsync();
 
         Assert.False(result.Uploaded);
+        Assert.False(result.NoScopeSelected);
         Assert.Empty(transport.Files);
+    }
+
+    /// <summary>
+    /// Endpoint set but every domain toggle off — a valid state while the
+    /// user is still configuring. Backup-now must name the gap instead of
+    /// reporting a generic "not configured".
+    /// </summary>
+    [Fact]
+    public async Task RunBackupNow_EndpointWithoutScope_ReturnsNoScope()
+    {
+        var transport = new FakeCloudBackupTransport();
+        (CloudBackupService service, _) = CreateService(transport);
+        service.UpdateOptions(ConfiguredOptions(scope: CloudBackupDomain.None));
+
+        CloudBackupRunResult result = await service.RunBackupNowAsync();
+
+        Assert.False(result.Uploaded);
+        Assert.True(result.NoScopeSelected);
+        Assert.Empty(transport.Files);
+    }
+
+    /// <summary>
+    /// A connection test validates the endpoint, not the backup selection —
+    /// it must work before the user has toggled any domain on.
+    /// </summary>
+    [Fact]
+    public async Task ProbeConnection_EndpointWithoutScope_StillProbes()
+    {
+        var transport = new FakeCloudBackupTransport();
+        (CloudBackupService service, _) = CreateService(transport);
+        service.UpdateOptions(ConfiguredOptions(scope: CloudBackupDomain.None));
+
+        await service.ProbeConnectionAsync("just-typed");
+
+        Assert.True(transport.Probed);
+    }
+
+    /// <summary>
+    /// Restoring a snapshot on a fresh install predates any backup-scope
+    /// choice — listing and downloading must only require a reachable
+    /// endpoint (restore domains are picked in the restore dialog).
+    /// </summary>
+    [Fact]
+    public async Task RestoreEndpoints_EndpointWithoutScope_ListAndDownload()
+    {
+        var transport = new FakeCloudBackupTransport();
+        transport.Files["DeskBox/backups/DeskBox-CloudBackup-20260101-000000-aaaabbbb.zip"] = [0x1, 0x2];
+
+        (CloudBackupService service, _) = CreateService(transport);
+        service.UpdateOptions(ConfiguredOptions(scope: CloudBackupDomain.None));
+
+        IReadOnlyList<CloudBackupRemoteEntry> snapshots = await service.ListRemoteSnapshotsAsync();
+        string path = await service.DownloadSnapshotAsync(snapshots[0].Name, _tempRoot);
+
+        Assert.Single(snapshots);
+        Assert.Equal([0x1, 0x2], await File.ReadAllBytesAsync(path));
+    }
+
+    /// <summary>The credential belongs to the endpoint, not the backup scope.</summary>
+    [Fact]
+    public async Task HasCredential_EndpointWithoutScope_Resolves()
+    {
+        var transport = new FakeCloudBackupTransport();
+        (CloudBackupService service, _) = CreateService(transport);
+        service.UpdateOptions(ConfiguredOptions(scope: CloudBackupDomain.None));
+
+        Assert.True(await service.HasCredentialAsync());
     }
 
     [Fact]
@@ -782,6 +1130,12 @@ public sealed class CloudBackupTransportTests : IDisposable
         internal List<string> Directories { get; } = [];
         internal Func<string, bool>? FailOn { get; init; }
         internal Func<string, Task>? UploadHook { get; init; }
+        // Verification-fault knobs: ReportedLengthOverride makes the
+        // listing lie about sizes; ExcludeFromListing hides entries
+        // entirely — together they simulate silent truncation and
+        // never-visible uploads.
+        internal long? ReportedLengthOverride { get; init; }
+        internal Func<string, bool>? ExcludeFromListing { get; init; }
         internal bool Probed { get; private set; }
 
         public Task ProbeAsync(CancellationToken cancellationToken = default)
@@ -805,7 +1159,12 @@ public sealed class CloudBackupTransportTests : IDisposable
             string prefix = remoteDirectory.TrimEnd('/') + "/";
             IReadOnlyList<CloudBackupRemoteEntry> entries = Files.Keys
                 .Where(k => k.StartsWith(prefix, StringComparison.Ordinal))
-                .Select(k => new CloudBackupRemoteEntry(k[prefix.Length..], (long?)Files[k].Length, null, false))
+                .Where(k => ExcludeFromListing?.Invoke(k) != true)
+                .Select(k => new CloudBackupRemoteEntry(
+                    k[prefix.Length..],
+                    ReportedLengthOverride ?? Files[k].Length,
+                    null,
+                    false))
                 .ToList();
             return Task.FromResult(entries);
         }

@@ -40,7 +40,6 @@ public sealed partial class TodoWidgetContent
             SetClipboardText(text);
             ShowUndoToast(
                 App.Current.LocalizationService.T("Todo.Copied"),
-                durationMs: CopyToastMs,
                 clearUndoOnHide: false);
         }
         catch (Exception ex)
@@ -48,7 +47,6 @@ public sealed partial class TodoWidgetContent
             App.Log($"[Todo] Failed to copy item {item.Id}: {ex}");
             ShowUndoToast(
                 App.Current.LocalizationService.T("Todo.CopyFailed"),
-                durationMs: UndoToastMs,
                 clearUndoOnHide: false);
         }
     }
@@ -83,7 +81,6 @@ public sealed partial class TodoWidgetContent
             SetClipboardText(text);
             ShowUndoToast(
                 localization.Format("Todo.CopiedCount", selectedItems.Count),
-                durationMs: CopyToastMs,
                 clearUndoOnHide: false);
         }
         catch (Exception ex)
@@ -91,7 +88,6 @@ public sealed partial class TodoWidgetContent
             App.Log($"[Todo] Failed to copy {selectedItems.Count} selected items: {ex}");
             ShowUndoToast(
                 localization.T("Todo.CopyFailed"),
-                durationMs: UndoToastMs,
                 clearUndoOnHide: false);
         }
     }

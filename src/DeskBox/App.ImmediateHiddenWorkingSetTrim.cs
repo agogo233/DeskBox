@@ -69,6 +69,10 @@ public partial class App
             visibility.LogicalVisibleCount != 0 ||
             visibility.HasNativeVisibleWidgets ||
             manager.HasActiveVisualWork ||
+            Volatile.Read(ref _quiescenceWorkingSetTrimRunning) != 0 ||
+            _quiescenceWorkingSetTrimTracker.LastTrimWithin(
+                DateTimeOffset.UtcNow,
+                QuiescenceWorkingSetTrimTracker.MinimumTrimInterval) ||
             !CanRunBackgroundMemoryCleanup())
         {
             Log($"[Memory] Immediate hidden working-set trim skipped reason=activity-or-disabled trigger={reason}");
@@ -82,10 +86,7 @@ public partial class App
         long started = Stopwatch.GetTimestamp();
         bool trimmed = Win32Helper.TrimWorkingSet();
         _immediateHiddenWorkingSetTrimTracker.Complete(generation, trimmed);
-        if (trimmed)
-        {
-            AdvanceMemoryCleanupEpoch($"working-set-trim:immediate-hidden:{reason}");
-        }
+        CompleteWorkingSetTrim(trimmed, $"immediate-hidden:{reason}");
 
         process.Refresh();
         Log(

@@ -108,12 +108,12 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
     private string _selectedTodoTabStyle = SettingsService.WidgetTabStyleButton;
     private int _selectedTodoReminderOffsetMinutes = SettingsService.DefaultTodoReminderOffsetMinutes;
     private string _selectedMusicDisplayMode = SettingsService.MusicDisplayModeAuto;
-private string _selectedWeatherTemperatureUnit = SettingsService.WeatherTemperatureUnitCelsius;
-private string _selectedWeatherWindSpeedUnit = SettingsService.WeatherWindSpeedUnitKmh;
-private string _selectedWeatherDefaultView = SettingsService.WeatherDefaultViewToday;
-private string _selectedWeatherSkin = SettingsService.WeatherSkinRich;
-private string _selectedWeatherDataSource = SettingsService.WeatherDataSourceMsn;
-private int _selectedWeatherRefreshInterval = 60;
+    private string _selectedWeatherTemperatureUnit = SettingsService.WeatherTemperatureUnitCelsius;
+    private string _selectedWeatherWindSpeedUnit = SettingsService.WeatherWindSpeedUnitKmh;
+    private string _selectedWeatherDefaultView = SettingsService.WeatherDefaultViewToday;
+    private string _selectedWeatherSkin = SettingsService.WeatherSkinRich;
+    private string _selectedWeatherDataSource = SettingsService.WeatherDataSourceMsn;
+    private int _selectedWeatherRefreshInterval = 60;
     private bool _useSystemAccentColor;
     private string _accentColorHex = AccentColorHelper.DefaultAccentColorHex;
     private string _managedStorageRootPath = SettingsService.GetDefaultManagedStorageRootPath();
@@ -241,6 +241,7 @@ private string[]? _cachedWeatherRefreshIntervalDisplayNames;
     [ObservableProperty] public partial bool HideShortcutExtensionWhenShowingFileExtensions { get; set; } = true;
     [ObservableProperty] public partial bool IdleWorkingSetTrimEnabled { get; set; } = true;
     [ObservableProperty] public partial bool ImmediateHiddenWorkingSetTrimEnabled { get; set; }
+    [ObservableProperty] public partial bool QuiescenceWorkingSetTrimEnabled { get; set; } = true;
     [ObservableProperty] public partial bool QuickCaptureEnabled { get; set; }
     [ObservableProperty] public partial bool QuickCaptureShowTabBar { get; set; } = true;
     [ObservableProperty] public partial bool QuickCaptureShowRecordsTab { get; set; } = true;
@@ -401,6 +402,7 @@ private string[]? _cachedWeatherRefreshIntervalDisplayNames;
         HideShortcutExtensionWhenShowingFileExtensions = settings.HideShortcutExtensionWhenShowingFileExtensions;
         IdleWorkingSetTrimEnabled = settings.IdleWorkingSetTrimEnabled;
         ImmediateHiddenWorkingSetTrimEnabled = settings.ImmediateHiddenWorkingSetTrimEnabled;
+        QuiescenceWorkingSetTrimEnabled = settings.Performance.QuiescenceWorkingSetTrimEnabled;
         QuickCaptureEnabled = FeatureWidgetSettings.IsEnabled(settings, WidgetKind.QuickCapture);
         QuickCaptureClipboardEnabled = settings.QuickCaptureClipboardEnabled;
         QuickCaptureImageClipboardEnabled = settings.QuickCaptureImageClipboardEnabled;
@@ -453,32 +455,32 @@ private string[]? _cachedWeatherRefreshIntervalDisplayNames;
         MusicUseArtworkBackdrop = musicSettings.UseArtworkBackdrop;
         MusicEnableCoverHoverMotion = musicSettings.EnableCoverHoverMotion;
         _selectedMusicDisplayMode = SettingsService.NormalizeMusicDisplayMode(musicSettings.DisplayMode);
-WeatherAutoLocation = settings.WeatherAutoLocation;
-WeatherCityName = settings.WeatherCityName;
-_weatherCitySearchText = settings.WeatherCityName;
-_selectedWeatherTemperatureUnit = settings.WeatherTemperatureUnit == SettingsService.WeatherTemperatureUnitFahrenheit
-    ? SettingsService.WeatherTemperatureUnitFahrenheit
-    : SettingsService.WeatherTemperatureUnitCelsius;
-_selectedWeatherWindSpeedUnit = settings.WeatherWindSpeedUnit is SettingsService.WeatherWindSpeedUnitMs or SettingsService.WeatherWindSpeedUnitMph
-    ? settings.WeatherWindSpeedUnit
-    : SettingsService.WeatherWindSpeedUnitKmh;
-_selectedWeatherDefaultView = settings.WeatherDefaultView == SettingsService.WeatherDefaultViewWeek
-    ? SettingsService.WeatherDefaultViewWeek
-    : SettingsService.WeatherDefaultViewToday;
-_selectedWeatherSkin = settings.WeatherSkin == SettingsService.WeatherSkinRich
-    ? SettingsService.WeatherSkinRich
-    : SettingsService.WeatherSkinStandard;
-WeatherShowForecast = settings.WeatherShowForecast;
-WeatherShowSunrise = settings.WeatherShowSunrise;
-WeatherShowUvIndex = settings.WeatherShowUvIndex;
-WeatherShowPrecipitation = settings.WeatherShowPrecipitation;
-WeatherShowHumidity = settings.WeatherShowHumidity;
-WeatherShowWind = settings.WeatherShowWind;
-WeatherShowPressure = settings.WeatherShowPressure;
-_selectedWeatherRefreshInterval = Math.Clamp(
-    settings.WeatherRefreshIntervalMinutes,
-    SettingsService.WeatherRefreshMinMinutes,
-    SettingsService.WeatherRefreshMaxMinutes);
+        WeatherAutoLocation = settings.WeatherAutoLocation;
+        WeatherCityName = settings.WeatherCityName;
+        _weatherCitySearchText = settings.WeatherCityName;
+        _selectedWeatherTemperatureUnit = settings.WeatherTemperatureUnit == SettingsService.WeatherTemperatureUnitFahrenheit
+            ? SettingsService.WeatherTemperatureUnitFahrenheit
+            : SettingsService.WeatherTemperatureUnitCelsius;
+        _selectedWeatherWindSpeedUnit = settings.WeatherWindSpeedUnit is SettingsService.WeatherWindSpeedUnitMs or SettingsService.WeatherWindSpeedUnitMph
+            ? settings.WeatherWindSpeedUnit
+            : SettingsService.WeatherWindSpeedUnitKmh;
+        _selectedWeatherDefaultView = settings.WeatherDefaultView == SettingsService.WeatherDefaultViewWeek
+            ? SettingsService.WeatherDefaultViewWeek
+            : SettingsService.WeatherDefaultViewToday;
+        _selectedWeatherSkin = settings.WeatherSkin == SettingsService.WeatherSkinRich
+            ? SettingsService.WeatherSkinRich
+            : SettingsService.WeatherSkinStandard;
+        WeatherShowForecast = settings.WeatherShowForecast;
+        WeatherShowSunrise = settings.WeatherShowSunrise;
+        WeatherShowUvIndex = settings.WeatherShowUvIndex;
+        WeatherShowPrecipitation = settings.WeatherShowPrecipitation;
+        WeatherShowHumidity = settings.WeatherShowHumidity;
+        WeatherShowWind = settings.WeatherShowWind;
+        WeatherShowPressure = settings.WeatherShowPressure;
+        _selectedWeatherRefreshInterval = Math.Clamp(
+            settings.WeatherRefreshIntervalMinutes,
+            SettingsService.WeatherRefreshMinMinutes,
+            SettingsService.WeatherRefreshMaxMinutes);
         _isRestoringDefaults = false;
         _selectedTodoNewTaskPosition = NormalizeTodoNewTaskPosition(settings.TodoNewTaskPosition);
         _selectedTodoDefaultFilter = NormalizeTodoDefaultFilter(settings.TodoDefaultFilter);

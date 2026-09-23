@@ -192,10 +192,14 @@ public sealed partial class FileSurfaceContent
             }
             else
             {
+                // No icon override: the system renders the target file's own
+                // icon with the shortcut overlay, matching Explorer's native
+                // Alt-drag shortcut.
                 DragDropPermissionService.CreateOrUpdateShortcut(
                     linkPath,
                     source,
-                    string.Empty);
+                    string.Empty,
+                    iconPath: null);
             }
 
             created.Add(linkPath);

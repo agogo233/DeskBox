@@ -158,6 +158,7 @@ public sealed partial class WidgetManager
         MarkNeedsInitialPlacementIfDisplayUnusable(config);
         _settingsService.Settings.Widgets.Add(config);
         await _settingsService.SaveAsync();
+        await TryAdoptOrphanedTodoStoreAsync(config);
         await SeedTodoGuideAsync(config);
 
         var window = await CreateContentWidgetFromConfigAsync(config, revealAfterCreate: true);
@@ -180,6 +181,41 @@ public sealed partial class WidgetManager
         catch (Exception ex)
         {
             App.Log($"[WidgetManager] Failed to seed Quick Capture guide: {ex}");
+        }
+    }
+
+    /// <summary>
+    /// A brand-new Todo widget gets a brand-new id — but a cloud restore
+    /// may already have parked todo stores under foreign source ids
+    /// (unmapped orphans). Adopt the newest one so the restored data shows
+    /// up instead of the widget appearing empty. Runs before the guide
+    /// seed: a store with items suppresses the guide automatically.
+    /// </summary>
+    private async Task TryAdoptOrphanedTodoStoreAsync(WidgetConfig config)
+    {
+        try
+        {
+            var claimedIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (WidgetConfig widget in _settingsService.Settings.Widgets)
+            {
+                claimedIds.Add(widget.Id);
+            }
+
+            foreach (string deletedId in _settingsService.Settings.DeletedWidgetIds ?? [])
+            {
+                claimedIds.Add(deletedId);
+            }
+
+            await TodoWidgetStore.TryAdoptOrphanedStoreAsync(
+                Path.Combine(
+                    DeskBoxDataPathService.Current.DataDirectory,
+                    "widgets"),
+                config.Id,
+                claimedIds);
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[WidgetManager] Orphaned todo store adoption failed: {ex.Message}");
         }
     }
 

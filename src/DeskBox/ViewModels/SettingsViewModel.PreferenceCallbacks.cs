@@ -401,4 +401,15 @@ public partial class SettingsViewModel
         _settingsService.Settings.ImmediateHiddenWorkingSetTrimEnabled = value;
         _settingsService.SaveDebounced();
     }
+
+    partial void OnQuiescenceWorkingSetTrimEnabledChanged(bool value)
+    {
+        if (_isRestoringDefaults)
+        {
+            return;
+        }
+
+        _settingsService.Settings.Performance.QuiescenceWorkingSetTrimEnabled = value;
+        _settingsService.SaveDebounced();
+    }
 }

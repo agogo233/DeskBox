@@ -587,26 +587,10 @@ public sealed partial class QuickCaptureWidgetWindow
 
     private Brush GetBrushResourceOrFallback(string resourceKey, Windows.UI.Color fallbackColor)
     {
-        if (RootGrid.Resources.TryGetValue(resourceKey, out object? scopedResource))
-        {
-            return scopedResource switch
-            {
-                Brush brush => brush,
-                Windows.UI.Color color => new SolidColorBrush(color),
-                _ => new SolidColorBrush(fallbackColor)
-            };
-        }
-
-        if (Application.Current.Resources.TryGetValue(resourceKey, out object? resource))
-        {
-            return resource switch
-            {
-                Brush brush => brush,
-                Windows.UI.Color color => new SolidColorBrush(color),
-                _ => new SolidColorBrush(fallbackColor)
-            };
-        }
-
-        return new SolidColorBrush(fallbackColor);
+        // Resolve by this element's own theme: a bare application-scope
+        // lookup would follow the system theme and invert the resource
+        // whenever the widget's theme override disagrees with it.
+        return NeutralInteractionBrush.ResolveThemedResource(resourceKey, RootGrid) ??
+               new SolidColorBrush(fallbackColor);
     }
 }

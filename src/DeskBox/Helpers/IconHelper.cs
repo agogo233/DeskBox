@@ -1041,18 +1041,44 @@ public static class IconHelper
                 }
             }
 
-            if (ShouldPreferHighResolutionShellItemIcon(isShortcutPath))
+            if (!ShortcutHelper.IsShortcutPath(loadIconSource.Path))
             {
                 // Ask the same isolated Shell-item pipeline used by Explorer for
-                // every real file and folder. ShellIconNativeMethods.SHGetImageList's Jumbo slot can be
-                // a pre-scaled 32/48 px bitmap even when the registered file icon
-                // contains a genuine 256 px frame. Keep the in-process image-list
-                // path below as the compatibility fallback.
-                bytes = await TryLoadFileShellItemIconAsync(originalSourcePath);
+                // every real file and folder. This also covers a shortcut whose
+                // icon source resolved past the .lnk (target file or explicit
+                // icon location): the resolved source is an ordinary file, no
+                // shortcut overlay is involved, and skipping this pipeline is
+                // what made shortcut tiles render as pre-scaled 32/48 px
+                // image-list bitmaps. A source that still is the .lnk itself
+                // keeps the image-list path so the arrow-overlay rendering the
+                // user chose is preserved.
+                bytes = await TryLoadFileShellItemIconAsync(loadIconSource.Path);
                 if (bytes is { Length: > 0 })
                 {
                     App.LogVerbose(
                         $"[IconHelper] Loaded high-resolution Shell item icon " +
+                        $"path={loadIconSource.Path}");
+                }
+            }
+            else if (isShortcutPath && !hideShortcutArrowOverlay)
+            {
+                // Arrow-overlay mode: the source is the .lnk itself, so ask the
+                // Shell explicitly for the item icon WITH overlays through the
+                // proxy (system image list, up to 256 px). The in-process
+                // image-list fallback below caps this at pre-scaled 32/48 px,
+                // which rendered every arrow shortcut as a blurry tile.
+                bytes = await TryLoadHighResolutionShellItemIconAsync(
+                    originalSourcePath,
+                    includeOverlays: true);
+                if (bytes is { Length: > 0 })
+                {
+                    bytes = ShellThumbnailProxy.NormalizeIconPayload(bytes) ?? bytes;
+                }
+
+                if (bytes is { Length: > 0 })
+                {
+                    App.LogVerbose(
+                        $"[IconHelper] Loaded high-resolution overlay icon " +
                         $"path={originalSourcePath}");
                 }
             }
@@ -1208,10 +1234,6 @@ public static class IconHelper
 
         return image;
     }
-
-    internal static bool ShouldPreferHighResolutionShellItemIcon(
-        bool isShortcutPath) =>
-        !isShortcutPath;
 
     private static async Task<byte[]?> TryLoadHighResolutionShellItemIconAsync(
         string path,

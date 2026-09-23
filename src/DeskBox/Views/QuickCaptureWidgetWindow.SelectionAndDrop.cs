@@ -326,8 +326,7 @@ public sealed partial class QuickCaptureWidgetWindow
         {
             SetClipboardText(text);
             ShowStatusToast(
-                _localizationService.Format("QuickCapture.CopiedCount", selectedItems.Count),
-                durationMs: CopyToastMs);
+                _localizationService.Format("QuickCapture.CopiedCount", selectedItems.Count));
         }
         catch (Exception ex)
         {
@@ -622,14 +621,14 @@ public sealed partial class QuickCaptureWidgetWindow
 
     private void ShowCopyToast()
     {
-        ShowStatusToast(_localizationService.T("QuickCapture.Copied"), durationMs: CopyToastMs);
+        ShowStatusToast(_localizationService.T("QuickCapture.Copied"));
     }
 
-    private void ShowStatusToast(string text, string? actionText = null, int durationMs = StatusToastDefaultMs)
+    private void ShowStatusToast(string text, string? actionText = null)
     {
         if (!DispatcherQueue.HasThreadAccess)
         {
-            DispatcherQueue.TryEnqueue(() => ShowStatusToast(text, actionText, durationMs));
+            DispatcherQueue.TryEnqueue(() => ShowStatusToast(text, actionText));
             return;
         }
 

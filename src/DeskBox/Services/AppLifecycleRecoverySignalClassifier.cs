@@ -1,3 +1,6 @@
+using System.Runtime.InteropServices;
+using DeskBox.Platform;
+
 namespace DeskBox.Services;
 
 /// <summary>
@@ -22,6 +25,13 @@ internal static class AppLifecycleRecoverySignalClassifier
     internal static string? ResolveRecoveryReason(
         uint message,
         UIntPtr wParam,
+        uint taskbarCreatedMessage) =>
+        ResolveRecoveryReason(message, wParam, IntPtr.Zero, taskbarCreatedMessage);
+
+    internal static string? ResolveRecoveryReason(
+        uint message,
+        UIntPtr wParam,
+        IntPtr lParam,
         uint taskbarCreatedMessage)
     {
         uint eventValue = unchecked((uint)wParam.ToUInt64());
@@ -29,6 +39,16 @@ internal static class AppLifecycleRecoverySignalClassifier
             eventValue is PbtResumeAutomatic or PbtResumeSuspend or PbtResumeCritical)
         {
             return "resume";
+        }
+
+        // Idle background apps get their working sets trimmed and hooks
+        // starved while the display is off; "display on" is the earliest
+        // reliable signal that the user is back and input should work again.
+        if (message == WmPowerBroadcast &&
+            eventValue == Win32Helper.PbtPowerSettingChange &&
+            IsConsoleDisplayOn(lParam))
+        {
+            return "display-power-on";
         }
 
         if (message == WmWtsSessionChange &&
@@ -47,5 +67,25 @@ internal static class AppLifecycleRecoverySignalClassifier
         return message == taskbarCreatedMessage
             ? "explorer-restart"
             : null;
+    }
+
+    private static bool IsConsoleDisplayOn(IntPtr lParam)
+    {
+        if (lParam == IntPtr.Zero)
+        {
+            return false;
+        }
+
+        try
+        {
+            var setting = Marshal.PtrToStructure<Win32Helper.PowerBroadcastSetting>(lParam);
+            return setting.PowerSetting == Win32Helper.ConsoleDisplayStatePowerSetting &&
+                   setting.DataLength >= 1 &&
+                   setting.Data == 1;
+        }
+        catch (Exception)
+        {
+            return false;
+        }
     }
 }

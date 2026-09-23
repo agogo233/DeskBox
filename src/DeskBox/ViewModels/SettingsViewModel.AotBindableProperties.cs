@@ -109,8 +109,10 @@ namespace DeskBox.ViewModels;
     nameof(CloudBackupHttpWarningText),
     nameof(CloudBackupHttpWarningVisibility),
     nameof(CloudBackupQuickCaptureDataEnabled),
+    // CloudBackupRemoteSnapshots is intentionally absent: the snapshot
+    // ListView's ItemsSource is assigned in code-behind (an object[]
+    // snapshot), so no {Binding} ever reads this property.
     nameof(CloudBackupRemotePath),
-    nameof(CloudBackupRemoteSnapshots),
     nameof(CloudBackupServerUrl),
     nameof(CloudBackupStatusText),
     nameof(CloudBackupTodoDataEnabled),
@@ -274,6 +276,7 @@ namespace DeskBox.ViewModels;
     nameof(SelectedWidgetTitleIconModeText),
     nameof(IdleWorkingSetTrimEnabled),
     nameof(ImmediateHiddenWorkingSetTrimEnabled),
+    nameof(QuiescenceWorkingSetTrimEnabled),
     nameof(ShowFileExtensions),
     nameof(ShowFileItemPathTooltips),
     nameof(ShowImageFilesAsIcons),

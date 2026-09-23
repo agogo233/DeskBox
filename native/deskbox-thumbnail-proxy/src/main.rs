@@ -24,8 +24,9 @@ mod windows_proxy {
         Win32::{
             Foundation::{HANDLE, HWND, LPARAM, LRESULT, POINT, SIZE, WPARAM},
             Graphics::Gdi::{
-                BI_RGB, BITMAP, BITMAPINFO, DIB_RGB_COLORS, DeleteObject, GetDC, GetDIBits,
-                GetObjectW, HBITMAP, HGDIOBJ, ReleaseDC,
+                AC_SRC_ALPHA, AC_SRC_OVER, AlphaBlend, BLENDFUNCTION, BI_RGB, BITMAP,
+                BITMAPINFO, CreateCompatibleDC, DIB_RGB_COLORS, DeleteDC, DeleteObject, GetDC,
+                GetDIBits, GetObjectW, HBITMAP, HGDIOBJ, ReleaseDC, SelectObject,
             },
             Storage::FileSystem::FILE_FLAGS_AND_ATTRIBUTES,
             System::{
@@ -37,7 +38,7 @@ mod windows_proxy {
                 Threading::GetCurrentThreadId,
             },
             UI::{
-                Controls::SetWindowTheme,
+                Controls::{ILD_TRANSPARENT, IImageList, SetWindowTheme},
                 HiDpi::{
                     DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetProcessDpiAwarenessContext,
                 },
@@ -45,18 +46,20 @@ mod windows_proxy {
                 Shell::{
                     CMF_EXPLORE, CMF_ITEMMENU, CMF_NORMAL, CMIC_MASK_CONTROL_DOWN,
                     CMIC_MASK_PTINVOKE, CMIC_MASK_SHIFT_DOWN, CMINVOKECOMMANDINFOEX,
-                    Common::ITEMIDLIST, IContextMenu, IContextMenu2, IContextMenu3, IShellFolder,
+                    Common::ITEMIDLIST, IContextMenu, IContextMenu2, IContextMenu3,
+                    IShellFolder,
                     IShellItemImageFactory, SHBindToParent, SHCreateItemFromParsingName,
-                    SHFILEINFOW, SHGFI_ADDOVERLAYS, SHGFI_ICON, SHGFI_LARGEICON, SHGetFileInfoW,
-                    SHParseDisplayName, SIIGBF_BIGGERSIZEOK, SIIGBF_ICONONLY, SIIGBF_SCALEUP,
-                    SIIGBF_THUMBNAILONLY,
+                    SHFILEINFOW, SHGFI_ADDOVERLAYS, SHGFI_ICON, SHGFI_LARGEICON,
+                    SHGFI_OVERLAYINDEX, SHGFI_SYSICONINDEX, SHGetFileInfoW, SHGetImageList,
+                    SHParseDisplayName, SHIL_EXTRALARGE, SHIL_JUMBO, SIIGBF_BIGGERSIZEOK,
+                    SIIGBF_ICONONLY, SIIGBF_SCALEUP, SIIGBF_THUMBNAILONLY,
                 },
                 WindowsAndMessaging::{
-                    CallNextHookEx, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyIcon,
-                    DestroyMenu, DestroyWindow, DispatchMessageW, GetClassNameW, GetIconInfo,
-                    GetMenuItemCount, GetMessageW, HICON, HMENU, ICONINFO, MSG, MSLLHOOKSTRUCT,
-                    PM_REMOVE, PeekMessageW, PostMessageW, PostThreadMessageW, RegisterClassW,
-                    SW_SHOWNORMAL,
+                    CallNextHookEx, CreatePopupMenu, CreateWindowExW, DefWindowProcW,
+                    DestroyIcon, DestroyMenu, DestroyWindow, DispatchMessageW, GetClassNameW,
+                    GetIconInfo, GetMenuItemCount, GetMessageW, HICON, HMENU, ICONINFO, MSG,
+                    MSLLHOOKSTRUCT, PM_REMOVE, PeekMessageW, PostMessageW, PostThreadMessageW,
+                    RegisterClassW, SW_SHOWNORMAL,
                     SetForegroundWindow, SetWindowsHookExW, TPM_RETURNCMD, TrackPopupMenuEx,
                     TranslateMessage, UnhookWindowsHookEx, WH_MOUSE_LL, WINDOW_STYLE, WM_DRAWITEM,
                     WM_INITMENUPOPUP, WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDOWN, WM_MEASUREITEM,
@@ -747,6 +750,100 @@ mod windows_proxy {
     }
 
     fn load_shell_icon_with_overlays(parsing_name: &[u16]) -> Result<Vec<u8>, String> {
+        // Index-first through the system image list: the JUMBO slot holds the
+        // Shell-rendered base icon at up to 256 px. The overlay index has to
+        // be queried through the SHGFI_ICON pairing (SHGFI_OVERLAYINDEX is
+        // documented as a modifier of SHGFI_ICON and fills the upper eight
+        // bits of iIcon only there), so the 32 px icon that call yields is
+        // discarded and only its encoded index is kept. The overlay is then
+        // drawn onto the base bitmap explicitly — the same construction the
+        // legacy SHGFI_ICON | SHGFI_ADDOVERLAYS request produced, but at full
+        // resolution instead of the fixed 32 px LARGEICON cap.
+        let mut index_info = SHFILEINFOW::default();
+        // SAFETY: parsing_name is zero terminated and index_info is valid for
+        // the call. SHGFI_SYSICONINDEX fills iIcon only; no handle is handed
+        // back, so there is nothing to release.
+        let index_queried = unsafe {
+            SHGetFileInfoW(
+                PCWSTR(parsing_name.as_ptr()),
+                FILE_FLAGS_AND_ATTRIBUTES(0),
+                Some(&mut index_info),
+                size_of::<SHFILEINFOW>() as u32,
+                SHGFI_SYSICONINDEX,
+            )
+        } != 0;
+        // A failed query leaves iIcon at 0, which would silently resolve to
+        // the generic file icon in the JUMBO list; a negative index forces
+        // the 32 px compatibility fallback below instead.
+        let base_index = if index_queried { index_info.iIcon } else { -1 };
+
+        let mut overlay_info = SHFILEINFOW::default();
+        // SAFETY: parsing_name is zero terminated and overlay_info is valid
+        // for the call; the hIcon ownership is released below.
+        let overlay_queried = unsafe {
+            SHGetFileInfoW(
+                PCWSTR(parsing_name.as_ptr()),
+                FILE_FLAGS_AND_ATTRIBUTES(0),
+                Some(&mut overlay_info),
+                size_of::<SHFILEINFOW>() as u32,
+                SHGFI_ICON | SHGFI_LARGEICON | SHGFI_ADDOVERLAYS | SHGFI_OVERLAYINDEX,
+            )
+        };
+        let overlay_index = if overlay_queried != 0 {
+            // SHGFI_OVERLAYINDEX encodes the overlay index in the upper
+            // eight bits of iIcon (0x020000CA means overlay 2, the shortcut
+            // link overlay) — verified against the live API.
+            (overlay_info.iIcon >> 24) & 0xFF
+        } else {
+            0
+        };
+        if overlay_queried != 0 && !overlay_info.hIcon.is_invalid() {
+            // SAFETY: the handle came from SHGetFileInfoW and is not needed.
+            let _ = unsafe { DestroyIcon(overlay_info.hIcon) };
+        }
+
+        if base_index >= 0 {
+            // JUMBO first, then EXTRALARGE: a shortcut whose icon resource
+            // lacks a genuine 256 px frame gets a small glyph centered on the
+            // full JUMBO canvas (the "padded icon" case — the whole tile then
+            // renders as a tiny glyph). Measuring the artwork's share of the
+            // canvas detects it, and the 48 px slot serves the native frame.
+            for shell_image_list in [SHIL_JUMBO as i32, SHIL_EXTRALARGE as i32] {
+                // SAFETY: the image-list interface is released at the end of
+                // the iteration and the icon handle is owned by IconGuard.
+                let Ok(image_list) =
+                    (unsafe { SHGetImageList::<IImageList>(shell_image_list) })
+                else {
+                    continue;
+                };
+                let Ok(base_icon) =
+                    (unsafe { image_list.GetIcon(base_index, ILD_TRANSPARENT.0) })
+                else {
+                    continue;
+                };
+                let base = IconGuard(base_icon);
+
+                if shell_image_list == SHIL_JUMBO as i32
+                    && icon_artwork_is_padded(base.0)
+                {
+                    // Padded JUMBO frame — continue to the 48 px slot.
+                    continue;
+                }
+
+                if let Some(bytes) =
+                    composite_overlay_bitmap(&image_list, base.0, overlay_index)
+                {
+                    return Ok(bytes);
+                }
+
+                if let Ok(bytes) = icon_to_bmp_bytes(base.0) {
+                    return Ok(bytes);
+                }
+            }
+        }
+
+        // Compatibility fallback: the direct 32 px overlay icon, used only
+        // when the system image list could not serve the item.
         let mut file_info = SHFILEINFOW::default();
         // SAFETY: parsing_name is zero terminated and file_info is valid for
         // the duration of the call. SHGFI_ICON transfers ownership of hIcon.
@@ -765,6 +862,277 @@ mod windows_proxy {
 
         let icon = IconGuard(file_info.hIcon);
         icon_to_bmp_bytes(icon.0)
+    }
+
+    /// Draws the item's overlay icon (shortcut arrow and friends) onto the
+    /// base icon's color bitmap and returns the composed bytes. Returns None
+    /// when there is no overlay or drawing is not possible; the caller then
+    /// keeps the plain base icon.
+    fn composite_overlay_bitmap(
+        image_list: &IImageList,
+        base_icon: HICON,
+        overlay_index: i32,
+    ) -> Option<Vec<u8>> {
+        if overlay_index <= 0 {
+            return None;
+        }
+
+        // The overlay mask member itself, resolved to its image-list index.
+        // SAFETY: the call only reads the list.
+        let overlay_list_index = unsafe { image_list.GetOverlayImage(overlay_index) }.ok()?;
+        // SAFETY: the returned icon handle is owned by IconGuard.
+        let overlay_icon = unsafe { image_list.GetIcon(overlay_list_index, ILD_TRANSPARENT.0) }
+            .map(IconGuard)
+            .ok()?;
+
+        // SAFETY: GetIconInfo hands out copies of the overlay icon's bitmaps;
+        // the bitmaps are released by IconInfoBitmapGuard.
+        let mut overlay_info = ICONINFO::default();
+        unsafe { GetIconInfo(overlay_icon.0, &mut overlay_info) }.ok()?;
+        let overlay_bitmaps = IconInfoBitmapGuard(overlay_info);
+        if overlay_bitmaps.0.hbmColor.is_invalid() {
+            return None;
+        }
+
+        let mut overlay_bitmap = BITMAP::default();
+        // SAFETY: the bitmap handle is valid and outlives the read.
+        if unsafe {
+            GetObjectW(
+                overlay_bitmaps.0.hbmColor.into(),
+                size_of::<BITMAP>() as i32,
+                Some((&mut overlay_bitmap) as *mut BITMAP as *mut core::ffi::c_void),
+            )
+        } == 0
+            || overlay_bitmap.bmWidth <= 0
+            || overlay_bitmap.bmHeight <= 0
+        {
+            return None;
+        }
+
+        // SAFETY: GetIconInfo hands out copies of the icon's bitmaps; the
+        // bitmaps are released by IconInfoBitmapGuard.
+        let mut icon_info = ICONINFO::default();
+        unsafe { GetIconInfo(base_icon, &mut icon_info) }.ok()?;
+        let bitmaps = IconInfoBitmapGuard(icon_info);
+        if bitmaps.0.hbmColor.is_invalid() {
+            return None;
+        }
+
+        let mut base = BITMAP::default();
+        // SAFETY: the bitmap handle is valid and outlives the read.
+        if unsafe {
+            GetObjectW(
+                bitmaps.0.hbmColor.into(),
+                size_of::<BITMAP>() as i32,
+                Some((&mut base) as *mut BITMAP as *mut core::ffi::c_void),
+            )
+        } == 0
+        {
+            return None;
+        }
+
+        // Explorer draws the shortcut arrow in the lower-left corner at
+        // roughly a third of the icon's edge. The overlay member lives on a
+        // full JUMBO canvas whose actual arrow artwork occupies only a small
+        // center patch, so the source rectangle is the artwork's alpha
+        // bounding box — blending the whole canvas would shrink the arrow to
+        // that patch's share of the target edge.
+        let overlay_source = measure_overlay_artwork(&overlay_bitmaps.0.hbmColor)
+            .unwrap_or((
+                0,
+                0,
+                overlay_bitmap.bmWidth,
+                overlay_bitmap.bmHeight,
+            ));
+        let overlay_edge = ((base.bmWidth.max(base.bmHeight) as i32) / 3).max(16);
+        let x = 0;
+        let y = base.bmHeight - overlay_edge;
+
+        // SAFETY: the DC owns nothing but the temporarily selected bitmaps,
+        // which are restored before the DCs are deleted.
+        let dc = unsafe { GetDC(None) };
+        if dc.is_invalid() {
+            return None;
+        }
+
+        let memory_dc = unsafe { CreateCompatibleDC(Some(dc)) };
+        let previous = unsafe { SelectObject(memory_dc, bitmaps.0.hbmColor.into()) };
+        let overlay_dc = unsafe { CreateCompatibleDC(Some(dc)) };
+        let overlay_previous =
+            unsafe { SelectObject(overlay_dc, overlay_bitmaps.0.hbmColor.into()) };
+        let blend = BLENDFUNCTION {
+            BlendOp: AC_SRC_OVER as u8,
+            BlendFlags: 0,
+            SourceConstantAlpha: 255,
+            AlphaFormat: AC_SRC_ALPHA as u8,
+        };
+        // SAFETY: both DCs stay alive with their bitmaps selected for the
+        // blend call; the source rectangle covers only the arrow artwork.
+        let drawn = unsafe {
+            AlphaBlend(
+                memory_dc,
+                x,
+                y,
+                overlay_edge,
+                overlay_edge,
+                overlay_dc,
+                overlay_source.0,
+                overlay_source.1,
+                overlay_source.2,
+                overlay_source.3,
+                blend,
+            )
+        };
+        unsafe {
+            SelectObject(overlay_dc, overlay_previous);
+            let _ = DeleteDC(overlay_dc);
+            SelectObject(memory_dc, previous);
+            let _ = DeleteDC(memory_dc);
+            ReleaseDC(None, dc);
+        }
+        if !drawn.as_bool() {
+            return None;
+        }
+
+        bitmap_to_bmp_bytes(bitmaps.0.hbmColor).ok()
+    }
+
+    /// True when the icon's artwork occupies only a small share of its
+    /// bitmap canvas — the Shell serves a small native frame centered on a
+    /// full-size canvas when the icon resource has no high-resolution entry.
+    fn icon_artwork_is_padded(icon: HICON) -> bool {
+        // SAFETY: GetIconInfo hands out bitmap copies that the guard frees.
+        let mut icon_info = ICONINFO::default();
+        if unsafe { GetIconInfo(icon, &mut icon_info) }.is_err() {
+            return false;
+        }
+
+        let bitmaps = IconInfoBitmapGuard(icon_info);
+        if bitmaps.0.hbmColor.is_invalid() {
+            return true;
+        }
+
+        let Some((left, top, width, height)) =
+            measure_overlay_artwork(&bitmaps.0.hbmColor)
+        else {
+            return true;
+        };
+
+        let mut canvas = BITMAP::default();
+        // SAFETY: the handle is valid for the duration of the call.
+        if unsafe {
+            GetObjectW(
+                bitmaps.0.hbmColor.into(),
+                size_of::<BITMAP>() as i32,
+                Some((&mut canvas) as *mut BITMAP as *mut core::ffi::c_void),
+            )
+        } == 0
+            || canvas.bmWidth <= 0
+            || canvas.bmHeight <= 0
+        {
+            return true;
+        }
+
+        let _ = (left, top);
+        // A genuine 256 px frame fills most of its canvas; the padded frame
+        // centers a glyph at roughly a 32/256 share.
+        let share = (width as f64 / canvas.bmWidth as f64)
+            .min(height as f64 / canvas.bmHeight as f64);
+        share < 0.7
+    }
+
+    /// Measures the bounding box of the actual artwork on a 32 bpp alpha
+    /// bitmap (the overlay member's arrow occupies only a small patch of its
+    /// JUMBO canvas). Returns (x, y, width, height), or None when the pixels
+    /// cannot be read.
+    fn measure_overlay_artwork(bitmap_handle: &HBITMAP) -> Option<(i32, i32, i32, i32)> {
+        let mut bitmap = BITMAP::default();
+        // SAFETY: the handle is valid and the structure is writable for the
+        // duration of the call.
+        if unsafe {
+            GetObjectW(
+                (*bitmap_handle).into(),
+                size_of::<BITMAP>() as i32,
+                Some((&mut bitmap) as *mut BITMAP as *mut core::ffi::c_void),
+            )
+        } == 0
+            || bitmap.bmWidth <= 0
+            || bitmap.bmHeight <= 0
+        {
+            return None;
+        }
+
+        let width = bitmap.bmWidth;
+        let height = bitmap.bmHeight;
+        let pixel_byte_count = (width as usize)
+            .checked_mul(height as usize)?
+            .checked_mul(4)?;
+        let mut pixels = vec![0u8; pixel_byte_count];
+        let mut bitmap_info = BITMAPINFO::default();
+        bitmap_info.bmiHeader.biSize =
+            size_of::<windows::Win32::Graphics::Gdi::BITMAPINFOHEADER>() as u32;
+        bitmap_info.bmiHeader.biWidth = width;
+        bitmap_info.bmiHeader.biHeight = -height;
+        bitmap_info.bmiHeader.biPlanes = 1;
+        bitmap_info.bmiHeader.biBitCount = 32;
+        bitmap_info.bmiHeader.biCompression = BI_RGB.0;
+        bitmap_info.bmiHeader.biSizeImage = pixel_byte_count as u32;
+
+        // SAFETY: the DC is balanced and pixels/bitmap_info stay valid and
+        // correctly sized for the requested top-down 32-bit DIB.
+        let dc = unsafe { GetDC(None) };
+        if dc.is_invalid() {
+            return None;
+        }
+
+        let copied_rows = unsafe {
+            GetDIBits(
+                dc,
+                *bitmap_handle,
+                0,
+                height as u32,
+                Some(pixels.as_mut_ptr().cast::<core::ffi::c_void>()),
+                &mut bitmap_info,
+                DIB_RGB_COLORS,
+            )
+        };
+        unsafe { ReleaseDC(None, dc) };
+        if copied_rows != height {
+            return None;
+        }
+
+        // Top-down BGRA: the alpha channel is every fourth byte. A small
+        // threshold skips decoder noise at fully transparent edges.
+        const AlphaThreshold: u8 = 8;
+        let mut left = width;
+        let mut top = height;
+        let mut right: i32 = -1;
+        let mut bottom: i32 = -1;
+        for row in 0..height {
+            for column in 0..width {
+                let alpha = pixels[(row * width + column) as usize * 4 + 3];
+                if alpha >= AlphaThreshold {
+                    if column < left {
+                        left = column;
+                    }
+                    if row < top {
+                        top = row;
+                    }
+                    if column > right {
+                        right = column;
+                    }
+                    if row > bottom {
+                        bottom = row;
+                    }
+                }
+            }
+        }
+
+        if right < left || bottom < top {
+            return None;
+        }
+
+        Some((left, top, right - left + 1, bottom - top + 1))
     }
 
     fn icon_to_bmp_bytes(icon: HICON) -> Result<Vec<u8>, String> {

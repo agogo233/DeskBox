@@ -412,16 +412,22 @@ pub(crate) unsafe fn write_shortcut(
             return finish_write(result, DESKBOX_NATIVE_STATUS_OPERATION_FAILED, hresult);
         }
 
-        // SAFETY: Each UTF-16 value is NUL-terminated and alive for the call.
-        let icon_hresult = unsafe {
-            (Interface::vtable(&shell_link).SetIconLocation)(
-                Interface::as_raw(&shell_link),
-                PCWSTR(icon_path.as_ptr()),
-                request.icon_index,
-            )
-        };
-        if let Err(hresult) = record_write_field(result, ShortcutField::Icon, icon_hresult.0) {
-            return finish_write(result, DESKBOX_NATIVE_STATUS_OPERATION_FAILED, hresult);
+        // An empty icon path means "no custom icon": skip SetIconLocation so
+        // the system renders the target's own icon with the shortcut overlay
+        // (the Explorer-native default). Calling SetIconLocation with an
+        // empty string instead relies on undocumented reset semantics.
+        if icon_path.len() > 1 {
+            // SAFETY: Each UTF-16 value is NUL-terminated and alive for the call.
+            let icon_hresult = unsafe {
+                (Interface::vtable(&shell_link).SetIconLocation)(
+                    Interface::as_raw(&shell_link),
+                    PCWSTR(icon_path.as_ptr()),
+                    request.icon_index,
+                )
+            };
+            if let Err(hresult) = record_write_field(result, ShortcutField::Icon, icon_hresult.0) {
+                return finish_write(result, DESKBOX_NATIVE_STATUS_OPERATION_FAILED, hresult);
+            }
         }
     }
 
