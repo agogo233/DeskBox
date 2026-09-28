@@ -656,7 +656,7 @@ public sealed class NativeDropTarget : IDisposable
             }
             finally
             {
-                ReleaseStgMedium(ref medium);
+                OleDropTargetNativeMethods.ReleaseStgMedium(ref medium);
             }
         }
         catch
