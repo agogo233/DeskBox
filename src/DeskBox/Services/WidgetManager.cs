@@ -1,6 +1,7 @@
 ﻿using DeskBox.Contracts;
 using DeskBox.Models;
 using DeskBox.Helpers;
+using DeskBox.Contracts;
 using DeskBox.Controls.WidgetContents;
 using DeskBox.Services.Plugins;
 using DeskBox.Platform;
@@ -247,6 +248,9 @@ public sealed partial class WidgetManager :
     IFileWidgetImportTarget,
     IFeatureStateEvents
 {
+    private readonly TodoSettingsCoordinator? _todoSettings;
+    private readonly IQuickCaptureSettings? _quickCaptureSettings;
+    private readonly ISearchFeatureSettings? _searchFeatureSettings;
     private const string ManagedShortcutDescriptionPrefix = "DeskBox mapped widget shortcut:";
 
     private readonly SettingsService _settingsService;
@@ -262,8 +266,10 @@ public sealed partial class WidgetManager :
     private readonly FileWidgetHostDiagnostics _fileWidgetHostDiagnostics;
     private readonly WidgetTopologyLayoutService _topologyLayoutService = new();
     private readonly Dictionary<string, FileWidgetSession> _fileWidgets = new();
+    private readonly FileSessionRegistration<FileWidgetSession, ContentWidgetWindow> _fileSessionRegistration;
     private readonly Dictionary<string, ContentWidgetWindow> _contentWidgets = new();
     private readonly HashSet<IntPtr> _widgetWindowHandles = new();
+    private readonly ContentWindowRegistration<ContentWidgetWindow> _contentWindowRegistration;
     private readonly HashSet<string> _deletedWidgetIds = [];
     private readonly HashSet<string> _suppressClosedVisibilityPersistence = [];
     private readonly SemaphoreSlim _widgetRenameGate = new(1, 1);
@@ -299,7 +305,7 @@ public sealed partial class WidgetManager :
             .Distinct()
             .Any(window =>
                 window.Visible &&
-                window.CurrentContent is FileSurfaceContent);
+                window.CurrentContent is FileWidgetContentAdapter);
 
     internal int LoadedWidgetCount => _widgetSurfaces.Count;
 
@@ -584,7 +590,10 @@ public sealed partial class WidgetManager :
         OrganizerService organizerService,
         ThemeService themeService,
         QuickCaptureService quickCaptureService,
-        LocalizationService? localizationService = null)
+        LocalizationService? localizationService = null,
+        TodoSettingsCoordinator? todoSettings = null,
+        IQuickCaptureSettings? quickCaptureSettings = null,
+        ISearchFeatureSettings? searchFeatureSettings = null)
         : this(
             settingsService,
             fileService,
@@ -593,7 +602,10 @@ public sealed partial class WidgetManager :
             quickCaptureService,
             localizationService ?? new LocalizationService(settingsService),
             () => Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),
-            recycleManagedFolderDeletes: true)
+            recycleManagedFolderDeletes: true,
+            todoSettings,
+            quickCaptureSettings,
+            searchFeatureSettings)
     {
     }
 
@@ -625,9 +637,19 @@ public sealed partial class WidgetManager :
         QuickCaptureService quickCaptureService,
         LocalizationService? localizationService,
         Func<string> desktopPathProvider,
-        bool recycleManagedFolderDeletes)
+        bool recycleManagedFolderDeletes,
+        TodoSettingsCoordinator? todoSettings = null,
+        IQuickCaptureSettings? quickCaptureSettings = null,
+        ISearchFeatureSettings? searchFeatureSettings = null)
     {
         _settingsService = settingsService;
+        _fileSessionRegistration = new(_fileWidgets,
+            session => session.Host, session => session.Content);
+        _contentWindowRegistration = new(_contentWidgets, _widgetWindowHandles,
+            window => window.WindowHandle);
+        _todoSettings = todoSettings;
+        _quickCaptureSettings = quickCaptureSettings;
+        _searchFeatureSettings = searchFeatureSettings;
         _fileService = fileService;
         _organizerService = organizerService;
         _themeService = themeService;
@@ -788,6 +810,10 @@ public sealed partial class WidgetManager :
             }
 
             _lastFeatureWidgetEnabledStates[kind] = enabled;
+            if (kind == WidgetKind.QuickCapture && _quickCaptureSettings is not null)
+                continue; // the coordinator handles external enablement and listener state
+            if (kind == WidgetKind.Search && _searchFeatureSettings is not null)
+                continue; // the coordinator orders widget teardown before runtime release
             ApplyFeatureWidgetEnabledState(kind, enabled);
         }
 
@@ -1006,6 +1032,7 @@ public sealed partial class WidgetManager :
             _sessionManager.MarkDesktopResting("restore-widgets");
             QueueVisibleGroupedFileIconRecoveryAfterStartup();
         }
+
     }
 
     /// <summary>
@@ -1637,6 +1664,7 @@ public sealed partial class WidgetManager :
         // re-held by a fast reraise during the await.
         SweepRaisedBandGuests("set-all-hidden", endedRaiseGeneration);
         App.LogVerbose($"[TrayBatch] SetAllVisible completed visible=false prepared={windowsToHide.Count}");
+
         ReconcileBackgroundMemoryCleanupForWidgetVisibility(
             "tray-batch-hidden",
             forceScheduleWhenHidden: true);
@@ -1814,14 +1842,13 @@ public sealed partial class WidgetManager :
         if (_fileWidgets.TryGetValue(widgetId, out var fileSession))
         {
             App.Log($"[WidgetManager] Retiring widget window for delete: {widgetId}");
-            _fileWidgets.Remove(widgetId);
+            _fileSessionRegistration.UnregisterIfMatch(widgetId, fileSession);
         }
 
         if (_contentWidgets.TryGetValue(widgetId, out var contentWindow))
         {
             App.Log($"[WidgetManager] Retiring content widget window for delete: {widgetId}");
-            _contentWidgets.Remove(widgetId);
-            _widgetWindowHandles.Remove(contentWindow.WindowHandle);
+            _contentWindowRegistration.UnregisterIfMatch(widgetId, contentWindow);
             // Explicitly dispose content (e.g. MusicWidgetViewModel) BEFORE
             // closing the window.  The Closed event handler also calls
             // DisposeContent, but if the event is delayed or fails, the
@@ -1895,7 +1922,7 @@ public sealed partial class WidgetManager :
             }
             else
             {
-                SetFeatureWidgetEnabledState(config.WidgetKind, false);
+                await CommitFeatureWidgetStateAsync(config.WidgetKind, false);
             }
         }
         await _settingsService.SaveAsync();
@@ -1994,7 +2021,7 @@ public sealed partial class WidgetManager :
 
         foreach (ContentWidgetWindow window in _contentWidgets.Values.Distinct())
         {
-            if (window.CurrentContent is not FileSurfaceContent fileContent ||
+            if (window.CurrentContent is not FileWidgetContentAdapter fileContent ||
                 string.Equals(
                     fileContent.WidgetId,
                     activeWidgetId,
@@ -2134,7 +2161,7 @@ public sealed partial class WidgetManager :
 
                     if (GetLoadedWindow(group.ActiveMemberId) is not ContentWidgetWindow window ||
                         !window.Visible ||
-                        window.CurrentContent is not FileSurfaceContent fileSurface ||
+                        window.CurrentContent is not FileWidgetContentAdapter fileSurface ||
                         !string.Equals(
                             fileSurface.WidgetId,
                             group.ActiveMemberId,
@@ -2394,7 +2421,7 @@ public sealed partial class WidgetManager :
             _suppressClosedVisibilityPersistence.Add(widget.Id);
         }
 
-        _fileWidgets.Clear();
+        _fileSessionRegistration.Clear();
 
         foreach (ContentWidgetWindow window in _contentWidgets.Values
                      .DistinctBy(candidate => candidate.WindowHandle)
@@ -2419,8 +2446,7 @@ public sealed partial class WidgetManager :
             }
         }
 
-        _contentWidgets.Clear();
-        _widgetWindowHandles.Clear();
+        _contentWindowRegistration.Clear();
         _widgetSurfaces.Clear();
         _widgetSurfaceSwitchGates.Clear();
         _sessionManager.MarkHidden("close-all");
@@ -2451,9 +2477,9 @@ public sealed partial class WidgetManager :
         ContentWidgetWindow? contentWindow = _contentWidgets.Values
             .Distinct()
             .FirstOrDefault(window =>
-                window.CurrentContent is FileSurfaceContent surface &&
+                window.CurrentContent is FileWidgetContentAdapter surface &&
                 string.Equals(surface.WidgetId, widgetId, StringComparison.Ordinal));
-        if (contentWindow?.CurrentContent is FileSurfaceContent fileSurface)
+        if (contentWindow?.CurrentContent is FileWidgetContentAdapter fileSurface)
         {
             await fileSurface.ViewModel.RefreshFromConfigAsync();
         }
@@ -2481,9 +2507,9 @@ public sealed partial class WidgetManager :
             ContentWidgetWindow? contentWindow = _contentWidgets.Values
                 .Distinct()
                 .FirstOrDefault(window =>
-                    window.CurrentContent is FileSurfaceContent surface &&
+                    window.CurrentContent is FileWidgetContentAdapter surface &&
                     string.Equals(surface.WidgetId, widgetId, StringComparison.Ordinal));
-            if (contentWindow?.CurrentContent is FileSurfaceContent fileSurface)
+            if (contentWindow?.CurrentContent is FileWidgetContentAdapter fileSurface)
             {
                 fileSurface.SetDesktopOrganizationBusy(isBusy);
             }
@@ -2620,7 +2646,8 @@ public sealed partial class WidgetManager :
         bool keepPreparedForAnimation = false,
         bool revealAfterCreate = false,
         bool showRaisedWhileInitializing = false,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool prepareSurfacePromotionCandidate = false)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -2631,11 +2658,18 @@ public sealed partial class WidgetManager :
                 keepPreparedForAnimation,
                 revealAfterCreate,
                 showRaisedWhileInitializing,
-                cancellationToken));
+                cancellationToken,
+                prepareSurfacePromotionCandidate));
         }
 
         if (_contentWidgets.TryGetValue(config.Id, out var existing))
         {
+            if (prepareSurfacePromotionCandidate)
+            {
+                throw new InvalidOperationException(
+                    $"Promotion candidate for '{config.Id}' must be a newly created host.");
+            }
+
             if (!showRaisedWhileInitializing)
             {
                 await existing.ContentReadyTask.WaitAsync(cancellationToken);
@@ -2667,55 +2701,52 @@ public sealed partial class WidgetManager :
 
         ContentWidgetWindowPlan plan = factory.CreateContentWindowPlan(config);
         var window = factory.CreateContentWindow(plan);
-        _themeService.TrackWindow(window);
-        _contentWidgets[config.Id] = window;
-        RegisterStandaloneUnifiedFileSessionIfNeeded(
-            config,
-            window,
-            plan.Content);
-        RegisterCreatedSurfaceHost(config, window);
-        _widgetWindowHandles.Add(window.WindowHandle);
-        ApplyCapsuleArrangementIfChanged(force: true);
-
-        window.Closed += (_, _) =>
-        {
-            List<string> registeredIds = _contentWidgets
-                .Where(entry => ReferenceEquals(entry.Value, window))
-                .Select(entry => entry.Key)
-                .ToList();
-            foreach (string registeredId in registeredIds)
-            {
-                _contentWidgets.Remove(registeredId);
-            }
-
-            RemoveFileWidgetSessionsForHost(window);
-
-            UnregisterSurfaceHost(window);
-            _widgetWindowHandles.Remove(window.WindowHandle);
-            WidgetConfig closedConfig = window.Config;
-            if (IsDeleted(closedConfig.Id) || FindConfig(closedConfig.Id) is null)
-            {
-                return;
-            }
-
-            if (_suppressClosedVisibilityPersistence.Contains(closedConfig.Id) ||
-                registeredIds.Any(_suppressClosedVisibilityPersistence.Contains))
-            {
-                return;
-            }
-
-            if (_contentWidgets.Values.Any(candidate => ReferenceEquals(candidate, window)))
-            {
-                return;
-            }
-
-            closedConfig.IsVisible = false;
-            SetWidgetGroupVisibility(closedConfig, isVisible: false);
-            _settingsService.SaveDebounced();
-        };
-
         try
         {
+            _themeService.TrackWindow(window);
+            _contentWindowRegistration.Register(config.Id, window);
+            RegisterStandaloneUnifiedFileSessionIfNeeded(
+                config,
+                window,
+                plan.Content);
+            RegisterCreatedSurfaceHost(
+                config,
+                window,
+                prepareSurfacePromotionCandidate);
+            ApplyCapsuleArrangementIfChanged(force: true);
+
+            window.Closed += (_, _) =>
+            {
+                IReadOnlyList<string> registeredIds = _contentWindowRegistration.Unregister(window);
+
+                RemoveFileWidgetSessionsForHost(window);
+
+                UnregisterSurfaceHost(window);
+                // A late Closed event from a retired/replaced HWND must not
+                // persist hidden state onto the replacement's config.
+                if (registeredIds.Count == 0) return;
+                WidgetConfig closedConfig = window.Config;
+                if (IsDeleted(closedConfig.Id) || FindConfig(closedConfig.Id) is null)
+                {
+                    return;
+                }
+
+                if (_suppressClosedVisibilityPersistence.Contains(closedConfig.Id) ||
+                    registeredIds.Any(_suppressClosedVisibilityPersistence.Contains))
+                {
+                    return;
+                }
+
+                if (_contentWidgets.Values.Any(candidate => ReferenceEquals(candidate, window)))
+                {
+                    return;
+                }
+
+                closedConfig.IsVisible = false;
+                SetWidgetGroupVisibility(closedConfig, isVisible: false);
+                _settingsService.SaveDebounced();
+            };
+
             if (keepPreparedForAnimation && showRaisedWhileInitializing)
             {
                 window.PrepareTrayShowAnimation();
@@ -2743,10 +2774,13 @@ public sealed partial class WidgetManager :
         }
         catch
         {
-            _contentWidgets.Remove(config.Id);
+            _contentWindowRegistration.Unregister(window);
             RemoveFileWidgetSessionsForHost(window);
-            _widgetWindowHandles.Remove(window.WindowHandle);
-            UnregisterSurfaceHost(window);
+            try { UnregisterSurfaceHost(window); }
+            catch (Exception cleanupError)
+            {
+                App.Log($"[WidgetManager] Failed to unregister content surface after creation error: {cleanupError}");
+            }
             CloseFailedCreatedWindow(
                 config.Id,
                 window,
@@ -2766,38 +2800,32 @@ public sealed partial class WidgetManager :
             WidgetGroupSettings.FindByMember(
                 _settingsService.Settings,
                 config.Id) is not null ||
-            content is not FileSurfaceContent fileSurface)
+            content is not FileWidgetContentAdapter fileAdapter)
         {
             return;
         }
 
-        if (_fileWidgets.TryGetValue(config.Id, out var existing) &&
-            ReferenceEquals(existing.Host, window))
-        {
-            return;
-        }
+        if (_contentWidgets.TryGetValue(config.Id, out var registeredWindow) &&
+            !ReferenceEquals(registeredWindow, window))
+            throw new InvalidOperationException(
+                $"File session host does not match the active content window for '{config.Id}'.");
 
-        var session = new FileWidgetSession(window, fileSurface);
-        _fileWidgets[config.Id] = session;
-        _fileWidgetHostDiagnostics.RecordUnifiedCreation();
+        bool newHost = !_fileWidgets.TryGetValue(config.Id, out var previous) ||
+            !ReferenceEquals(previous.Host, window);
+        var session = new FileWidgetSession(window, fileAdapter);
+        if (!_fileSessionRegistration.RegisterOrReplace(config.Id, session)) return;
+        if (newHost) _fileWidgetHostDiagnostics.RecordUnifiedCreation();
         App.LogVerbose(
-            $"[WidgetManager] Registered unified standalone file host " +
+            $"[WidgetManager] {(newHost ? "Registered" : "Rebound")} unified standalone file session " +
             $"widget={config.Id} hwnd=0x{window.WindowHandle.ToInt64():X}");
     }
 
     private List<string> RemoveFileWidgetSessionsForHost(
         IDesktopWidgetWindow window)
     {
-        List<string> registeredIds = _fileWidgets
-            .Where(entry => ReferenceEquals(entry.Value.Host, window))
-            .Select(entry => entry.Key)
-            .ToList();
-        foreach (string registeredId in registeredIds)
-        {
-            _fileWidgets.Remove(registeredId);
-        }
-
-        return registeredIds;
+        return window is ContentWidgetWindow host
+            ? _fileSessionRegistration.UnregisterHost(host).ToList()
+            : [];
     }
 
     private void CloseFailedCreatedWindow(
@@ -2846,9 +2874,8 @@ public sealed partial class WidgetManager :
                 if (_contentWidgets.TryGetValue(config.Id, out var currentWindow) &&
                     ReferenceEquals(currentWindow, window))
                 {
-                    _contentWidgets.Remove(config.Id);
+                    _contentWindowRegistration.UnregisterIfMatch(config.Id, window);
                     RemoveFileWidgetSessionsForHost(window);
-                    _widgetWindowHandles.Remove(window.WindowHandle);
                     try
                     {
                         window.Close();

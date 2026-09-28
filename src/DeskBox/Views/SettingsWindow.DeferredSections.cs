@@ -13,6 +13,8 @@ public sealed partial class SettingsWindow
 {
     private void RefreshVisibleSettingsPageData()
     {
+        UpdateSearchSettingsActivity();
+        UpdateBackupSettingsActivity();
         if (_currentSettingsSection is "AppearanceDetail" or "FileStorageSettings")
         {
             RefreshManagedStoragePathWarning();
@@ -28,6 +30,29 @@ public sealed partial class SettingsWindow
         {
             _ = ViewModel.RefreshQuickCaptureImageCacheInfoAsync();
         }
+        if (_currentSettingsSection == "SearchSettings" &&
+            _settingsSectionElements.TryGetValue("SearchSettings", out FrameworkElement? search) &&
+            search is SearchSettingsSection section)
+        {
+            section.RefreshFromSettings();
+        }
+    }
+
+    private void UpdateSearchSettingsActivity()
+    {
+        if (_settingsSectionElements.TryGetValue("SearchSettings", out FrameworkElement? element) &&
+            element is SearchSettingsSection section)
+        {
+            section.SetActive(!_isClosed && IsVisibleToUser && _currentSettingsSection == "SearchSettings");
+        }
+    }
+
+    private void UpdateBackupSettingsActivity()
+    {
+        if (!_isClosed && IsVisibleToUser && _currentSettingsSection == "CloudBackupSettings")
+            _backupSettingsViewModel.Activate();
+        else
+            _backupSettingsViewModel.Deactivate();
     }
 
     private FrameworkElement EnsureSettingsSectionCreated(string sectionTag)
@@ -52,6 +77,9 @@ public sealed partial class SettingsWindow
 
         switch (section)
         {
+            case SearchSettingsSection searchSettings:
+                searchSettings.Configure(_searchSettingsViewModel, _localizationService, _hWnd);
+                break;
             case FileWidgetSettingsSection fileSettings:
                 fileSettings.ViewModel = ViewModel;
                 break;
@@ -61,6 +89,16 @@ public sealed partial class SettingsWindow
             case GlanceWidgetSettingsSection glanceSettings:
                 glanceSettings.SetOwnerWindow(_hWnd);
                 break;
+        }
+
+        // Pilot pattern for retiring the shell binding facade: sections whose
+        // editor owns the binding surface get the editor as their DataContext,
+        // overriding the shell view model set above. {Binding} markup resolves
+        // through the editor's generated custom-property provider under
+        // Native AOT, so no per-property shell bridge is needed anymore.
+        if (sectionTag == "MusicSettings")
+        {
+            section.DataContext = _musicSettingsViewModel;
         }
 
         if (sectionTag == "FileStorageSettings")

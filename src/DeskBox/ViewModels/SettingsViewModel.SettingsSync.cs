@@ -17,6 +17,7 @@ public partial class SettingsViewModel
     private void OnLanguageChanged()
     {
         RefreshLocalizedProperties();
+        _musicSettings.RefreshLocalization();
     }
 
     private void OnSettingsChanged()
@@ -139,15 +140,10 @@ public partial class SettingsViewModel
             ApplyContentEditorSettingsSnapshot(settings);
             ApplyFileStackSettingsSnapshot(settings);
 
-            QuickCaptureEnabled = FeatureWidgetSettings.IsEnabled(settings, WidgetKind.QuickCapture);
-            QuickCaptureClipboardEnabled = settings.QuickCaptureClipboardEnabled;
-            QuickCaptureImageClipboardEnabled = settings.QuickCaptureImageClipboardEnabled;
-            QuickCaptureRecentLimit = QuickCaptureService.NormalizeRecentLimit(settings.QuickCaptureRecentLimit);
-            QuickCaptureShowCreatedTime = settings.QuickCaptureShowCreatedTime;
-            QuickCaptureListTextSize = SettingsService.NormalizeTextSize(
-                (settings.QuickCaptureListTextSize > 0 ? settings.QuickCaptureListTextSize : settings.TextSize));
-            QuickCaptureContentTextSize = SettingsService.NormalizeTextSize(
-                (settings.QuickCaptureContentTextSize > 0 ? settings.QuickCaptureContentTextSize : settings.TextSize));
+            SyncQuickCaptureSettingsFacade();
+            SyncQuickCapturePresentationFacade();
+            SyncQuickCaptureRecentLimitFacade();
+            SyncQuickCaptureTextSizeFacade();
             SelectedAttachmentStorageMode = SettingsService.NormalizeAttachmentStorageMode(settings.AttachmentStorageMode);
             ApplyPerformanceSettingsSnapshot(settings);
             SelectedManagedDropAction = settings.ManagedDropAction switch
@@ -160,45 +156,22 @@ public partial class SettingsViewModel
                     SettingsService.ManagedDropActionShortcutOutsideDesktop,
                 _ => SettingsService.ManagedDropActionCopy
             };
-            SelectedQuickCaptureDefaultView = NormalizeQuickCaptureDefaultView(settings.QuickCaptureDefaultView);
-            SelectedQuickCaptureTabStyle = SettingsService.NormalizeWidgetTabStyle(settings.QuickCaptureTabStyle);
-            QuickCaptureShowTabBar = settings.QuickCaptureShowTabBar;
-            QuickCaptureShowRecordsTab = settings.QuickCaptureShowRecordsTab;
-            QuickCaptureShowPinnedTab = settings.QuickCaptureShowPinnedTab;
-            QuickCaptureShowRecentTab = settings.QuickCaptureShowRecentTab;
+            SyncQuickCaptureTabsFacade();
 
-            TodoEnabled = FeatureWidgetSettings.IsEnabled(settings, WidgetKind.Todo);
-            TodoShowTabBar = settings.TodoShowTabBar;
-            TodoShowAllTab = settings.TodoShowAllTab;
-            TodoShowActiveTab = settings.TodoShowActiveTab;
-            TodoShowTodayTab = settings.TodoShowTodayTab;
-            TodoShowThisWeekTab = settings.TodoShowThisWeekTab;
-            TodoShowThisMonthTab = settings.TodoShowThisMonthTab;
-            TodoShowImportantTab = settings.TodoShowImportantTab;
-            TodoShowCompletedTab = settings.TodoShowCompletedTab;
-            TodoShowCompletedTasks = settings.TodoShowCompletedTasks;
-            TodoListTextSize = SettingsService.NormalizeTextSize(
-                (settings.TodoListTextSize > 0 ? settings.TodoListTextSize : settings.TextSize));
-            TodoContentTextSize = SettingsService.NormalizeTextSize(
-                (settings.TodoContentTextSize > 0 ? settings.TodoContentTextSize : settings.TextSize));
-            TodoShowFooterStats = settings.TodoShowFooterStats;
-            TodoShowClearCompletedButton = settings.TodoShowClearCompletedButton;
-            SelectedTodoLayoutMode = SettingsService.NormalizeTodoLayoutMode(
-                settings.TodoLayoutMode,
-                settings.TodoUseWideDetailPane);
-            TodoUseWideDetailPane = SelectedTodoLayoutMode != SettingsService.TodoLayoutModeSinglePane;
-            TodoAutoSelectFirstInWideLayout = settings.TodoAutoSelectFirstInWideLayout;
-            TodoReminderEnabled = settings.TodoReminderEnabled;
-            SelectedTodoNewTaskPosition = NormalizeTodoNewTaskPosition(settings.TodoNewTaskPosition);
-            SelectedTodoDefaultFilter = NormalizeTodoDefaultFilter(settings.TodoDefaultFilter);
-            SelectedTodoTabStyle = SettingsService.NormalizeWidgetTabStyle(settings.TodoTabStyle);
-            SelectedTodoReminderOffsetMinutes = SettingsService.NormalizeTodoReminderOffsetMinutes(
-                settings.TodoDefaultReminderOffsetMinutes);
+            _todoSettings.Refresh();
+            SyncTodoTabFacade();
+            SyncTodoDisplayFacade();
+            SyncTodoTextSizeFacade();
+            TodoUseWideDetailPane = _todoSettings.LayoutMode != SettingsService.TodoLayoutModeSinglePane;
+            TodoAutoSelectFirstInWideLayout = _todoSettings.AutoSelectFirstInWideLayout;
 
             var musicSettingsSnapshot = _musicSettingsStore.Load();
             MusicUseArtworkBackdrop = musicSettingsSnapshot.UseArtworkBackdrop;
             MusicEnableCoverHoverMotion = musicSettingsSnapshot.EnableCoverHoverMotion;
             SelectedMusicDisplayMode = SettingsService.NormalizeMusicDisplayMode(musicSettingsSnapshot.DisplayMode);
+            // Music presentation lives on the section editor now: refresh the
+            // editor projection instead of assigning shell facade properties.
+            _musicSettings.SyncPresentation();
 
             WeatherAutoLocation = settings.WeatherAutoLocation;
             WeatherCityName = settings.WeatherCityName;
@@ -231,13 +204,7 @@ public partial class SettingsViewModel
                 SettingsService.WeatherRefreshMaxMinutes);
 
             ManagedStorageRootPath = SettingsService.NormalizeManagedStorageRootPath(settings.DefaultManagedStorageRootPath);
-            AutomaticBackupEnabled = settings.AutomaticBackupEnabled;
-            SelectedAutomaticBackupIntervalMinutes = DataBackupSettingsPolicy.NormalizeIntervalMinutes(
-                settings.AutomaticBackupIntervalMinutes);
-            SelectedAutomaticBackupRetentionCount = DataBackupSettingsPolicy.NormalizeRetentionCount(
-                settings.AutomaticBackupRetentionCount);
-            AutomaticBackupDirectory =
-                DataBackupSettingsPolicy.NormalizeCustomDirectory(settings.AutomaticBackupDirectory) ?? string.Empty;
+            _backupSettings.RefreshState();
             GlobalHotkeyEnabled = settings.GlobalHotkeyEnabled;
         }
         finally
@@ -349,7 +316,6 @@ public partial class SettingsViewModel
             _cachedTodoLayoutModeDisplayNames = null;
             _cachedTodoTabStyleDisplayNames = null;
             _cachedTodoReminderOffsetDisplayNames = null;
-            _cachedMusicDisplayModeDisplayNames = null;
             _cachedWeatherTempUnitDisplayNames = null;
             _cachedWeatherWindUnitDisplayNames = null;
             _cachedWeatherDefaultViewDisplayNames = null;
@@ -395,7 +361,6 @@ public partial class SettingsViewModel
             OnPropertyChanged(nameof(AvailableTodoDefaultFilterDisplayNames));
             OnPropertyChanged(nameof(AvailableTodoTabStyleDisplayNames));
             OnPropertyChanged(nameof(AvailableTodoReminderOffsetDisplayNames));
-            OnPropertyChanged(nameof(AvailableMusicDisplayModeDisplayNames));
             OnPropertyChanged(nameof(AvailableWeatherTemperatureUnitDisplayNames));
             OnPropertyChanged(nameof(AvailableWeatherWindSpeedUnitDisplayNames));
             OnPropertyChanged(nameof(AvailableWeatherDefaultViewDisplayNames));
@@ -479,7 +444,6 @@ public partial class SettingsViewModel
         RefreshTodoContentPresentation();
         OnPropertyChanged(nameof(TodoReminderSummaryText));
         OnPropertyChanged(nameof(TodoFooterDisplaySummaryText));
-        OnPropertyChanged(nameof(SelectedMusicDisplayModeText));
         OnPropertyChanged(nameof(WeatherDisplayOptionsSummaryText));
     }
 }

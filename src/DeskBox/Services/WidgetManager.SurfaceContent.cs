@@ -35,7 +35,7 @@ public sealed partial class WidgetManager
 
     private IWidgetContent CreateQuickCaptureSurfaceContent(WidgetConfig config)
     {
-        return new QuickCaptureSurfaceContent(
+        return new QuickCaptureWidgetContentAdapter(
             config,
             _quickCaptureService,
             _settingsService,
@@ -45,7 +45,7 @@ public sealed partial class WidgetManager
 
     private IWidgetContent CreateFileSurfaceContent(WidgetConfig config)
     {
-        return new FileSurfaceContent(
+        return new FileWidgetContentAdapter(
             config,
             _fileService,
             _organizerService,
@@ -62,9 +62,18 @@ public sealed partial class WidgetManager
     private async Task PromoteGroupToUnifiedSurfaceHostAsync(
         WidgetGroupConfig group,
         Func<Task>? beforeRetireAsync = null,
-        bool preserveRaisedLayer = false)
+        bool preserveRaisedLayer = false,
+        IReadOnlyCollection<WidgetSurfaceClaimTransfer<IDesktopWidgetWindow>>?
+            expectedRetiringClaims = null)
     {
         IDesktopWidgetWindow? loaded = GetLoadedWindow(group.ActiveMemberId);
+        IReadOnlyCollection<WidgetSurfaceClaimTransfer<IDesktopWidgetWindow>>
+            retiringSurfaceClaims = expectedRetiringClaims ??
+                (loaded is null
+                    ? Array.Empty<WidgetSurfaceClaimTransfer<IDesktopWidgetWindow>>()
+                    : _widgetSurfaces.CaptureGroupClaimTransfers(
+                        CreateSurfaceDefinition(group),
+                        onlyRetireHost: loaded));
         if (loaded is ContentWidgetWindow contentWindow)
         {
             if (beforeRetireAsync is not null)
@@ -72,18 +81,10 @@ public sealed partial class WidgetManager
                 await beforeRetireAsync();
             }
 
-            string standaloneSurfaceId = contentWindow.Config.Id;
-            CommitSurfaceHost(group, contentWindow);
-            if (!string.Equals(
-                    standaloneSurfaceId,
-                    group.SurfaceId,
-                    StringComparison.Ordinal))
-            {
-                // Commit the group identity first, then remove the former
-                // standalone identity. This keeps the live HWND registered if
-                // a registry validation ever rejects the group commit.
-                _widgetSurfaces.RemoveSurface(standaloneSurfaceId);
-            }
+            CommitSurfaceHost(
+                group,
+                contentWindow,
+                retiringSurfaceClaims);
             return;
         }
 
@@ -99,7 +100,8 @@ public sealed partial class WidgetManager
         WidgetConfig? config = FindConfig(group.ActiveMemberId);
         if (config is null)
         {
-            return;
+            throw new InvalidOperationException(
+                $"The active member '{group.ActiveMemberId}' has no widget configuration.");
         }
 
         bool showCandidateRaised = preserveRaisedLayer ||
@@ -113,7 +115,8 @@ public sealed partial class WidgetManager
             await WidgetSurfacePromotionTransaction.ExecuteAsync(
                 prepareCandidateAsync: () => CreateContentWidgetFromConfigAsync(
                     config,
-                    keepPreparedForAnimation: true),
+                    keepPreparedForAnimation: true,
+                    prepareSurfacePromotionCandidate: true),
                 presentCandidateAsync: async candidate =>
                 {
                     if (!group.IsVisible)
@@ -149,28 +152,48 @@ public sealed partial class WidgetManager
                     {
                         await beforeRetireAsync();
                     }
-                    CommitSurfaceHost(group, candidate);
+                    CommitSurfaceHost(
+                        group,
+                        candidate,
+                        retiringSurfaceClaims);
                     if (loaded is not null)
                     {
-                        RetireSpecificLoadedWindowForGroup(
-                            group.ActiveMemberId,
-                            loaded,
-                            keepConfigVisible: group.IsVisible);
+                        try
+                        {
+                            RetireSpecificLoadedWindowForGroup(
+                                group.ActiveMemberId,
+                                loaded,
+                                keepConfigVisible: group.IsVisible);
+                        }
+                        catch (Exception retirementError)
+                        {
+                            // The new host is already committed. A failure to
+                            // retire the old HWND must not roll back and close
+                            // the committed candidate.
+                            App.Log(
+                                $"[WidgetSurface] Legacy host retirement " +
+                                $"failed after commit surface={group.SurfaceId}: " +
+                                retirementError);
+                            try
+                            {
+                                CloseFailedGroupReplacement(
+                                    group.ActiveMemberId,
+                                    loaded);
+                            }
+                            catch (Exception cleanupError)
+                            {
+                                App.Log(
+                                    $"[WidgetSurface] Legacy host cleanup " +
+                                    $"failed surface={group.SurfaceId}: " +
+                                    cleanupError);
+                            }
+                        }
                     }
                 },
                 rollbackCandidate: candidate =>
                 {
-                    if (_contentWidgets.TryGetValue(
-                            config.Id,
-                            out var registeredCandidate) &&
-                        ReferenceEquals(registeredCandidate, candidate))
-                    {
-                        _contentWidgets.Remove(config.Id);
-                    }
-
+                    _contentWindowRegistration.Unregister(candidate);
                     RemoveFileWidgetSessionsForHost(candidate);
-
-                    _widgetWindowHandles.Remove(candidate.WindowHandle);
                     UnregisterSurfaceHost(candidate);
                     CloseFailedCreatedWindow(
                         config.Id,

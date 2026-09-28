@@ -1635,9 +1635,12 @@ $stage4E4BridgeAssignmentIndex = $stage4E4DeferredSectionsSource.IndexOf(
 $stage4E4BridgeClearIndex = $stage4E4SettingsWindowSource.IndexOf(
     "AppearanceDetailSection.ViewModel = null;",
     [StringComparison]::Ordinal)
-$stage4E4ViewModelDisposeIndex = $stage4E4SettingsWindowSource.IndexOf(
-    "ViewModel.Dispose();",
-    [StringComparison]::Ordinal)
+$stage4E4ViewModelDisposeMatch = [regex]::Match(
+    $stage4E4SettingsWindowSource,
+    '(?m)^[ \t]*ViewModel\.Dispose\(\);[ \t]*\r?$')
+$stage4E4ViewModelDisposeIndex = if ($stage4E4ViewModelDisposeMatch.Success) {
+    $stage4E4ViewModelDisposeMatch.Index
+} else { -1 }
 $stage4E4ViewModelBridgeOrderValid =
     $stage4E4RootDataContextIndex -ge 0 -and
     $stage4E4DeferredDataContextIndex -ge 0 -and
@@ -3490,7 +3493,7 @@ $stage5B4B1RequiredRunnerPatterns = @(
     'FileStackRuleCount',
     'BackupSnapshotCount',
     'DeepSettingsCompleted',
-    'result.DeepSettings.PageTransitions.Count == 24',
+    'result.DeepSettings.PageTransitions.Count == 25',
     'AotManagedUiSmokeJsonContext.Default.AotManagedUiSmokeResult'
 )
 $stage5B4B1MissingRunnerPatterns = @(
@@ -3646,7 +3649,7 @@ $stage5B4B1MissingBindableTypePatterns = @(
         }
     }
 )
-$stage5B4B1ExpectedBindableViewModelPropertyCount = 349
+$stage5B4B1ExpectedBindableViewModelPropertyCount = 345
 $stage5B4B1ActualBindableViewModelPropertyCount = [regex]::Matches(
     $stage5B4B1Sources[$stage5B4B1SourceFiles[9]],
     [regex]::Escape('nameof(')).Count
@@ -4157,7 +4160,8 @@ $stage5B4B2B1RequiredManagerPatterns = @(
     'aot-5b4b2b1-quick-capture',
     '_contentWidgets.TryGetValue',
     'window.ContentReadyTask',
-    'window.CurrentContent is QuickCaptureSurfaceContent',
+    'window.CurrentContent is QuickCaptureWidgetContentAdapter adapter',
+    'adapter.View is QuickCaptureSurfaceContent surface',
     'WindowHandle',
     'WindowContentRoot?.XamlRoot',
     'Visible'
@@ -4295,6 +4299,14 @@ $stage5B4B2B2ARequiredRunnerPatterns = @(
     'AttachmentCount',
     'HasDueDate',
     'HasRecurrence',
+    'Where(item => !item.IsDeleted)',
+    'Single(entry => !entry.IsDeleted)',
+    'TombstoneIdCount',
+    'TombstoneIds',
+    'RequireAotTodoTombstonesPersisted',
+    'RequireAotTodoTombstoneSurvivedRestart',
+    'TodoDeletedItemTombstonePersisted',
+    'TodoDeleteTombstoneSurvivedRestart',
     'NormalShutdownRequested',
     'ShutdownApplicationAsync()',
     'AotManagedUiSmokeJsonContext.Default.AotManagedUiSmokeResult'
@@ -4399,6 +4411,9 @@ $stage5B4B2B2ARequiredSmokeScriptPatterns = @(
     '$verifyDelete.todoPersistence.before',
     '$verifyDelete.todoPersistence.after',
     '$postflight.todoPersistence.before',
+    '$deletedTodoItemId',
+    'tombstoneIdsAfterDelete',
+    'tombstoneIdsAfterRestart',
     'afterExplicitSave',
     'final-todo.json',
     'todoNaturalExit',
@@ -4518,6 +4533,11 @@ $stage5B4B2B2B1RequiredRunnerPatterns = @(
     'AfterStepDelete',
     'RequireAotManagedUiTodoStepPopulated',
     'RequireAotManagedUiTodoTaskWithoutSteps',
+    'Single(entry => !entry.IsDeleted)',
+    'RequireAotTodoTombstonesPersisted(evidence.After, restart.ItemId)',
+    'RequireAotTodoTombstoneSurvivedRestart',
+    'TodoStepsDeletedItemTombstonePersisted',
+    'TodoStepsDeleteTombstoneSurvivedRestart',
     'NormalShutdownRequested',
     'ShutdownApplicationAsync()',
     'AotManagedUiSmokeJsonContext.Default.AotManagedUiSmokeResult'
@@ -4632,6 +4652,9 @@ $stage5B4B2B2B1RequiredSmokeScriptPatterns = @(
     '$verifyDelete.todoStepsPersistence.afterStepMutation',
     '$verifyDelete.todoStepsPersistence.afterStepDelete',
     '$postflight.todoStepsPersistence.before',
+    '$deletedTodoStepsItemId',
+    'todoStepsTombstoneIdsAfterDelete',
+    'todoStepsTombstoneIdsAfterRestart',
     'todoStepsNaturalExit',
     'todoStepsPreviewProcessesAfter',
     'Sort-Object -Unique',
@@ -4748,6 +4771,11 @@ $stage5B4B2B2B2RequiredRunnerPatterns = @(
     'AfterAttachmentDelete',
     'RequireAotManagedUiTodoAttachmentPopulated',
     'RequireAotManagedUiTodoTaskWithoutAttachments',
+    'Single(entry => !entry.IsDeleted)',
+    'RequireAotTodoTombstonesPersisted(evidence.After, deletion.ItemId)',
+    'RequireAotTodoTombstoneSurvivedRestart',
+    'TodoAttachmentsDeletedItemTombstonePersisted',
+    'TodoAttachmentsDeleteTombstoneSurvivedRestart',
     'NormalShutdownRequested',
     'ShutdownApplicationAsync()',
     'AotManagedUiSmokeJsonContext.Default.AotManagedUiSmokeResult'
@@ -4886,6 +4914,9 @@ $stage5B4B2B2B2RequiredSmokeScriptPatterns = @(
     '$verifyDelete.todoAttachmentsPersistence.before',
     '$verifyDelete.todoAttachmentsPersistence.afterAttachmentDelete',
     '$postflight.todoAttachmentsPersistence.before',
+    '$deletedTodoAttachmentsItemId',
+    'todoAttachmentsTombstoneIdsAfterDelete',
+    'todoAttachmentsTombstoneIdsAfterRestart',
     'todo-managed-attachment.txt',
     'Get-FileSha256',
     'fixtureSha256',
@@ -5208,7 +5239,11 @@ $stage5B4B2C2ASourceFiles = @(
     "src/DeskBox/App.AotManagedUiSmoke.cs",
     "src/DeskBox/App.AotWeatherSettingsPersistenceSmoke.cs",
     "src/DeskBox/Services/WeatherSettingsPolicy.cs",
-    "src/DeskBox/ViewModels/SettingsViewModel.WeatherOptions.cs",
+    # Batch 38 moved the settings page's weather policy writes from the
+    # SettingsViewModel.WeatherOptions shell facade into the feature-section
+    # coordinator; the "product writer reuses the local policy" pin follows
+    # the owner.
+    "src/DeskBox/Services/FeatureWidgetsSettingsCoordinator.cs",
     "src/DeskBox/Services/WeatherWidgetViewModeSettings.cs",
     "src/DeskBox/Services/WidgetManager.AotWeatherSettingsPersistenceSmoke.cs",
     "src/DeskBox/ViewModels/WeatherWidgetViewModel.RefreshAndLayout.cs",
@@ -5385,7 +5420,7 @@ $stage5B4B2C2ASourceWarningMessages = @(
             $line = $_
             $warningCodeRegex.IsMatch($line) -and
                 $line -notmatch "warning WMC1510:" -and
-                $line -match "(?:App\.Aot(?:ManagedUi|WeatherSettingsPersistence)Smoke|WeatherSettingsPolicy|SettingsViewModel\.WeatherOptions|WeatherWidgetViewModeSettings|WidgetManager\.AotWeatherSettingsPersistenceSmoke|WeatherWidgetViewModel\.RefreshAndLayout)\.cs\("
+                $line -match "(?:App\.Aot(?:ManagedUi|WeatherSettingsPersistence)Smoke|WeatherSettingsPolicy|FeatureWidgetsSettingsCoordinator|SettingsViewModel\.WeatherOptions|WeatherWidgetViewModeSettings|WidgetManager\.AotWeatherSettingsPersistenceSmoke|WeatherWidgetViewModel\.RefreshAndLayout)\.cs\("
         } |
         ForEach-Object { $_.Trim() } |
         Sort-Object -Unique
@@ -6596,7 +6631,7 @@ $stage5B4C1B2BRequiredSmokeScriptPatterns = @(
     'FilePropertiesReadOnly',
     '[Guid]::NewGuid().ToString("N")',
     'file-properties-preview-$runId',
-    'profile 49 / schema 46',
+    'profile 62 / schema 55',
     'Refusing to replace an existing file Properties preview root',
     'Refusing to replace an existing file Properties recovery root',
     'properties-$runId.txt',
@@ -6824,7 +6859,7 @@ $stage5B4C1C1RequiredSmokeScriptPatterns = @(
     'run-aot-picker-clipboard-smoke.ps1',
     'PickerClipboardStorageItemsPersistenceRestart',
     '[Guid]::NewGuid().ToString("N")',
-    'profile 50 / schema 47',
+    'profile 62 / schema 55',
     'UIAutomationClient',
     'CancelPending',
     'SelectionPending',
@@ -6843,7 +6878,7 @@ $stage5B4C1C1RequiredSmokeScriptPatterns = @(
     '"Postflight"',
     '$dataDirectory = Join-Path $DataRoot "data"',
     '$settingsPath = Join-Path $dataDirectory "settings.json"',
-    'schemaVersion = 5',
+    'schemaVersion = 9',
     'hasResolvedInitialFileWidgetSetup = $true',
     'featureWidgetEnabledStates',
     'productionDataFingerprintBefore',
@@ -7056,10 +7091,19 @@ $stage5B4C1C2ARequiredScenarioPatterns = @(
     'NativeDropLeaveClearedFolderHighlight',
     'NativeDropCopyMoveSemanticsVerified',
     'OleCallbackReleasedBeforeProgress',
-    'ProgressCardVisibleAboveDragVisual',
-    'BackgroundIsAcrylicBrush',
-    'CanvasZIndex >= 1000',
-    'TranslationZ >= 64',
+    'ProgressDeferredToShellTransfer',
+    'duringImport.IsImportBusy',
+    '!duringImport.CardVisible',
+    'WaitForAotImportBusyPastCardDelayAsync',
+    'AotImportCardDelayProofFloorMilliseconds',
+    'duringImport.BusyElapsedMilliseconds',
+    'WaitForAotImportCardVisibleSnapshotAsync',
+    'NativeDropManagedImportShowedAcrylicCard',
+    'NativeDropManagedImportSettled',
+    'NativeDropManagedCardProbeCleanedUp',
+    'cardShown.BackgroundIsAcrylicBrush',
+    'cardShown.CanvasZIndex == 1000',
+    'containsTemporaryFiles: true',
     'NativeDropRestartMutationVerified',
     'NativeDropPostflightVerified',
     'SHA256.HashData(stream)'
@@ -7101,7 +7145,7 @@ $stage5B4C1C2ARequiredSmokeScriptPatterns = @(
     'run-aot-native-drop-smoke.ps1',
     'NativeDropPersistenceRestart',
     '[Guid]::NewGuid().ToString("N")',
-    'profile 56 / schema 53',
+    'profile 62 / schema 55',
     '$largeFileLength = 384MB',
     'ProgrammaticGeneratedCcwHDrop',
     'physicalExplorerMouseVerified = $false',
@@ -7110,9 +7154,10 @@ $stage5B4C1C2ARequiredSmokeScriptPatterns = @(
     '"VerifyRestore"',
     '"Postflight"',
     'copyImport.duringImport.cardVisible',
-    'backgroundIsAcrylicBrush',
-    'canvasZIndex',
-    'translationZ',
+    'copyImport.duringImport.isImportBusy',
+    'managedCardImport.cardShown.cardVisible',
+    'managedCardImport.cardShown.backgroundIsAcrylicBrush',
+    'managedCardImport.destinationRemovedAfterProbe',
     'nativePointerClear.highlightActiveAfter',
     'nativeLeaveClear.highlightActiveAfter',
     'productionDataFingerprintBefore',
@@ -7276,7 +7321,7 @@ $stage5B4C2ARunnerSource =
     $stage5B4C2ASources[$stage5B4C2ASourceFiles[7]]
 $stage5B4C2ARequiredSmokeScriptPatterns = @(
     'StartAotHotkeySmokeIfRequested();',
-    'profile 56 / schema 53',
+    'profile 62 / schema 55',
     'Invoke-HotkeyPhase',
     '-Phase "Primary"',
     '-Phase "Release"',
@@ -7416,7 +7461,9 @@ $stage5B4C3AProductSource =
 $stage5B4C3ARequiredProductPatterns = @(
     'Func<string, TodoWidgetStore> storeFactory',
     'Func<DateTimeOffset> clock',
-    'public async Task<int> CheckNowAsync(DateTimeOffset now)',
+    'public Task<int> CheckNowAsync(DateTimeOffset now)',
+    'return _activeCheck = CheckCoreAsync(now);',
+    'private async Task<int> CheckCoreAsync(DateTimeOffset now)',
     'public async Task<bool> SnoozeAsync(',
     'item.SnoozedUntil = snoozedUntil',
     'item.ReminderDismissedForDueDate = item.DueDate',
@@ -7447,7 +7494,7 @@ $stage5B4C3ARequiredSmokeScriptPatterns = @(
     'StartAotTodoRecurrenceReminderSmokeIfRequested();',
     'TodoRecurrenceReminderPersistenceRestart',
     'run-aot-todo-recurrence-reminder-smoke.ps1',
-    'profile 56 / schema 53',
+    'profile 62 / schema 55',
     '[Guid]::NewGuid().ToString("N")',
     'Invoke-TodoRecurrenceReminderPhase',
     '"SeedAndSnooze"',
@@ -7618,7 +7665,7 @@ $stage5B4C3B1RequiredSmokeScriptPatterns = @(
     'StartAotTodoNotificationLifecycleSmokeIfRequested();',
     'TodoNotificationDisplayCleanup',
     'run-aot-todo-notification-smoke.ps1',
-    'profile 56 / schema 53',
+    'profile 62 / schema 55',
     '[Guid]::NewGuid().ToString("N")',
     'Invoke-TodoNotificationPhase',
     '"ShowAndInspect"',
@@ -7806,7 +7853,7 @@ $stage5B4C3B2ARequiredSmokeScriptPatterns = @(
     'StartAotTodoNotificationActivationSmokeIfRequested();',
     'TodoNotificationActionRouting',
     'run-aot-todo-notification-activation-smoke.ps1',
-    'profile 56 / schema 53',
+    'profile 62 / schema 55',
     '[Guid]::NewGuid().ToString("N")',
     'Invoke-TodoNotificationActivationPhase',
     '"RouteAndPersist"',

@@ -23,20 +23,14 @@ using WinRT.Interop;
 namespace DeskBox.Controls.WidgetContents;
 
 /// <summary>
-/// Window-independent Quick Capture member. All top-level window, DWM,
+/// Window-independent Quick Capture leaf view. All top-level window, DWM,
 /// z-order, bounds, capsule, and group navigation behavior stays with the
-/// surface host; this control owns only Quick Capture data and interaction.
+/// surface host; this control owns only Quick Capture interaction state.
+/// The residency adapter (QuickCaptureWidgetContentAdapter) owns the view
+/// model and this leaf's lifetime.
 /// </summary>
 public sealed partial class QuickCaptureSurfaceContent :
     UserControl,
-    IWidgetContent,
-    IWidgetFeedbackSource,
-    IWidgetTransientStateContent,
-    IWidgetResponsiveLayoutContent,
-    IWidgetHostViewportContent,
-    IWidgetInteractiveResizeContent,
-    IWidgetAddActionContent,
-    IWidgetGroupContentCacheable,
     IDisposable
 {
     private const int DetailAutoSaveDelayMs = 600;
@@ -92,26 +86,20 @@ public sealed partial class QuickCaptureSurfaceContent :
     private bool _isWindowRevealCompleted;
 
     public QuickCaptureSurfaceContent(
-        WidgetConfig config,
-        QuickCaptureService quickCaptureService,
+        QuickCaptureWidgetViewModel viewModel,
         SettingsService settingsService,
         LocalizationService localizationService,
         DispatcherQueue dispatcherQueue)
     {
-        ArgumentNullException.ThrowIfNull(config);
-        ArgumentNullException.ThrowIfNull(quickCaptureService);
+        ArgumentNullException.ThrowIfNull(viewModel);
         ArgumentNullException.ThrowIfNull(settingsService);
         ArgumentNullException.ThrowIfNull(localizationService);
         ArgumentNullException.ThrowIfNull(dispatcherQueue);
 
         _localizationService = localizationService;
         _settingsService = settingsService;
-        ViewModel = new QuickCaptureWidgetViewModel(
-            config,
-            quickCaptureService,
-            settingsService,
-            localizationService,
-            dispatcherQueue);
+        ViewModel = viewModel;
+        WidgetConfig config = viewModel.Config;
 
         try
         {
@@ -155,19 +143,15 @@ public sealed partial class QuickCaptureSurfaceContent :
 
     public QuickCaptureWidgetViewModel ViewModel { get; }
 
-    public event EventHandler<WidgetFeedbackRequestedEventArgs>? FeedbackRequested;
+    internal event EventHandler<WidgetFeedbackRequestedEventArgs>? FeedbackRequested;
 
-    public WidgetConfig Config => ViewModel.Config;
+    internal WidgetConfig Config => ViewModel.Config;
 
-    public string WidgetId => Config.Id;
+    internal string WidgetId => Config.Id;
 
-    public WidgetKind WidgetKind => WidgetKind.QuickCapture;
+    internal bool IsReadyForReuse => _isInitialized && !_isDisposed;
 
-    public FrameworkElement View => this;
-
-    public bool IsReadyForReuse => _isInitialized && !_isDisposed;
-
-    public async Task InitializeAsync()
+    internal async Task InitializeContentAsync()
     {
         await ViewModel.InitializeAsync();
         _isInitialized = true;
@@ -179,9 +163,7 @@ public sealed partial class QuickCaptureSurfaceContent :
         }
     }
 
-    public Task RefreshAsync() => ViewModel.RefreshItemsAsync();
-
-    public async Task AddFromTitleButtonAsync()
+    internal async Task AddFromTitleButtonAsync()
     {
         await OpenNewDetailAsync();
     }
@@ -208,7 +190,7 @@ public sealed partial class QuickCaptureSurfaceContent :
         await OpenDetailAfterSavingAsync(item);
     }
 
-    public void ApplyAppearance()
+    internal void ApplyAppearance()
     {
         ViewModel.ApplyAppearancePreview();
         UpdateSelectedViewVisual();
@@ -216,7 +198,7 @@ public sealed partial class QuickCaptureSurfaceContent :
         ApplyResponsiveLayout();
     }
 
-    public void OnActivated()
+    internal void OnActivated()
     {
         if (IsLoaded)
         {
@@ -224,13 +206,13 @@ public sealed partial class QuickCaptureSurfaceContent :
         }
     }
 
-    public async void OnDeactivated()
+    internal async void OnDeactivated()
     {
         _lastFocusTarget = GetCurrentFocusTarget();
         await FlushPendingDetailSaveAsync();
     }
 
-    public async void OnWindowVisibilityChanged(bool visible)
+    internal async void OnWindowVisibilityChanged(bool visible)
     {
         _isWindowVisible = visible;
         if (!visible)
@@ -241,7 +223,7 @@ public sealed partial class QuickCaptureSurfaceContent :
         }
     }
 
-    public void OnWindowRevealCompleted()
+    internal void OnWindowRevealCompleted()
     {
         if (!_isWindowVisible || _isWindowRevealCompleted)
         {
@@ -255,7 +237,7 @@ public sealed partial class QuickCaptureSurfaceContent :
         }
     }
 
-    public void RestoreTransientState(string? inputText, string? searchText)
+    internal void RestoreTransientState(string? inputText, string? searchText)
     {
         ViewModel.InputText = inputText ?? string.Empty;
         ViewModel.SearchText = searchText ?? string.Empty;
@@ -265,7 +247,7 @@ public sealed partial class QuickCaptureSurfaceContent :
         }
     }
 
-    object? IWidgetTransientStateContent.CaptureTransientState()
+    internal object? CaptureSwitchTransientState()
     {
         bool shouldCaptureDetail =
             QuickCaptureDetailRestorePolicy.ShouldCaptureDetail(
@@ -285,7 +267,7 @@ public sealed partial class QuickCaptureSurfaceContent :
             shouldCaptureDetail && !_isDualPane && _showDetailInSinglePane);
     }
 
-    void IWidgetTransientStateContent.RestoreTransientState(object? state)
+    internal void RestoreSwitchTransientState(object? state)
     {
         if (state is QuickCaptureWidgetTransientState quickState)
         {
@@ -397,14 +379,14 @@ public sealed partial class QuickCaptureSurfaceContent :
         }
     }
 
-    public void BeginInteractiveResize(double contentWidth, double contentHeight)
+    internal void BeginInteractiveResize(double contentWidth, double contentHeight)
     {
         _isInteractiveResizeActive = true;
         CancelSegmentedRestore();
         _deferDetailReaderUntilTransitionCompletes = true;
     }
 
-    public void CompleteInteractiveResize(double contentWidth, double contentHeight)
+    internal void CompleteInteractiveResize(double contentWidth, double contentHeight)
     {
         _isInteractiveResizeActive = false;
         _deferDetailReaderUntilTransitionCompletes = false;
@@ -633,7 +615,7 @@ public sealed partial class QuickCaptureSurfaceContent :
         _settingsService.SaveDebounced();
     }
 
-    public void BeginResponsiveLayoutTransition(
+    internal void BeginResponsiveLayoutTransition(
         double targetContentWidth,
         double targetContentHeight,
         bool isCollapsing)
@@ -709,7 +691,7 @@ public sealed partial class QuickCaptureSurfaceContent :
         });
     }
 
-    public void OnHostViewportSizeChanged(double width, double height)
+    internal void OnHostViewportSizeChanged(double width, double height)
     {
         if (!double.IsFinite(width) || width <= 0)
         {
@@ -724,7 +706,7 @@ public sealed partial class QuickCaptureSurfaceContent :
         }
     }
 
-    public void CompleteResponsiveLayoutTransition(
+    internal void CompleteResponsiveLayoutTransition(
         double finalContentWidth,
         double finalContentHeight)
     {
@@ -740,7 +722,7 @@ public sealed partial class QuickCaptureSurfaceContent :
         QueueSegmentedRestore();
     }
 
-    public void CancelResponsiveLayoutTransition()
+    internal void CancelResponsiveLayoutTransition()
     {
         _isResponsiveLayoutTransitionActive = false;
         _deferDetailReaderUntilTransitionCompletes = false;

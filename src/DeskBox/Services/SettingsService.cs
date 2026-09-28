@@ -304,11 +304,13 @@ public sealed class SettingsService
     public const string LayoutDensityStandard = "Standard";
     public const string LayoutDensityRelaxed = "Relaxed";
     public const string LayoutDensityCustom = "Custom";
-    public const string MusicDisplayModeAuto = "Auto";
-    public const string MusicDisplayModeCover = "Cover";
-    public const string MusicDisplayModeControls = "Controls";
-    public const string MusicDisplayModeRecordVertical = "RecordVertical";
-    public const string MusicDisplayModeRecordHorizontal = "RecordHorizontal";
+    // Aliases of the contract-owned canonical values so the feature editor
+    // can build its option list without referencing the settings adapter.
+    public const string MusicDisplayModeAuto = Contracts.MusicDisplayModes.Auto;
+    public const string MusicDisplayModeCover = Contracts.MusicDisplayModes.Cover;
+    public const string MusicDisplayModeControls = Contracts.MusicDisplayModes.Controls;
+    public const string MusicDisplayModeRecordVertical = Contracts.MusicDisplayModes.RecordVertical;
+    public const string MusicDisplayModeRecordHorizontal = Contracts.MusicDisplayModes.RecordHorizontal;
     public const int MaxRecentOrganizationHistoryCount = 24;
     public const string TodoNewTaskPositionTop = "Top";
     public const string TodoNewTaskPositionBottom = "Bottom";
@@ -2135,6 +2137,61 @@ settings.FocusClickedWidgetOnRaise = false;
             WidgetCollapseBehaviorNames.Normalize(value));
     }
 
+    public static string NormalizeWidgetAnimationEffect(string? effect)
+    {
+        return effect is
+            WidgetAnimationEffectFade or
+            WidgetAnimationEffectSlideRight or
+            WidgetAnimationEffectSlideLeft or
+            WidgetAnimationEffectSlideUp or
+            WidgetAnimationEffectSlideDown or
+            WidgetAnimationEffectScaleFade or
+            WidgetAnimationEffectSlideFade or
+            WidgetAnimationEffectZoom or
+            WidgetAnimationEffectSlideUpFade or
+            WidgetAnimationEffectSlideDownFade or
+            WidgetAnimationEffectSlideLeftFade or
+            WidgetAnimationEffectSlideRightFade or
+            WidgetAnimationEffectScaleSlide
+            ? effect
+            : WidgetAnimationEffectSlideFade;
+    }
+
+    public static string NormalizeWidgetAnimationSpeed(string? speed)
+    {
+        return speed is
+            WidgetAnimationSpeedVeryFast or
+            WidgetAnimationSpeedFast or
+            WidgetAnimationSpeedStandard or
+            WidgetAnimationSpeedRelaxed or
+            WidgetAnimationSpeedSlow
+            ? speed
+            : WidgetAnimationSpeedStandard;
+    }
+
+    public static string NormalizeWidgetAnimationSlideDirection(string? direction)
+    {
+        return direction is
+            WidgetAnimationSlideDirectionNone or
+            WidgetAnimationSlideDirectionLeft or
+            WidgetAnimationSlideDirectionRight or
+            WidgetAnimationSlideDirectionUp or
+            WidgetAnimationSlideDirectionDown
+            ? direction
+            : WidgetAnimationSlideDirectionRight;
+    }
+
+    public static string NormalizeWidgetAnimationEasingIntensity(string? intensity)
+    {
+        return intensity is
+            WidgetAnimationEasingNone or
+            WidgetAnimationEasingLight or
+            WidgetAnimationEasingStandard or
+            WidgetAnimationEasingStrong
+            ? intensity
+            : WidgetAnimationEasingStandard;
+    }
+
     public static string NormalizeWidgetCompactWidthMode(string? value)
     {
         return string.Equals(
@@ -2321,6 +2378,34 @@ settings.FocusClickedWidgetOnRaise = false;
         return string.Equals(value, WidgetCompactMediaCornerRound, StringComparison.OrdinalIgnoreCase)
             ? WidgetCompactMediaCornerRound
             : WidgetCompactMediaCornerFollowWidget;
+    }
+
+    // Uplifted from the settings shell's capsule section (batch 33) so the
+    // CapsuleSettingsCoordinator and the shell's binding state share one
+    // preset mapping, like the animation-normalizer precedent of batch 29.
+    public static int? WidgetCompactAnimationPresetDurationMs(string? effect)
+    {
+        return NormalizeWidgetCompactAnimationEffect(effect) switch
+        {
+            WidgetCompactAnimationSmooth => DefaultWidgetCompactAnimationDurationMs,
+            WidgetCompactAnimationSlow => SlowWidgetCompactAnimationDurationMs,
+            WidgetCompactAnimationSnappy => SnappyWidgetCompactAnimationDurationMs,
+            _ => null
+        };
+    }
+
+    public static (int Expand, int Collapse)? WidgetCompactHoverResponsePresetDelays(string? response)
+    {
+        return NormalizeWidgetCompactHoverResponse(response) switch
+        {
+            WidgetCompactHoverResponseSensitive =>
+                (SensitiveWidgetCompactExpandDelayMs, SensitiveWidgetCompactCollapseDelayMs),
+            WidgetCompactHoverResponsePreventAccidental =>
+                (PreventAccidentalWidgetCompactExpandDelayMs, PreventAccidentalWidgetCompactCollapseDelayMs),
+            WidgetCompactHoverResponseBalanced =>
+                (DefaultWidgetCompactExpandDelayMs, DefaultWidgetCompactCollapseDelayMs),
+            _ => null
+        };
     }
 
     public static string NormalizeWidgetTitleIconModeSetting(string? value)
@@ -3163,12 +3248,11 @@ settings.FocusClickedWidgetOnRaise = false;
             changed = true;
         }
 
-        if (settings.QuickCaptureDefaultView is not (
-            QuickCaptureDefaultViewRecords or
-            QuickCaptureDefaultViewPinned or
-            QuickCaptureDefaultViewRecent))
+        string normalizedDefaultView = NormalizeQuickCaptureDefaultView(
+            settings.QuickCaptureDefaultView);
+        if (settings.QuickCaptureDefaultView != normalizedDefaultView)
         {
-            settings.QuickCaptureDefaultView = QuickCaptureDefaultViewRecords;
+            settings.QuickCaptureDefaultView = normalizedDefaultView;
             changed = true;
         }
 
@@ -3255,20 +3339,15 @@ settings.FocusClickedWidgetOnRaise = false;
             changed = true;
         }
 
-        if (settings.TodoNewTaskPosition is not (TodoNewTaskPositionTop or TodoNewTaskPositionBottom))
+        if (settings.TodoNewTaskPosition != NormalizeTodoNewTaskPosition(
+                settings.TodoNewTaskPosition))
         {
             settings.TodoNewTaskPosition = TodoNewTaskPositionTop;
             changed = true;
         }
 
-        if (settings.TodoDefaultFilter is not (
-            TodoDefaultFilterAll or
-            TodoDefaultFilterActive or
-            TodoDefaultFilterToday or
-            TodoDefaultFilterThisWeek or
-            TodoDefaultFilterThisMonth or
-            TodoDefaultFilterImportant or
-            TodoDefaultFilterCompleted))
+        if (settings.TodoDefaultFilter != NormalizeTodoDefaultFilter(
+                settings.TodoDefaultFilter))
         {
             settings.TodoDefaultFilter = TodoDefaultFilterAll;
             changed = true;
@@ -3349,6 +3428,11 @@ settings.FocusClickedWidgetOnRaise = false;
             ? !controlPressed
             : controlPressed;
 
+    public static string NormalizeTodoNewTaskPosition(string? position) =>
+        position == TodoNewTaskPositionBottom
+            ? TodoNewTaskPositionBottom
+            : TodoNewTaskPositionTop;
+
     public static string NormalizeWidgetTabStyle(string? style)
     {
         return style == WidgetTabStylePivot
@@ -3383,6 +3467,11 @@ settings.FocusClickedWidgetOnRaise = false;
             ? QuickCaptureWideOpenEditing
             : QuickCaptureWideOpenReading;
 
+    public static string NormalizeQuickCaptureDefaultView(string? view) => view is
+        QuickCaptureDefaultViewPinned or QuickCaptureDefaultViewRecent
+            ? view
+            : QuickCaptureDefaultViewRecords;
+
     public static bool IsQuickCaptureTabVisible(AppSettings settings, string? view) => view switch
     {
         QuickCaptureDefaultViewPinned => settings.QuickCaptureShowPinnedTab,
@@ -3398,26 +3487,42 @@ settings.FocusClickedWidgetOnRaise = false;
         return QuickCaptureDefaultViewRecords;
     }
 
-    public static bool IsTodoTabVisible(AppSettings settings, string? filter) => filter switch
+    public static string NormalizeTodoDefaultFilter(string? filter) => filter is
+        TodoDefaultFilterActive or
+        TodoDefaultFilterToday or
+        TodoDefaultFilterThisWeek or
+        TodoDefaultFilterThisMonth or
+        TodoDefaultFilterImportant or
+        TodoDefaultFilterCompleted
+        ? filter
+        : TodoDefaultFilterAll;
+
+    public static bool IsTodoTabVisible(AppSettings settings, string? filter) =>
+        IsTodoTabVisible(settings.Todo, filter);
+
+    public static bool IsTodoTabVisible(TodoSettingsSlice todo, string? filter) => filter switch
     {
-        TodoDefaultFilterActive => settings.TodoShowActiveTab,
-        TodoDefaultFilterToday => settings.TodoShowTodayTab,
-        TodoDefaultFilterThisWeek => settings.TodoShowThisWeekTab,
-        TodoDefaultFilterThisMonth => settings.TodoShowThisMonthTab,
-        TodoDefaultFilterImportant => settings.TodoShowImportantTab,
-        TodoDefaultFilterCompleted => settings.TodoShowCompletedTab,
-        _ => settings.TodoShowAllTab
+        TodoDefaultFilterActive => todo.TodoShowActiveTab,
+        TodoDefaultFilterToday => todo.TodoShowTodayTab,
+        TodoDefaultFilterThisWeek => todo.TodoShowThisWeekTab,
+        TodoDefaultFilterThisMonth => todo.TodoShowThisMonthTab,
+        TodoDefaultFilterImportant => todo.TodoShowImportantTab,
+        TodoDefaultFilterCompleted => todo.TodoShowCompletedTab,
+        _ => todo.TodoShowAllTab
     };
 
-    public static string GetFirstVisibleTodoTab(AppSettings settings)
+    public static string GetFirstVisibleTodoTab(AppSettings settings) =>
+        GetFirstVisibleTodoTab(settings.Todo);
+
+    public static string GetFirstVisibleTodoTab(TodoSettingsSlice todo)
     {
-        if (settings.TodoShowAllTab) return TodoDefaultFilterAll;
-        if (settings.TodoShowActiveTab) return TodoDefaultFilterActive;
-        if (settings.TodoShowTodayTab) return TodoDefaultFilterToday;
-        if (settings.TodoShowThisWeekTab) return TodoDefaultFilterThisWeek;
-        if (settings.TodoShowThisMonthTab) return TodoDefaultFilterThisMonth;
-        if (settings.TodoShowImportantTab) return TodoDefaultFilterImportant;
-        if (settings.TodoShowCompletedTab) return TodoDefaultFilterCompleted;
+        if (todo.TodoShowAllTab) return TodoDefaultFilterAll;
+        if (todo.TodoShowActiveTab) return TodoDefaultFilterActive;
+        if (todo.TodoShowTodayTab) return TodoDefaultFilterToday;
+        if (todo.TodoShowThisWeekTab) return TodoDefaultFilterThisWeek;
+        if (todo.TodoShowThisMonthTab) return TodoDefaultFilterThisMonth;
+        if (todo.TodoShowImportantTab) return TodoDefaultFilterImportant;
+        if (todo.TodoShowCompletedTab) return TodoDefaultFilterCompleted;
         return TodoDefaultFilterAll;
     }
 

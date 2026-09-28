@@ -296,18 +296,6 @@ public partial class SettingsViewModel
         };
     }
 
-    public string GetMusicDisplayModeDisplayName(string mode)
-    {
-        return SettingsService.NormalizeMusicDisplayMode(mode) switch
-        {
-            SettingsService.MusicDisplayModeCover => _localizationService.T("Settings.Music.DisplayMode.Cover"),
-            SettingsService.MusicDisplayModeControls => _localizationService.T("Settings.Music.DisplayMode.Controls"),
-            SettingsService.MusicDisplayModeRecordVertical => _localizationService.T("Settings.Music.DisplayMode.RecordVertical"),
-            SettingsService.MusicDisplayModeRecordHorizontal => _localizationService.T("Settings.Music.DisplayMode.RecordHorizontal"),
-            _ => _localizationService.T("Settings.Music.DisplayMode.Auto")
-        };
-    }
-
     public string GetLanguageDisplayName(string language)
     {
         return _localizationService.GetLanguageDisplayName(language);

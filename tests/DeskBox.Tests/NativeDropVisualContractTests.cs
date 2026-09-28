@@ -30,7 +30,7 @@ public sealed class NativeDropVisualContractTests
         string imageManager = ReadRepositoryFile(
             "src/DeskBox/Helpers/NativeDropImageManager.cs");
         string description = ReadRepositoryFile(
-            "src/DeskBox/Helpers/NativeDropDescriptionWriter.cs");
+            "src/DeskBox/Platform/NativeDropDescriptionWriter.cs");
 
         Assert.Contains(
             "e.DragUIOverride.IsContentVisible = false;",
@@ -168,7 +168,7 @@ public sealed class NativeDropVisualContractTests
             "src/DeskBox/Controls/WidgetContents/TodoWidgetContentAdapter.cs");
 
         Assert.Contains(
-            "QuickCaptureSurfaceContent => true",
+            "QuickCaptureWidgetContentAdapter => true",
             window,
             StringComparison.Ordinal);
         Assert.Contains(
@@ -192,7 +192,7 @@ public sealed class NativeDropVisualContractTests
             window,
             StringComparison.Ordinal);
         Assert.Contains(
-            "case QuickCaptureSurfaceContent quickCapture:",
+            "case QuickCaptureWidgetContentAdapter quickCapture:",
             window,
             StringComparison.Ordinal);
         Assert.Contains(
@@ -310,7 +310,7 @@ public sealed class NativeDropVisualContractTests
         string combined = string.Join(
             Environment.NewLine,
             ReadRepositoryFile("src/DeskBox/Helpers/NativeDropImageManager.cs"),
-            ReadRepositoryFile("src/DeskBox/Helpers/NativeDropDescriptionWriter.cs"),
+            ReadRepositoryFile("src/DeskBox/Platform/NativeDropDescriptionWriter.cs"),
             ReadRepositoryFile("src/DeskBox/Helpers/NativeDropComDataReader.cs"));
 
         Assert.DoesNotContain(

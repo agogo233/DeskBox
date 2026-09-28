@@ -5,14 +5,11 @@ namespace DeskBox.ViewModels;
 
 public partial class SettingsViewModel
 {
-    private int _quickCaptureItemPreviewLineCount = SettingsService.DefaultQuickCaptureItemPreviewLineCount;
     private string _quickCaptureEditorEnterBehavior = SettingsService.EditorEnterBehaviorCtrlEnterSaves;
     private string _quickCaptureEditorFormat = SettingsService.QuickCaptureFormatMarkdown;
     private string _quickCaptureWideLayout = SettingsService.QuickCaptureWideLayoutAuto;
     private string _quickCaptureWideOpenMode = SettingsService.QuickCaptureWideOpenReading;
     private bool _quickCaptureAllowRemoteImages;
-    private int _todoItemPreviewLineCount = SettingsService.DefaultTodoItemPreviewLineCount;
-    private string _todoEditorEnterBehavior = SettingsService.EditorEnterBehaviorCtrlEnterSaves;
     private string[]? _cachedItemPreviewLineCountDisplayNames;
     private string[]? _cachedEditorEnterBehaviorDisplayNames;
     private string[]? _cachedQuickCaptureFormatDisplayNames;
@@ -78,25 +75,8 @@ public partial class SettingsViewModel
 
     public int QuickCaptureItemPreviewLineCount
     {
-        get => _quickCaptureItemPreviewLineCount;
-        set
-        {
-            int normalized = SettingsService.NormalizeItemPreviewLineCount(value);
-            if (!SetProperty(ref _quickCaptureItemPreviewLineCount, normalized))
-            {
-                return;
-            }
-
-            RefreshQuickCaptureContentPresentation();
-
-            if (_isRestoringDefaults || _isApplyingSettingsSnapshot)
-            {
-                return;
-            }
-
-            _settingsService.Settings.QuickCaptureItemPreviewLineCount = normalized;
-            _settingsService.SaveDebounced();
-        }
+        get => _quickCaptureSettings.ReadPresentation().PreviewLineCount;
+        set => ApplyQuickCapturePreviewLineCount(value);
     }
 
 
@@ -118,8 +98,7 @@ public partial class SettingsViewModel
                 return;
             }
 
-            _settingsService.Settings.QuickCaptureEditorEnterBehavior = normalized;
-            _settingsService.SaveDebounced();
+            _quickCaptureSettings.SetEditorEnterBehavior(normalized);
         }
     }
 
@@ -131,7 +110,7 @@ public partial class SettingsViewModel
             SetQuickCaptureSetting(
                 ref _quickCaptureEditorFormat,
                 SettingsService.NormalizeQuickCaptureFormat(value),
-                normalized => _settingsService.Settings.QuickCaptureDefaultFormat = normalized,
+                normalized => _quickCaptureSettings.SetEditorFormat(normalized),
                 nameof(QuickCaptureEditorFormat));
             RefreshQuickCaptureContentPresentation();
         }
@@ -145,7 +124,7 @@ public partial class SettingsViewModel
             SetQuickCaptureSetting(
                 ref _quickCaptureWideLayout,
                 SettingsService.NormalizeQuickCaptureWideLayout(value),
-                normalized => _settingsService.Settings.QuickCaptureWideLayout = normalized,
+                normalized => _quickCaptureSettings.SetWideLayout(normalized),
                 nameof(QuickCaptureWideLayout));
             OnPropertyChanged(nameof(QuickCaptureLayoutSummaryText));
             OnPropertyChanged(nameof(QuickCaptureWideOptionsVisibility));
@@ -160,7 +139,7 @@ public partial class SettingsViewModel
             SetQuickCaptureSetting(
                 ref _quickCaptureWideOpenMode,
                 SettingsService.NormalizeQuickCaptureWideOpenMode(value),
-                normalized => _settingsService.Settings.QuickCaptureWideOpenMode = normalized,
+                normalized => _quickCaptureSettings.SetWideOpenMode(normalized),
                 nameof(QuickCaptureWideOpenMode));
             OnPropertyChanged(nameof(QuickCaptureLayoutSummaryText));
         }
@@ -177,64 +156,41 @@ public partial class SettingsViewModel
                 return;
             }
 
-            _settingsService.Settings.QuickCaptureAllowRemoteImages = value;
-            _settingsService.SaveDebounced();
+            _quickCaptureSettings.SetAllowRemoteImages(value);
         }
     }
 
 
     public int TodoItemPreviewLineCount
     {
-        get => _todoItemPreviewLineCount;
+        get => _todoSettings.PreviewLineCount;
         set
         {
-            int normalized = SettingsService.NormalizeItemPreviewLineCount(value);
-            if (!SetProperty(ref _todoItemPreviewLineCount, normalized))
-            {
-                return;
-            }
-
-            RefreshTodoContentPresentation();
-
             if (_isRestoringDefaults || _isApplyingSettingsSnapshot)
             {
                 return;
             }
-
-            _settingsService.Settings.TodoItemPreviewLineCount = normalized;
-            _settingsService.SaveDebounced();
+            _todoSettings.PreviewLineCount = value;
         }
     }
 
 
     public string TodoEditorEnterBehavior
     {
-        get => _todoEditorEnterBehavior;
+        get => _todoSettings.EditorEnterBehavior;
         set
         {
-            string normalized = SettingsService.NormalizeEditorEnterBehavior(value);
-            if (!SetProperty(ref _todoEditorEnterBehavior, normalized))
-            {
-                return;
-            }
-
-            RefreshTodoContentPresentation();
-
             if (_isRestoringDefaults || _isApplyingSettingsSnapshot)
             {
                 return;
             }
-
-            _settingsService.Settings.TodoEditorEnterBehavior = normalized;
-            _settingsService.SaveDebounced();
+            _todoSettings.EditorEnterBehavior = value;
         }
     }
 
 
     private void InitializeContentEditorSettings(AppSettings settings)
     {
-        _quickCaptureItemPreviewLineCount = SettingsService.NormalizeItemPreviewLineCount(
-            settings.QuickCaptureItemPreviewLineCount);
         _quickCaptureEditorEnterBehavior = SettingsService.NormalizeEditorEnterBehavior(
             settings.QuickCaptureEditorEnterBehavior);
         _quickCaptureEditorFormat = SettingsService.NormalizeQuickCaptureFormat(
@@ -244,22 +200,15 @@ public partial class SettingsViewModel
         _quickCaptureWideOpenMode = SettingsService.NormalizeQuickCaptureWideOpenMode(
             settings.QuickCaptureWideOpenMode);
         _quickCaptureAllowRemoteImages = settings.QuickCaptureAllowRemoteImages;
-        _todoItemPreviewLineCount = SettingsService.NormalizeItemPreviewLineCount(
-            settings.TodoItemPreviewLineCount);
-        _todoEditorEnterBehavior = SettingsService.NormalizeEditorEnterBehavior(
-            settings.TodoEditorEnterBehavior);
     }
 
     private void ApplyContentEditorSettingsSnapshot(AppSettings settings)
     {
-        QuickCaptureItemPreviewLineCount = settings.QuickCaptureItemPreviewLineCount;
         QuickCaptureEditorEnterBehavior = settings.QuickCaptureEditorEnterBehavior;
         QuickCaptureEditorFormat = settings.QuickCaptureDefaultFormat;
         QuickCaptureWideLayout = settings.QuickCaptureWideLayout;
         QuickCaptureWideOpenMode = settings.QuickCaptureWideOpenMode;
         QuickCaptureAllowRemoteImages = settings.QuickCaptureAllowRemoteImages;
-        TodoItemPreviewLineCount = settings.TodoItemPreviewLineCount;
-        TodoEditorEnterBehavior = settings.TodoEditorEnterBehavior;
     }
 
     private void RefreshContentEditorLocalizedProperties()
@@ -316,7 +265,9 @@ public partial class SettingsViewModel
             return;
         }
 
+        // The apply callback forwards to the Quick Capture settings
+        // coordinator, which owns the unchanged-write skip and the debounced
+        // save for the editor group.
         apply(value);
-        _settingsService.SaveDebounced();
     }
 }

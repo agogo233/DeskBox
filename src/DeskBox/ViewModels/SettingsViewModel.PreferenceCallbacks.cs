@@ -79,13 +79,9 @@ public partial class SettingsViewModel
         OnPropertyChanged(nameof(AutoStartSystemSettingsVisibility));
         OnPropertyChanged(nameof(AutoStartModeVisibility));
 
-        if (_settingsService.Settings.AutoStart == effectiveValue)
-        {
-            return;
-        }
-
-        _settingsService.Settings.AutoStart = effectiveValue;
-        _settingsService.SaveDebounced();
+        // The coordinator skips unchanged values, mirroring the page's old
+        // read-before-write guard.
+        _interactionSettings.SetAutoStart(effectiveValue);
     }
 
     partial void OnAutoCheckForUpdatesChanged(bool value)
@@ -95,8 +91,7 @@ public partial class SettingsViewModel
             return;
         }
 
-        _settingsService.Settings.AutoCheckForUpdates = value;
-        _settingsService.SaveDebounced();
+        _interactionSettings.SetAutoCheckForUpdates(value);
     }
 
     partial void OnDoubleClickToOpenChanged(bool value)
@@ -107,8 +102,7 @@ public partial class SettingsViewModel
             return;
         }
 
-        _settingsService.Settings.DoubleClickToOpen = value;
-        _settingsService.SaveDebounced();
+        _interactionSettings.SetDoubleClickToOpen(value);
     }
 
     partial void OnFileItemSystemContextMenuEnabledChanged(bool value)
@@ -118,8 +112,7 @@ public partial class SettingsViewModel
             return;
         }
 
-        _settingsService.Settings.FileItemSystemContextMenuEnabled = value;
-        _settingsService.SaveDebounced();
+        _interactionSettings.SetFileItemSystemContextMenuEnabled(value);
         if (value)
         {
             // Warm the native context-menu server so the first right-click in
@@ -135,8 +128,7 @@ public partial class SettingsViewModel
             return;
         }
 
-        _settingsService.Settings.ResizeSnapEnabled = value;
-        _settingsService.SaveDebounced();
+        _interactionSettings.SetResizeSnapEnabled(value);
 
         // Sync to the live overlay service
         if (App.Current is { } app)
@@ -161,8 +153,7 @@ public partial class SettingsViewModel
             return;
         }
 
-        _settingsService.Settings.WidgetSnapSpacing = normalized;
-        _settingsService.SaveDebounced();
+        _interactionSettings.SetWidgetSnapSpacing(normalized);
         if (App.Current is { } app)
         {
             app.ResizeGuideOverlay.SnapSpacingDips = normalized;
@@ -177,8 +168,7 @@ public partial class SettingsViewModel
             return;
         }
 
-        _settingsService.Settings.KeepWidgetsVisibleOnShowDesktop = value;
-        _settingsService.SaveDebounced();
+        _interactionSettings.SetKeepWidgetsVisibleOnShowDesktop(value);
         App.Current?.WidgetManager?.RefreshVisibleWidgetDesktopLayers(
             "settings-show-desktop-visibility");
     }
@@ -225,25 +215,13 @@ public partial class SettingsViewModel
             return;
         }
 
-        if (double.IsNaN(value))
+        var update = _appearanceSettings.UpdateDefaultWidgetWidth(value);
+        if (!update.Committed)
         {
-            DefaultWidth = _settingsService.Settings.DefaultWidgetWidth;
+            DefaultWidth = update.Value;
             return;
         }
 
-        double normalizedValue = Math.Clamp(
-            Math.Round(value / 10d, MidpointRounding.AwayFromZero) * 10d,
-            SettingsService.MinWidgetWidth,
-            1200d);
-
-        if (Math.Abs(normalizedValue - value) > 0.0001)
-        {
-            DefaultWidth = normalizedValue;
-            return;
-        }
-
-        _settingsService.Settings.DefaultWidgetWidth = normalizedValue;
-        _settingsService.SaveDebounced();
         OnPropertyChanged(nameof(DefaultWidthInput));
     }
 
@@ -255,25 +233,13 @@ public partial class SettingsViewModel
             return;
         }
 
-        if (double.IsNaN(value))
+        var update = _appearanceSettings.UpdateDefaultWidgetHeight(value);
+        if (!update.Committed)
         {
-            DefaultHeight = _settingsService.Settings.DefaultWidgetHeight;
+            DefaultHeight = update.Value;
             return;
         }
 
-        double normalizedValue = Math.Clamp(
-            Math.Round(value / 10d, MidpointRounding.AwayFromZero) * 10d,
-            SettingsService.MinWidgetHeight,
-            1200d);
-
-        if (Math.Abs(normalizedValue - value) > 0.0001)
-        {
-            DefaultHeight = normalizedValue;
-            return;
-        }
-
-        _settingsService.Settings.DefaultWidgetHeight = normalizedValue;
-        _settingsService.SaveDebounced();
         OnPropertyChanged(nameof(DefaultHeightInput));
     }
 
@@ -284,8 +250,7 @@ public partial class SettingsViewModel
             return;
         }
 
-        _settingsService.Settings.HideShortcutArrowOverlay = value;
-        _settingsService.SaveDebounced();
+        _fileDisplaySettings.SetHideShortcutArrowOverlay(value);
     }
 
     partial void OnShowImageFilesAsIconsChanged(bool value)
@@ -295,8 +260,7 @@ public partial class SettingsViewModel
             return;
         }
 
-        _settingsService.Settings.ShowImageFilesAsIcons = value;
-        _settingsService.SaveDebounced();
+        _fileDisplaySettings.SetShowImageFilesAsIcons(value);
     }
 
     partial void OnShowHoverButtonsChanged(bool value)
@@ -307,8 +271,7 @@ public partial class SettingsViewModel
             return;
         }
 
-        _settingsService.Settings.ShowHoverButtons = value;
-        _settingsService.SaveDebounced();
+        _interactionSettings.SetShowHoverButtons(value);
     }
 
     partial void OnShowHoverActionLockPositionChanged(bool value)
@@ -343,8 +306,7 @@ public partial class SettingsViewModel
             return;
         }
 
-        _settingsService.Settings.ShowListItemDetails = value;
-        _settingsService.SaveDebounced();
+        _fileDisplaySettings.SetShowListItemDetails(value);
     }
 
     partial void OnShowFileItemPathTooltipsChanged(bool value)
@@ -354,8 +316,7 @@ public partial class SettingsViewModel
             return;
         }
 
-        _settingsService.Settings.ShowFileItemPathTooltips = value;
-        _settingsService.SaveDebounced();
+        _fileDisplaySettings.SetShowFileItemPathTooltips(value);
     }
 
     partial void OnShowFileExtensionsChanged(bool value)
@@ -365,8 +326,7 @@ public partial class SettingsViewModel
             return;
         }
 
-        _settingsService.Settings.ShowFileExtensions = value;
-        _settingsService.SaveDebounced();
+        _fileDisplaySettings.SetShowFileExtensions(value);
     }
 
     partial void OnHideShortcutExtensionWhenShowingFileExtensionsChanged(bool value)
@@ -376,8 +336,7 @@ public partial class SettingsViewModel
             return;
         }
 
-        _settingsService.Settings.HideShortcutExtensionWhenShowingFileExtensions = value;
-        _settingsService.SaveDebounced();
+        _fileDisplaySettings.SetHideShortcutExtensionWhenShowingFileExtensions(value);
     }
 
     partial void OnIdleWorkingSetTrimEnabledChanged(bool value)
@@ -387,8 +346,7 @@ public partial class SettingsViewModel
             return;
         }
 
-        _settingsService.Settings.IdleWorkingSetTrimEnabled = value;
-        _settingsService.SaveDebounced();
+        _interactionSettings.SetIdleWorkingSetTrimEnabled(value);
     }
 
     partial void OnImmediateHiddenWorkingSetTrimEnabledChanged(bool value)
@@ -398,8 +356,7 @@ public partial class SettingsViewModel
             return;
         }
 
-        _settingsService.Settings.ImmediateHiddenWorkingSetTrimEnabled = value;
-        _settingsService.SaveDebounced();
+        _interactionSettings.SetImmediateHiddenWorkingSetTrimEnabled(value);
     }
 
     partial void OnQuiescenceWorkingSetTrimEnabledChanged(bool value)

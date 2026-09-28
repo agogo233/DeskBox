@@ -425,7 +425,7 @@ public sealed partial class WidgetManager
             throw new NotSupportedException($"Widget kind '{kind}' is not a content feature widget.");
         }
 
-        SetFeatureWidgetEnabledState(kind, true);
+        await CommitFeatureWidgetStateAsync(kind, true);
 
         var existingConfig = _settingsService.Settings.Widgets
             .FirstOrDefault(w => w.WidgetKind == kind && !IsDeleted(w.Id));
@@ -771,6 +771,19 @@ public sealed partial class WidgetManager
                 // Streaming copy so cancellation is honored mid-transfer,
                 // unlike File.Copy/Task.Run (round-5 review requirement).
                 await source.CopyToAsync(temp, cancellationToken);
+                ContentWidgetWindow? adapterContentWindow = _contentWidgets.Values
+                    .Distinct()
+                    .FirstOrDefault(window =>
+                        window.CurrentContent is FileWidgetContentAdapter adapterSurface &&
+                        string.Equals(
+                            adapterSurface.WidgetId,
+                            targetWidgetId,
+                            StringComparison.Ordinal));
+                if (adapterContentWindow?.CurrentContent is FileWidgetContentAdapter adapterFileSurface)
+                {
+                    await adapterFileSurface.ViewModel.RefreshFromConfigAsync();
+                    adapterFileSurface.RevealSavedItem(destinationPath);
+                }
             }
 
             destinationPath = MoveImportIntoPlace(tempPath, baseCandidatePath, destinationPath);
@@ -1113,6 +1126,22 @@ public sealed partial class WidgetManager
             return;
         }
 
+        if (kind == WidgetKind.QuickCapture && _quickCaptureSettings is not null)
+        {
+            await _quickCaptureSettings.SetEnabledAsync(enabled, reveal);
+            return;
+        }
+        if (kind == WidgetKind.Search && _searchFeatureSettings is not null)
+        {
+            await _searchFeatureSettings.SetEnabledAsync(enabled, reveal);
+            return;
+        }
+        if (kind == WidgetKind.Todo && _todoSettings is not null)
+        {
+            await _todoSettings.SetEnabledAsync(enabled);
+            return;
+        }
+
         if (_featureWidgetHandlers.TryGetValue(kind, out var handler) &&
             _featureWidgetUpdateLocks.TryGetValue(kind, out var updateLock))
         {
@@ -1130,6 +1159,44 @@ public sealed partial class WidgetManager
         }
 
         App.Log($"[WidgetManager] SetFeatureWidgetEnabled: unsupported kind={kind}");
+    }
+
+    internal async Task ApplyQuickCaptureWindowStateAsync(bool enabled, bool reveal)
+    {
+        if (!HasUiThreadAccess())
+        {
+            await RunOnUiThreadAsync(() => ApplyQuickCaptureWindowStateAsync(enabled, reveal));
+            return;
+        }
+
+        SemaphoreSlim gate = _featureWidgetUpdateLocks[WidgetKind.QuickCapture];
+        await gate.WaitAsync();
+        try
+        {
+            if (_quickCaptureSettings is not null && _quickCaptureSettings.Read().Enabled != enabled)
+                return;
+            await SetQuickCaptureEnabledAsync(enabled, reveal);
+        }
+        finally { gate.Release(); }
+    }
+
+    internal async Task ApplySearchWindowStateAsync(bool enabled, bool reveal)
+    {
+        if (!HasUiThreadAccess())
+        {
+            await RunOnUiThreadAsync(() => ApplySearchWindowStateAsync(enabled, reveal));
+            return;
+        }
+
+        SemaphoreSlim gate = _featureWidgetUpdateLocks[WidgetKind.Search];
+        await gate.WaitAsync();
+        try
+        {
+            if (_searchFeatureSettings is not null && _searchFeatureSettings.Enabled != enabled)
+                return;
+            await SetSearchFeatureWidgetEnabledAsync(enabled, reveal);
+        }
+        finally { gate.Release(); }
     }
 
     public async Task ResetFeatureWidgetAsync(WidgetKind kind)
@@ -1188,7 +1255,7 @@ public sealed partial class WidgetManager
                 await new GlanceImageService().ClearCacheAsync();
             }
 
-            SetFeatureWidgetEnabledState(kind, false);
+            await CommitFeatureWidgetStateAsync(kind, false);
             var config = configs.FirstOrDefault(widget => !IsDeleted(widget.Id)) ??
                          configs.FirstOrDefault();
 
@@ -1372,7 +1439,7 @@ public sealed partial class WidgetManager
     {
         if (enabled)
         {
-            SetFeatureWidgetEnabledState(kind, true);
+            await CommitFeatureWidgetStateAsync(kind, true);
             if (reveal)
             {
                 await CreateSingletonContentFeatureWidgetAsync(kind);
@@ -1406,7 +1473,7 @@ public sealed partial class WidgetManager
         // Close the content window while feature-owned services are still
         // available. Search content, for example, must unsubscribe from the
         // exact SearchHistoryService instance before that service is released.
-        SetFeatureWidgetEnabledState(kind, false);
+        await CommitFeatureWidgetStateAsync(kind, false);
         await _settingsService.SaveAsync();
     }
 
@@ -1492,15 +1559,37 @@ public sealed partial class WidgetManager
     /// listener from breaking the others (contract pinned in the port).
     /// </summary>
     public event Action<FeatureStateChangedEventArgs>? FeatureStateChanged;
+    private async Task CommitFeatureWidgetStateAsync(WidgetKind kind, bool enabled)
+    {
+        if (kind == WidgetKind.Search && _searchFeatureSettings is not null)
+        {
+            await _searchFeatureSettings.CommitEnabledStateAsync(enabled);
+            _lastFeatureWidgetEnabledStates[kind] = GetFeatureWidgetEnabledState(kind);
+            return;
+        }
+        SetFeatureWidgetEnabledState(kind, enabled);
+    }
 
     private void SetFeatureWidgetEnabledState(WidgetKind kind, bool enabled)
     {
-        FeatureWidgetSettings.SetEnabled(_settingsService.Settings, kind, enabled);
+        if (kind == WidgetKind.Search && _searchFeatureSettings is not null)
+            throw new InvalidOperationException("Search state commits must await their runtime boundary.");
         _lastFeatureWidgetEnabledStates[kind] = enabled;
         if (TryGetFeatureId(kind) is { } featureId)
         {
             RaiseFeatureStateChanged(featureId, enabled);
         }
+        if (kind == WidgetKind.Todo && _todoSettings is not null)
+        {
+            _todoSettings.CommitEnabledState(enabled);
+            return;
+        }
+        if (kind == WidgetKind.QuickCapture && _quickCaptureSettings is not null)
+        {
+            _quickCaptureSettings.CommitEnabledState(enabled);
+            return;
+        }
+        FeatureWidgetSettings.SetEnabled(_settingsService.Settings, kind, enabled);
     }
 
     private static FeatureId? TryGetFeatureId(WidgetKind kind) => kind switch
@@ -1574,19 +1663,10 @@ public sealed partial class WidgetManager
 
         window.Config.IsVisible = false;
 
-        if (window.Config.WidgetKind == WidgetKind.File &&
-                 _fileWidgets.TryGetValue(window.Config.Id, out var fileEntry) &&
-                 ReferenceEquals(fileEntry.Host, window))
-        {
-            _fileWidgets.Remove(window.Config.Id);
-        }
+        RemoveFileWidgetSessionsForHost(window);
 
-        if (_contentWidgets.TryGetValue(window.Config.Id, out var contentWindow) &&
-            ReferenceEquals(contentWindow, window))
-        {
-            _contentWidgets.Remove(window.Config.Id);
-            _widgetWindowHandles.Remove(window.WindowHandle);
-        }
+        if (window is ContentWidgetWindow contentWindow)
+            _contentWindowRegistration.Unregister(contentWindow);
 
         try
         {

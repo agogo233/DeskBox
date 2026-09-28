@@ -146,9 +146,6 @@ public partial class SettingsViewModel
     public IReadOnlyList<SettingsOption> AvailableTodoReminderOffsetOptions =>
         CreateSelectionOptions(AvailableTodoReminderOffsetMinutes, AvailableTodoReminderOffsetDisplayNames);
 
-    public IReadOnlyList<SettingsOption> AvailableMusicDisplayModeOptions =>
-        CreateSelectionOptions(AvailableMusicDisplayModes, AvailableMusicDisplayModeDisplayNames);
-
     public IReadOnlyList<SettingsOption> AvailableWeatherTemperatureUnitOptions =>
         CreateSelectionOptions(AvailableWeatherTemperatureUnits, AvailableWeatherTemperatureUnitDisplayNames);
 
@@ -266,7 +263,6 @@ public partial class SettingsViewModel
         OnPropertyChanged(nameof(AvailableTodoDefaultFilterOptions));
         OnPropertyChanged(nameof(AvailableTodoTabStyleOptions));
         OnPropertyChanged(nameof(AvailableTodoReminderOffsetOptions));
-        OnPropertyChanged(nameof(AvailableMusicDisplayModeOptions));
         OnPropertyChanged(nameof(AvailableWeatherTemperatureUnitOptions));
         OnPropertyChanged(nameof(AvailableWeatherWindSpeedUnitOptions));
         OnPropertyChanged(nameof(AvailableWeatherDefaultViewOptions));

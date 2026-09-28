@@ -220,10 +220,23 @@ public sealed class StartupResilienceContractTests
         Assert.Contains("!IsStartupLifelineEstablished", handler, StringComparison.Ordinal);
         Assert.Contains("FailStartup(", handler, StringComparison.Ordinal);
 
-        string shutdown = Slice(app, "private async Task ShutdownApplicationAsync", "private async Task ShutdownCoreAsync");
+        string shutdown = Slice(app, "private async Task ShutdownApplicationAsync", "private async Task<bool> ShutdownCoreAsync");
         Assert.Contains("await ShutdownCoreAsync();", shutdown, StringComparison.Ordinal);
         Assert.Contains("finally", shutdown, StringComparison.Ordinal);
         Assert.Contains("Exit();", shutdown, StringComparison.Ordinal);
+
+        // Application.Exit alone leaves the message loop pumping when the
+        // deadline path skips dependent teardown (measured on the probe);
+        // the skipped path must arm an Environment.Exit watchdog.
+        Assert.Contains("Dependent teardown skipped", shutdown, StringComparison.Ordinal);
+        Assert.Contains("Environment.Exit(0)", shutdown, StringComparison.Ordinal);
+
+        // The watchdog path must NOT release the single-instance mutex early:
+        // the process lives ~3s past the deadline and a new instance starting
+        // in that window would race this process's final writes. Process
+        // death releases the abandoned mutex instead.
+        Assert.Contains("if (dependentTeardownCompleted)", shutdown, StringComparison.Ordinal);
+        Assert.Contains("ReleaseMutex", shutdown, StringComparison.Ordinal);
     }
 
     [Fact]
