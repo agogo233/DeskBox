@@ -174,7 +174,7 @@ public sealed class AotStage5B4C3B2B1ContractTests
             "NativeNotificationActivationEnvelopeStore.cs\"] = 2",
             baseline,
             StringComparison.Ordinal);
-        Assert.Contains("assert_eq!(deskbox_native_capabilities(), 511);", rust, StringComparison.Ordinal);
+        Assert.Contains("assert_eq!(deskbox_native_capabilities(), 1023);", rust, StringComparison.Ordinal);
         Assert.Equal(10, Count(rust, "#[unsafe(no_mangle)]"));
     }
 
