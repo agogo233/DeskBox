@@ -99,6 +99,7 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
     private string _selectedWidgetCompactContentMode = SettingsService.WidgetCompactContentModeSmart;
     private string _selectedLayoutDensity = SettingsService.LayoutDensityStandard;
     private string _selectedAnimationPreset = AnimationPresetStandard;
+    private string _selectedMusicDisplayMode = SettingsService.MusicDisplayModeAuto;
     private string _selectedWidgetAnimationEffect = SettingsService.WidgetAnimationEffectFade;
     private string _selectedWidgetAnimationSpeed = SettingsService.WidgetAnimationSpeedStandard;
     private string _selectedWidgetAnimationSlideDirection = SettingsService.WidgetAnimationSlideDirectionRight;
@@ -453,8 +454,6 @@ private string[]? _cachedWeatherRefreshIntervalDisplayNames;
         TodoUseWideDetailPane = _todoSettings.LayoutMode != SettingsService.TodoLayoutModeSinglePane;
         TodoAutoSelectFirstInWideLayout = _todoSettings.AutoSelectFirstInWideLayout;
         var musicSettings = _musicSettingsStore.Load();
-        MusicUseArtworkBackdrop = musicSettings.UseArtworkBackdrop;
-        MusicEnableCoverHoverMotion = musicSettings.EnableCoverHoverMotion;
         _selectedMusicDisplayMode = SettingsService.NormalizeMusicDisplayMode(musicSettings.DisplayMode);
         WeatherAutoLocation = settings.WeatherAutoLocation;
         WeatherCityName = settings.WeatherCityName;

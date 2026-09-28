@@ -586,8 +586,6 @@ set => WidgetOpacity = Math.Clamp(1.0 - value / 100d, SettingsService.MinWidgetO
                     _todoSettings.ResetReminderPreferences(scheduleSave: false);
                     break;
                 case WidgetKind.Music:
-                    MusicUseArtworkBackdrop = true;
-                    MusicEnableCoverHoverMotion = true;
                     SelectedMusicDisplayMode = SettingsService.MusicDisplayModeAuto;
                     _settingsService.Settings.MusicUseArtworkBackdrop = true;
                     _settingsService.Settings.MusicEnableCoverHoverMotion = true;

@@ -166,8 +166,6 @@ public partial class SettingsViewModel
             TodoAutoSelectFirstInWideLayout = _todoSettings.AutoSelectFirstInWideLayout;
 
             var musicSettingsSnapshot = _musicSettingsStore.Load();
-            MusicUseArtworkBackdrop = musicSettingsSnapshot.UseArtworkBackdrop;
-            MusicEnableCoverHoverMotion = musicSettingsSnapshot.EnableCoverHoverMotion;
             SelectedMusicDisplayMode = SettingsService.NormalizeMusicDisplayMode(musicSettingsSnapshot.DisplayMode);
             // Music presentation lives on the section editor now: refresh the
             // editor projection instead of assigning shell facade properties.

@@ -131,43 +131,6 @@ public partial class SettingsViewModel
         SyncTodoDisplayFacade();
     }
 
-    partial void OnTodoReminderEnabledChanged(bool value)
-    {
-        OnPropertyChanged(nameof(TodoReminderSummaryText));
-        if (_isRestoringDefaults || _isApplyingSettingsSnapshot)
-        {
-            return;
-        }
-
-        _settingsService.Settings.TodoReminderEnabled = value;
-        _settingsService.SaveDebounced();
-        App.Current?.RefreshTodoReminderService(checkNow: value);
-    }
-
-    partial void OnMusicUseArtworkBackdropChanged(bool value)
-    {
-        if (_isRestoringDefaults || _isApplyingSettingsSnapshot)
-        {
-            return;
-        }
-
-        _settingsService.Settings.MusicUseArtworkBackdrop = value;
-        _musicSettingsStore.Update(store => store.UseArtworkBackdrop = value);
-        _settingsService.SaveDebounced();
-    }
-
-    partial void OnMusicEnableCoverHoverMotionChanged(bool value)
-    {
-        if (_isRestoringDefaults || _isApplyingSettingsSnapshot)
-        {
-            return;
-        }
-
-        _settingsService.Settings.MusicEnableCoverHoverMotion = value;
-        _musicSettingsStore.Update(store => store.EnableCoverHoverMotion = value);
-        _settingsService.SaveDebounced();
-    }
-
     private async Task SyncTodoEnabledAsync(bool enabled)
     {
         try
