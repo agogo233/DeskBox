@@ -1553,8 +1553,8 @@ public sealed partial class WidgetManager
 
     /// <summary>
     /// IFeatureStateEvents implementation (stage 3b, cut point 3): instead
-    /// of a hardcoded switch calling App.Current service refreshers, the
-    /// state change is raised as an event and the App-side subscriber owns
+    /// of a hardcoded switch calling the application's service refreshers,
+    /// the state change is raised as an event and the App-side subscriber owns
     /// its services. Per-subscriber exception isolation keeps one failing
     /// listener from breaking the others (contract pinned in the port).
     /// </summary>

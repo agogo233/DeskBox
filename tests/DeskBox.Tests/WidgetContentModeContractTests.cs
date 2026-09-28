@@ -18,6 +18,7 @@ public sealed class WidgetContentModeContractTests
     [
         nameof(ExistingWidgetContent),
         nameof(PlaceholderWidgetContent),
+        "NativeWidgetPilotContent",
     ];
 
     [Fact]

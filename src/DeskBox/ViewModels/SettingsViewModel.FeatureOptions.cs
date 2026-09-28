@@ -193,31 +193,6 @@ public partial class SettingsViewModel
 
     public string SelectedTodoReminderOffsetMinutesText => GetTodoReminderOffsetDisplayName(SelectedTodoReminderOffsetMinutes);
 
-    public string SelectedMusicDisplayMode
-    {
-        get => _selectedMusicDisplayMode;
-        set
-        {
-            string normalizedValue = SettingsService.NormalizeMusicDisplayMode(value);
-            if (!SetProperty(ref _selectedMusicDisplayMode, normalizedValue))
-            {
-                return;
-            }
-
-            OnPropertyChanged(nameof(SelectedMusicDisplayModeText));
-            if (_isRestoringDefaults || _isApplyingSettingsSnapshot)
-            {
-                return;
-            }
-
-            _settingsService.Settings.MusicDisplayMode = normalizedValue;
-            _musicSettingsStore.Update(store => store.DisplayMode = normalizedValue);
-            _settingsService.SaveDebounced();
-        }
-    }
-
-    public string SelectedMusicDisplayModeText => GetMusicDisplayModeDisplayName(SelectedMusicDisplayMode);
-
     public string AccentColorHex
     {
         get => _accentColorHex;
@@ -586,17 +561,12 @@ set => WidgetOpacity = Math.Clamp(1.0 - value / 100d, SettingsService.MinWidgetO
                     _todoSettings.ResetReminderPreferences(scheduleSave: false);
                     break;
                 case WidgetKind.Music:
-                    SelectedMusicDisplayMode = SettingsService.MusicDisplayModeAuto;
-                    _settingsService.Settings.MusicUseArtworkBackdrop = true;
-                    _settingsService.Settings.MusicEnableCoverHoverMotion = true;
-                    _settingsService.Settings.MusicDisplayMode = SettingsService.MusicDisplayModeAuto;
                     _musicSettingsStore.Update(store =>
                     {
                         store.UseArtworkBackdrop = true;
                         store.EnableCoverHoverMotion = true;
                         store.DisplayMode = SettingsService.MusicDisplayModeAuto;
                     });
-                    _settingsService.SaveDebounced();
                     _featureWidgetsSettings.ResetMusicPresentationPreferences(scheduleSave: false);
                     _musicSettings.SyncPresentation();
                     break;

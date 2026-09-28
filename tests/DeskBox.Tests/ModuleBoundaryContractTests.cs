@@ -133,6 +133,10 @@ public sealed class ModuleBoundaryContractTests
         // state) are host-side linkages that run around the coordinator's
         // write, not settings writes.
         ["src/DeskBox/ViewModels/SettingsViewModel.FeatureOptions.cs"] = 4,
+        // The local 1.6 WidgetManager sync chain (feature enable state) keeps
+        // one host-side App read in the callbacks partial; the state-change
+        // event itself raises without globals.
+        ["src/DeskBox/ViewModels/SettingsViewModel.FeatureCallbacks.cs"] = 1,
         ["src/DeskBox/ViewModels/SettingsViewModel.HotkeyAndStorage.cs"] = 1,
         ["src/DeskBox/ViewModels/SettingsViewModel.GroupNavigation.cs"] = 2,
         // Batch 34 moved the interaction section's persisted writes into
@@ -166,6 +170,9 @@ public sealed class ModuleBoundaryContractTests
         ["src/DeskBox/Services/WidgetManager.cs"] = 12,
         ["src/DeskBox/Services/WidgetManager.CapsuleArrangement.cs"] = 1,
         ["src/DeskBox/Services/WidgetLayerService.cs"] = 8,
+        // The 1.6 native plugin pilot reads the active culture through the
+        // host global while materializing localized package metadata.
+        ["src/DeskBox/Services/Plugins/NativeWidgetPackageLoader.cs"] = 1,
     };
 
     [Fact]

@@ -165,8 +165,6 @@ public partial class SettingsViewModel
             TodoUseWideDetailPane = _todoSettings.LayoutMode != SettingsService.TodoLayoutModeSinglePane;
             TodoAutoSelectFirstInWideLayout = _todoSettings.AutoSelectFirstInWideLayout;
 
-            var musicSettingsSnapshot = _musicSettingsStore.Load();
-            SelectedMusicDisplayMode = SettingsService.NormalizeMusicDisplayMode(musicSettingsSnapshot.DisplayMode);
             // Music presentation lives on the section editor now: refresh the
             // editor projection instead of assigning shell facade properties.
             _musicSettings.SyncPresentation();
