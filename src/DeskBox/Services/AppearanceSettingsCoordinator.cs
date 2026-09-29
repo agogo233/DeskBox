@@ -30,13 +30,18 @@ public sealed class AppearanceSettingsCoordinator : IAppearanceSettings
     public AppearanceMaterialSettings ReadMaterial()
     {
         WidgetShellSettingsSlice shell = _settings.Settings.WidgetShell;
+        // Read snapshots apply the legacy shell-constructor normalization so
+        // the editor can project them without touching the adapter or the
+        // platform compatibility probes.
         return new(
-            shell.WidgetMaterialType,
+            WindowsCompatibilityService.ResolveWidgetMaterialType(
+                shell.WidgetMaterialType),
             shell.WidgetOpacity,
             shell.WidgetMaterialIntensity,
-            shell.WidgetCornerPreference,
-            shell.WidgetBorderColorMode,
-            shell.WidgetBorderStyle);
+            WindowsCompatibilityService.ResolveEffectiveWidgetCornerPreference(
+                shell.WidgetCornerPreference),
+            WidgetBorderKinds.NormalizeColorMode(shell.WidgetBorderColorMode),
+            WidgetBorderKinds.NormalizeStyle(shell.WidgetBorderStyle));
     }
 
     public AppearanceDensitySettings ReadDensity()
@@ -44,14 +49,21 @@ public sealed class AppearanceSettingsCoordinator : IAppearanceSettings
         WidgetShellSettingsSlice shell = _settings.Settings.WidgetShell;
         FileWidgetSettingsSlice fileWidget = _settings.Settings.FileWidget;
         return new(
-            shell.LayoutDensity,
+            LayoutDensityKinds.ResolvePreset(
+                shell.IconSize,
+                shell.TextSize,
+                shell.LayoutDensityScale,
+                shell.HorizontalSpacingScale,
+                shell.VerticalSpacingScale,
+                fileWidget.FileNameWidthScale),
             shell.IconSize,
             shell.TextSize,
             shell.LayoutDensityScale,
             shell.HorizontalSpacingScale,
             shell.VerticalSpacingScale,
             fileWidget.FileNameWidthScale,
-            fileWidget.FileNameLineCount);
+            LayoutDensityKinds.NormalizeFileNameLineCount(
+                fileWidget.FileNameLineCount));
     }
 
     public AppearanceWindowChromeSettings ReadWindowChrome()
@@ -60,25 +72,41 @@ public sealed class AppearanceSettingsCoordinator : IAppearanceSettings
         return new(
             shell.DefaultWidgetWidth,
             shell.DefaultWidgetHeight,
-            shell.DisplayWidgetChromeMode,
-            shell.InteractiveWidgetChromeMode,
-            shell.WidgetTitleIconMode);
+            WidgetChromeModeNames.NormalizeSettingValue(
+                shell.DisplayWidgetChromeMode,
+                WidgetChromeMode.Overlay),
+            WidgetChromeModeNames.NormalizeSettingValue(
+                shell.InteractiveWidgetChromeMode,
+                WidgetChromeMode.Standard),
+            WidgetTitleIconModeNames.NormalizeSettingValue(shell.WidgetTitleIconMode));
     }
 
     public AppearanceAnimationSettings ReadAnimation()
     {
         WidgetShellSettingsSlice shell = _settings.Settings.WidgetShell;
         return new(
-            shell.WidgetAnimationEffect,
-            shell.WidgetAnimationSpeed,
-            shell.WidgetAnimationSlideDirection,
-            shell.WidgetAnimationEasingIntensity);
+            WidgetAnimationKinds.NormalizeEffect(shell.WidgetAnimationEffect),
+            WidgetAnimationKinds.NormalizeSpeed(shell.WidgetAnimationSpeed),
+            WidgetAnimationKinds.NormalizeSlideDirection(
+                shell.WidgetAnimationSlideDirection),
+            WidgetAnimationKinds.NormalizeEasingIntensity(
+                shell.WidgetAnimationEasingIntensity));
     }
 
     public AppearanceForegroundSettings ReadForeground()
     {
         WidgetShellSettingsSlice shell = _settings.Settings.WidgetShell;
-        return new(shell.WidgetForegroundMode, shell.WidgetForegroundColor);
+        return new(
+            WidgetForegroundKinds.NormalizeMode(shell.WidgetForegroundMode),
+            shell.WidgetForegroundColor);
+    }
+
+    public string ReadTrayIconStyle()
+    {
+        string style = _settings.Settings.Core.TrayIconStyle;
+        return style is TrayIconStyleColorful or TrayIconStyleBlack or TrayIconStyleWhite
+            ? style
+            : TrayIconStyleSystem;
     }
 
     public void SetTrayIconStyle(string? style)

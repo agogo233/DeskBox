@@ -1,4 +1,4 @@
-using DeskBox.Contracts;
+﻿using DeskBox.Contracts;
 using DeskBox.Features.Todo;
 using DeskBox.Models;
 using DeskBox.Services;
@@ -19,7 +19,7 @@ public sealed class TodoSettingsCoordinatorTests : IDisposable
         var coordinator = new TodoSettingsCoordinator(settings,
             refreshReminders: refreshes.Add);
         var errors = new List<Exception>();
-        using var editor = new TodoSettingsViewModel(coordinator, errors.Add);
+        using var editor = new TodoSettingsViewModel(coordinator, _ => string.Empty, (key, args) => key, errors.Add);
         var changed = new List<string?>();
         editor.PropertyChanged += (_, args) => changed.Add(args.PropertyName);
 
@@ -60,7 +60,7 @@ public sealed class TodoSettingsCoordinatorTests : IDisposable
         }, () => coordinator!.Read());
         coordinator = new TodoSettingsCoordinator(settings,
             refreshReminders: _ => runtime.Reconcile(coordinator!.Read()));
-        using var editor = new TodoSettingsViewModel(coordinator, _ => { });
+        using var editor = new TodoSettingsViewModel(coordinator, _ => string.Empty, (key, args) => key, _ => { });
 
         editor.ResetReminderPreferences(scheduleSave: false);
         Assert.Null(runtime.Current);
@@ -107,7 +107,7 @@ public sealed class TodoSettingsCoordinatorTests : IDisposable
         settings.Settings.Todo.TodoDefaultReminderOffsetMinutes = 30;
         var coordinator = new TodoSettingsCoordinator(settings);
         var errors = new List<Exception>();
-        using var editor = new TodoSettingsViewModel(coordinator, errors.Add);
+        using var editor = new TodoSettingsViewModel(coordinator, _ => string.Empty, (key, args) => key, errors.Add);
         await coordinator.StopAsync();
 
         editor.ResetReminderPreferences(scheduleSave: false);
@@ -154,7 +154,7 @@ public sealed class TodoSettingsCoordinatorTests : IDisposable
         var settings = new SettingsService(_root);
         var coordinator = new TodoSettingsCoordinator(settings);
         var errors = new List<Exception>();
-        using var editor = new TodoSettingsViewModel(coordinator, errors.Add);
+        using var editor = new TodoSettingsViewModel(coordinator, _ => string.Empty, (key, args) => key, errors.Add);
 
         editor.LayoutMode = SettingsService.TodoLayoutModeSinglePane;
         editor.AutoSelectFirstInWideLayout = false;
@@ -182,7 +182,7 @@ public sealed class TodoSettingsCoordinatorTests : IDisposable
         var settings = new SettingsService(_root);
         var coordinator = new TodoSettingsCoordinator(settings);
         var errors = new List<Exception>();
-        using var editor = new TodoSettingsViewModel(coordinator, errors.Add);
+        using var editor = new TodoSettingsViewModel(coordinator, _ => string.Empty, (key, args) => key, errors.Add);
 
         Assert.False(editor.Tabs.ShowThisWeekTab);
         editor.DefaultFilter = SettingsService.TodoDefaultFilterThisWeek;
@@ -208,7 +208,7 @@ public sealed class TodoSettingsCoordinatorTests : IDisposable
         var settings = new SettingsService(_root);
         var coordinator = new TodoSettingsCoordinator(settings);
         var errors = new List<Exception>();
-        using var editor = new TodoSettingsViewModel(coordinator, errors.Add);
+        using var editor = new TodoSettingsViewModel(coordinator, _ => string.Empty, (key, args) => key, errors.Add);
         editor.DefaultFilter = SettingsService.TodoDefaultFilterToday;
 
         editor.SetTabVisible(SettingsService.TodoDefaultFilterToday, false);
@@ -234,7 +234,7 @@ public sealed class TodoSettingsCoordinatorTests : IDisposable
         var settings = new SettingsService(_root);
         var coordinator = new TodoSettingsCoordinator(settings);
         var errors = new List<Exception>();
-        using var editor = new TodoSettingsViewModel(coordinator, errors.Add);
+        using var editor = new TodoSettingsViewModel(coordinator, _ => string.Empty, (key, args) => key, errors.Add);
         var changed = new List<string?>();
         editor.PropertyChanged += (_, args) => changed.Add(args.PropertyName);
 
@@ -275,7 +275,7 @@ public sealed class TodoSettingsCoordinatorTests : IDisposable
         var settings = new SettingsService(_root);
         var coordinator = new TodoSettingsCoordinator(settings);
         var errors = new List<Exception>();
-        using var editor = new TodoSettingsViewModel(coordinator, errors.Add);
+        using var editor = new TodoSettingsViewModel(coordinator, _ => string.Empty, (key, args) => key, errors.Add);
         settings.Settings.Todo.TodoDefaultFilter = "Unknown";
         settings.Settings.Todo.TodoShowAllTab = false;
         settings.Settings.Todo.TodoShowActiveTab = false;
@@ -303,7 +303,7 @@ public sealed class TodoSettingsCoordinatorTests : IDisposable
         settings.Settings.WidgetShell.TextSize = 13.5;
         var coordinator = new TodoSettingsCoordinator(settings);
         var errors = new List<Exception>();
-        using var editor = new TodoSettingsViewModel(coordinator, errors.Add);
+        using var editor = new TodoSettingsViewModel(coordinator, _ => string.Empty, (key, args) => key, errors.Add);
         var changed = new List<string?>();
         editor.PropertyChanged += (_, args) => changed.Add(args.PropertyName);
 
@@ -345,7 +345,7 @@ public sealed class TodoSettingsCoordinatorTests : IDisposable
         settings.Settings.WidgetShell.TextSize = 13.5;
         var coordinator = new TodoSettingsCoordinator(settings);
         var errors = new List<Exception>();
-        using var editor = new TodoSettingsViewModel(coordinator, errors.Add);
+        using var editor = new TodoSettingsViewModel(coordinator, _ => string.Empty, (key, args) => key, errors.Add);
 
         foreach (double invalid in new[] { double.NaN, double.PositiveInfinity,
                      double.NegativeInfinity })
@@ -370,17 +370,17 @@ public sealed class TodoSettingsCoordinatorTests : IDisposable
         var settings = new SettingsService(_root);
         var coordinator = new TodoSettingsCoordinator(settings);
         var errors = new List<Exception>();
-        using var editor = new TodoSettingsViewModel(coordinator, errors.Add);
+        using var editor = new TodoSettingsViewModel(coordinator, _ => string.Empty, (key, args) => key, errors.Add);
 
-        editor.PreviewLineCount = 99;
+        editor.ItemPreviewLineCount = 99;
         Assert.Equal(SettingsService.MaxItemPreviewLineCount,
-            editor.PreviewLineCount);
-        editor.PreviewLineCount = -5;
+            editor.ItemPreviewLineCount);
+        editor.ItemPreviewLineCount = -5;
         Assert.Equal(SettingsService.MinItemPreviewLineCount,
-            editor.PreviewLineCount);
+            editor.ItemPreviewLineCount);
         editor.ResetPreviewLineCount();
         Assert.Equal(SettingsService.DefaultTodoItemPreviewLineCount,
-            editor.PreviewLineCount);
+            editor.ItemPreviewLineCount);
         await settings.FlushPendingSaveAsync();
         var reloaded = new SettingsService(_root);
         await reloaded.LoadAsync();
@@ -396,14 +396,14 @@ public sealed class TodoSettingsCoordinatorTests : IDisposable
         var settings = new SettingsService(_root);
         var coordinator = new TodoSettingsCoordinator(settings);
         var errors = new List<Exception>();
-        using var editor = new TodoSettingsViewModel(coordinator, errors.Add);
+        using var editor = new TodoSettingsViewModel(coordinator, _ => string.Empty, (key, args) => key, errors.Add);
         await coordinator.StopAsync();
 
-        editor.PreviewLineCount = 7;
+        editor.ItemPreviewLineCount = 7;
         bool textApplied = editor.TrySetListTextSize(13);
 
         Assert.Equal(SettingsService.DefaultTodoItemPreviewLineCount,
-            editor.PreviewLineCount);
+            editor.ItemPreviewLineCount);
         Assert.False(textApplied);
         Assert.Equal(0, settings.Settings.Todo.TodoListTextSize);
         Assert.Equal(2, errors.Count);
@@ -416,7 +416,7 @@ public sealed class TodoSettingsCoordinatorTests : IDisposable
         var settings = new SettingsService(_root);
         var coordinator = new TodoSettingsCoordinator(settings);
         var errors = new List<Exception>();
-        using var editor = new TodoSettingsViewModel(coordinator, errors.Add);
+        using var editor = new TodoSettingsViewModel(coordinator, _ => string.Empty, (key, args) => key, errors.Add);
 
         editor.NewTaskPosition = SettingsService.TodoNewTaskPositionBottom;
         editor.EditorEnterBehavior = SettingsService.EditorEnterBehaviorEnterSaves;
@@ -448,7 +448,7 @@ public sealed class TodoSettingsCoordinatorTests : IDisposable
         var settings = new SettingsService(_root);
         var coordinator = new TodoSettingsCoordinator(settings);
         var errors = new List<Exception>();
-        using var editor = new TodoSettingsViewModel(coordinator, errors.Add);
+        using var editor = new TodoSettingsViewModel(coordinator, _ => string.Empty, (key, args) => key, errors.Add);
         var changed = new List<string?>();
         editor.PropertyChanged += (_, args) => changed.Add(args.PropertyName);
 
@@ -488,7 +488,7 @@ public sealed class TodoSettingsCoordinatorTests : IDisposable
         var settings = new SettingsService(_root);
         var coordinator = new TodoSettingsCoordinator(settings);
         var errors = new List<Exception>();
-        using var editor = new TodoSettingsViewModel(coordinator, errors.Add);
+        using var editor = new TodoSettingsViewModel(coordinator, _ => string.Empty, (key, args) => key, errors.Add);
         var changed = new List<string?>();
         editor.PropertyChanged += (_, args) => changed.Add(args.PropertyName);
 
@@ -541,7 +541,7 @@ public sealed class TodoSettingsCoordinatorTests : IDisposable
         var settings = new SettingsService(_root);
         var coordinator = new TodoSettingsCoordinator(settings);
         var errors = new List<Exception>();
-        using var editor = new TodoSettingsViewModel(coordinator, errors.Add);
+        using var editor = new TodoSettingsViewModel(coordinator, _ => string.Empty, (key, args) => key, errors.Add);
         await coordinator.StopAsync();
 
         editor.ShowCompletedTasks = true;
@@ -563,7 +563,7 @@ public sealed class TodoSettingsCoordinatorTests : IDisposable
         var settings = new SettingsService(_root);
         var coordinator = new TodoSettingsCoordinator(settings);
         var errors = new List<Exception>();
-        using var editor = new TodoSettingsViewModel(coordinator, errors.Add);
+        using var editor = new TodoSettingsViewModel(coordinator, _ => string.Empty, (key, args) => key, errors.Add);
         await coordinator.StopAsync();
 
         editor.NewTaskPosition = SettingsService.TodoNewTaskPositionBottom;
@@ -583,7 +583,7 @@ public sealed class TodoSettingsCoordinatorTests : IDisposable
         var settings = new SettingsService(_root);
         var coordinator = new TodoSettingsCoordinator(settings);
         var errors = new List<Exception>();
-        using var editor = new TodoSettingsViewModel(coordinator, errors.Add);
+        using var editor = new TodoSettingsViewModel(coordinator, _ => string.Empty, (key, args) => key, errors.Add);
         var changed = new List<string?>();
         editor.PropertyChanged += (_, args) => changed.Add(args.PropertyName);
 
@@ -618,7 +618,7 @@ public sealed class TodoSettingsCoordinatorTests : IDisposable
         var settings = new SettingsService(_root);
         var coordinator = new TodoSettingsCoordinator(settings);
         var errors = new List<Exception>();
-        using var editor = new TodoSettingsViewModel(coordinator, errors.Add);
+        using var editor = new TodoSettingsViewModel(coordinator, _ => string.Empty, (key, args) => key, errors.Add);
         await coordinator.StopAsync();
 
         editor.LayoutMode = SettingsService.TodoLayoutModeSinglePane;
@@ -643,7 +643,7 @@ public sealed class TodoSettingsCoordinatorTests : IDisposable
             if (transitions.Count == 1) await releaseFirst.Task;
         });
         var errors = new List<Exception>();
-        using var editor = new TodoSettingsViewModel(coordinator, errors.Add);
+        using var editor = new TodoSettingsViewModel(coordinator, _ => string.Empty, (key, args) => key, errors.Add);
 
         editor.Enabled = true;
         editor.Enabled = false;
@@ -676,7 +676,7 @@ public sealed class TodoSettingsCoordinatorTests : IDisposable
             return Task.CompletedTask;
         });
         var errors = new List<Exception>();
-        using var editor = new TodoSettingsViewModel(coordinator, errors.Add);
+        using var editor = new TodoSettingsViewModel(coordinator, _ => string.Empty, (key, args) => key, errors.Add);
         editor.Enabled = true;
         await editor.PendingChange;
         Assert.False(editor.Enabled);

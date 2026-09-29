@@ -202,7 +202,7 @@ public partial class SettingsViewModel
         OnPropertyChanged(nameof(CanToggleHoverActionAdd));
         OnPropertyChanged(nameof(CanToggleHoverActionMore));
         OnPropertyChanged(nameof(CanToggleHoverActionDelete));
-        OnPropertyChanged(nameof(HoverButtonActionsSummaryText));
+        _interactionSettings.UpdateHoverButtonActionsSummary(BuildHoverButtonActionsSummary());
     }
 
     private static string NormalizeWidgetAnimationEffect(string? effect) =>
@@ -225,20 +225,5 @@ public partial class SettingsViewModel
     private static string NormalizeWidgetTitleIconModeSetting(string? mode)
     {
         return SettingsService.NormalizeWidgetTitleIconModeSetting(mode);
-    }
-
-    private static string NormalizeTodoNewTaskPosition(string? position)
-    {
-        return SettingsService.NormalizeTodoNewTaskPosition(position);
-    }
-
-    private static string NormalizeQuickCaptureDefaultView(string? view)
-    {
-        return SettingsService.NormalizeQuickCaptureDefaultView(view);
-    }
-
-    private static string NormalizeTodoDefaultFilter(string? filter)
-    {
-        return SettingsService.NormalizeTodoDefaultFilter(filter);
     }
 }

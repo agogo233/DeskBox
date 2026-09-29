@@ -23,16 +23,17 @@ public sealed class InteractionSettingsCoordinatorTests : IDisposable
     {
         var settings = new SettingsService(_root);
         var coordinator = new InteractionSettingsCoordinator(settings);
-        var editor = new InteractionSettingsViewModel(coordinator);
+        var editor = new InteractionSettingsViewModel(
+            coordinator, static key => key);
         int notified = 0;
         settings.SettingsChanged += () => notified++;
 
         editor.SetAutoStart(false);
         editor.SetAutoCheckForUpdates(false);
-        editor.SetDoubleClickToOpen(false);
+        coordinator.SetDoubleClickToOpen(false);
         editor.SetFileItemSystemContextMenuEnabled(true);
-        editor.SetResizeSnapEnabled(false);
-        editor.SetKeepWidgetsVisibleOnShowDesktop(false);
+        coordinator.SetResizeSnapEnabled(false);
+        coordinator.SetKeepWidgetsVisibleOnShowDesktop(false);
         editor.SetShowHoverButtons(false);
         editor.SetIdleWorkingSetTrimEnabled(false);
         editor.SetImmediateHiddenWorkingSetTrimEnabled(false);
@@ -49,7 +50,7 @@ public sealed class InteractionSettingsCoordinatorTests : IDisposable
         Assert.Equal(9, notified);
 
         // Unchanged writes must not notify or save again.
-        editor.SetDoubleClickToOpen(false);
+        coordinator.SetDoubleClickToOpen(false);
         editor.SetIdleWorkingSetTrimEnabled(false);
         Assert.Equal(9, notified);
     }

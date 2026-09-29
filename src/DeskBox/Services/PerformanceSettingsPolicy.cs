@@ -1,3 +1,4 @@
+using DeskBox.Contracts;
 using DeskBox.Models;
 
 namespace DeskBox.Services;
@@ -29,40 +30,42 @@ public readonly record struct EffectivePerformanceSettings(
 /// </summary>
 public static class PerformanceSettingsPolicy
 {
+    // Canonical option values live in Contracts (batch 50) so the
+    // performance editor can build its binding surface without referencing
+    // this adapter-side policy; these historical constants stay as aliases.
     public const string ModeBestVisual = "BestVisual";
-    public const string ModeBalanced = "Balanced";
-    public const string ModeResourceSaver = "ResourceSaver";
-    public const string ModeCustom = "Custom";
+    public const string ModeBalanced = PerformanceOptionKinds.ModeBalanced;
+    public const string ModeResourceSaver = PerformanceOptionKinds.ModeResourceSaver;
+    public const string ModeCustom = PerformanceOptionKinds.ModeCustom;
 
-    public const string DecorativeAnimationTextMarquee = "TextMarquee";
-    public const string DecorativeAnimationVinylRotation = "VinylRotation";
-    public const string DecorativeAnimationGlanceRotation = "GlanceRotation";
-    public const string DecorativeAnimationCompactAmbient = "CompactAmbient";
+    public const string DecorativeAnimationTextMarquee =
+        PerformanceOptionKinds.DecorativeAnimationTextMarquee;
+    public const string DecorativeAnimationVinylRotation =
+        PerformanceOptionKinds.DecorativeAnimationVinylRotation;
+    public const string DecorativeAnimationGlanceRotation =
+        PerformanceOptionKinds.DecorativeAnimationGlanceRotation;
+    public const string DecorativeAnimationCompactAmbient =
+        PerformanceOptionKinds.DecorativeAnimationCompactAmbient;
 
-    public static IReadOnlyList<string> SupportedDecorativeAnimationOptions { get; } =
-        Array.AsReadOnly(new[]
-        {
-            DecorativeAnimationTextMarquee,
-            DecorativeAnimationVinylRotation,
-            DecorativeAnimationGlanceRotation,
-            DecorativeAnimationCompactAmbient
-        });
+    public static IReadOnlyList<string> SupportedDecorativeAnimationOptions =>
+        PerformanceOptionKinds.SupportedDecorativeAnimationOptions;
 
-    public const string CacheBudgetSmall = "Small";
-    public const string CacheBudgetBalanced = "Balanced";
-    public const string CacheBudgetLarge = "Large";
+    public const string CacheBudgetSmall = PerformanceOptionKinds.CacheBudgetSmall;
+    public const string CacheBudgetBalanced = PerformanceOptionKinds.CacheBudgetBalanced;
+    public const string CacheBudgetLarge = PerformanceOptionKinds.CacheBudgetLarge;
 
-    public const string HiddenCacheCleanupScopeWarm = "Warm";
+    public const string HiddenCacheCleanupScopeWarm =
+        PerformanceOptionKinds.HiddenCacheCleanupScopeWarm;
     public const string HiddenCacheCleanupScopeAllRecreatable =
-        "AllRecreatable";
+        PerformanceOptionKinds.HiddenCacheCleanupScopeAllRecreatable;
 
     public const int CleanupNever = -1;
-    public const int CleanupAfter30Seconds = 30;
-    public const int CleanupAfter1Minute = 60;
-    public const int CleanupAfter2Minutes = 2 * 60;
-    public const int CleanupAfter5Minutes = 5 * 60;
-    public const int CleanupAfter10Minutes = 10 * 60;
-    public const int CleanupAfter15Minutes = 15 * 60;
+    public const int CleanupAfter30Seconds = PerformanceOptionKinds.CleanupAfter30Seconds;
+    public const int CleanupAfter1Minute = PerformanceOptionKinds.CleanupAfter1Minute;
+    public const int CleanupAfter2Minutes = PerformanceOptionKinds.CleanupAfter2Minutes;
+    public const int CleanupAfter5Minutes = PerformanceOptionKinds.CleanupAfter5Minutes;
+    public const int CleanupAfter10Minutes = PerformanceOptionKinds.CleanupAfter10Minutes;
+    public const int CleanupAfter15Minutes = PerformanceOptionKinds.CleanupAfter15Minutes;
 
     public const string DefaultMode = ModeResourceSaver;
     public const int DefaultHiddenCacheCleanupDelaySeconds = CleanupAfter30Seconds;
@@ -80,54 +83,19 @@ public static class PerformanceSettingsPolicy
     public const bool DefaultGlanceImageAutoRotationEnabled = true;
     public const bool DefaultCompactAmbientAnimationsEnabled = true;
 
-    public static string NormalizeMode(string? mode)
-    {
-        if (string.Equals(mode, ModeResourceSaver, StringComparison.OrdinalIgnoreCase))
-        {
-            return ModeResourceSaver;
-        }
+    // The string option normalizers live in Contracts (single source) so the
+    // performance editor compares canonical values exactly like the legacy
+    // shell setters did; the numeric delay normalizers stay here because
+    // they encode the hidden CleanupNever sentinel and the settings-load
+    // migration path.
+    public static string NormalizeMode(string? mode) =>
+        PerformanceOptionKinds.NormalizeMode(mode);
 
-        if (string.Equals(mode, ModeCustom, StringComparison.OrdinalIgnoreCase))
-        {
-            return ModeCustom;
-        }
+    public static string NormalizeCacheBudget(string? cacheBudget) =>
+        PerformanceOptionKinds.NormalizeCacheBudget(cacheBudget);
 
-        return ModeBalanced;
-    }
-
-    public static string NormalizeCacheBudget(string? cacheBudget)
-    {
-        if (string.Equals(
-                cacheBudget,
-                CacheBudgetSmall,
-                StringComparison.OrdinalIgnoreCase))
-        {
-            return CacheBudgetSmall;
-        }
-
-        if (string.Equals(
-                cacheBudget,
-                CacheBudgetLarge,
-                StringComparison.OrdinalIgnoreCase))
-        {
-            return CacheBudgetLarge;
-        }
-
-        return CacheBudgetBalanced;
-    }
-
-    public static string NormalizeHiddenCacheCleanupScope(string? scope)
-    {
-        if (string.Equals(
-                scope,
-                HiddenCacheCleanupScopeWarm,
-                StringComparison.OrdinalIgnoreCase))
-        {
-            return HiddenCacheCleanupScopeWarm;
-        }
-
-        return HiddenCacheCleanupScopeAllRecreatable;
-    }
+    public static string NormalizeHiddenCacheCleanupScope(string? scope) =>
+        PerformanceOptionKinds.NormalizeHiddenCacheCleanupScope(scope);
 
     public static int ResolveInactiveGroupContentCacheCapacity(
         string? cacheBudget)

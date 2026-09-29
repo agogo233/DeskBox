@@ -1,3 +1,4 @@
+using DeskBox.Features.Backup;
 using DeskBox.Models;
 using DeskBox.Services;
 using DeskBox.Contracts;
@@ -33,7 +34,7 @@ public sealed partial class SettingsWindow
             _cloudBackupSnapshotSyncHooked = true;
             // The native ListView uses an object[] snapshot for AOT-safe projection.
             _cloudBackupCollectionChanged = (_, _) => SyncCloudBackupSnapshotList();
-            ViewModel.CloudBackupRemoteSnapshots.CollectionChanged += _cloudBackupCollectionChanged;
+            _backupSettingsViewModel.RemoteSnapshotItems.CollectionChanged += _cloudBackupCollectionChanged;
         }
 
         SyncCloudBackupSnapshotList();
@@ -43,11 +44,11 @@ public sealed partial class SettingsWindow
     private bool CurrentCloudBackupVisit(long endpointGeneration, int visitGeneration) =>
         !_isClosed && !_backupCommands.IsStopping && _backupSettingsViewModel.IsActive &&
         _backupSettingsViewModel.VisitGeneration == visitGeneration &&
-        ViewModel.CloudBackupEndpointGeneration == endpointGeneration;
+        _backupSettingsViewModel.EndpointGeneration == endpointGeneration;
 
     private async void CloudBackupSavePasswordButton_Click(object sender, RoutedEventArgs e)
     {
-        if (ViewModel.CloudBackupBusy || !_backupSettingsViewModel.IsActive) return;
+        if (!_backupSettingsViewModel.ActionsEnabled) return;
         string password = CloudBackupPasswordBox.Password;
         if (string.IsNullOrWhiteSpace(password))
         {
@@ -63,7 +64,7 @@ public sealed partial class SettingsWindow
 
     private async void CloudBackupTestConnectionButton_Click(object sender, RoutedEventArgs e)
     {
-        if (ViewModel.CloudBackupBusy || !_backupSettingsViewModel.IsActive) return;
+        if (!_backupSettingsViewModel.ActionsEnabled) return;
         string typedPassword = CloudBackupPasswordBox.Password;
         await _backupSettingsViewModel.ProbeAsync(
             string.IsNullOrEmpty(typedPassword) ? null : typedPassword);
@@ -71,9 +72,9 @@ public sealed partial class SettingsWindow
 
     private async void CloudBackupNowButton_Click(object sender, RoutedEventArgs e)
     {
-        if (ViewModel.CloudBackupBusy || _backupCommands.IsStopping) return;
-        ViewModel.CloudBackupBusy = true;
-        long generation = ViewModel.CloudBackupEndpointGeneration;
+        if (!_backupSettingsViewModel.ActionsEnabled || _backupCommands.IsStopping) return;
+        _backupSettingsViewModel.SetCommandBusy(true);
+        long generation = _backupSettingsViewModel.EndpointGeneration;
         int visit = _backupSettingsViewModel.VisitGeneration;
         try
         {
@@ -86,7 +87,7 @@ public sealed partial class SettingsWindow
             string unverifiedSuffix = result.UploadUnverified
                 ? " " + _localizationService.T("Settings.CloudBackup.BackupNow.UnverifiedSuffix")
                 : string.Empty;
-            ViewModel.CloudBackupConnectionStatusText = result.Uploaded
+            _backupSettingsViewModel.ConnectionStatusText = result.Uploaded
                 ? _localizationService.Format(
                     "Settings.CloudBackup.BackupNow.Success",
                     result.RemoteFilePath ?? string.Empty) + prunedSuffix + unverifiedSuffix
@@ -99,25 +100,25 @@ public sealed partial class SettingsWindow
                             : result.NoScopeSelected
                                 ? _localizationService.T("Settings.CloudBackup.NoScope")
                                 : _localizationService.T("Settings.CloudBackup.NotConfigured");
-            ViewModel.RefreshCloudBackupStatus();
+            _backupSettingsViewModel.RefreshState();
         }
         catch (OperationCanceledException) when (_backupCommands.IsStopping) { }
         catch (Exception ex)
         {
             App.Log($"[CloudBackup] Manual backup failed: {ex}");
             if (CurrentCloudBackupVisit(generation, visit))
-                ViewModel.CloudBackupConnectionStatusText = _localizationService.Format(
+                _backupSettingsViewModel.ConnectionStatusText = _localizationService.Format(
                     "Settings.CloudBackup.BackupNow.Failed", ex.Message);
         }
         finally
         {
-            if (!_isClosed) ViewModel.CloudBackupBusy = false;
+            if (!_isClosed) _backupSettingsViewModel.SetCommandBusy(false);
         }
     }
 
     private async void CloudBackupRefreshSnapshotsButton_Click(object sender, RoutedEventArgs e)
     {
-        if (ViewModel.CloudBackupBusy || !_backupSettingsViewModel.IsActive) return;
+        if (!_backupSettingsViewModel.ActionsEnabled) return;
         await _backupSettingsViewModel.RefreshSnapshotsAsync();
     }
 
@@ -134,9 +135,9 @@ public sealed partial class SettingsWindow
         if (FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.ListView>(
                 "CloudBackupSettings", "CloudBackupSnapshotsList") is { } list)
         {
-            list.ItemsSource = ViewModel.CloudBackupRemoteSnapshots.Count == 0
+            list.ItemsSource = _backupSettingsViewModel.RemoteSnapshotItems.Count == 0
                 ? null
-                : ViewModel.CloudBackupRemoteSnapshots.Cast<object>().ToArray();
+                : _backupSettingsViewModel.RemoteSnapshotItems.Cast<object>().ToArray();
         }
 
         // Empty-state hint: an unexplained blank area reads as "still
@@ -144,7 +145,7 @@ public sealed partial class SettingsWindow
         if (FindCreatedSectionElement<TextBlock>(
                 "CloudBackupSettings", "CloudBackupSnapshotsEmptyHint") is { } emptyHint)
         {
-            emptyHint.Visibility = ViewModel.CloudBackupRemoteSnapshots.Count == 0
+            emptyHint.Visibility = _backupSettingsViewModel.RemoteSnapshotItems.Count == 0
                 ? Visibility.Visible
                 : Visibility.Collapsed;
         }
@@ -203,7 +204,7 @@ public sealed partial class SettingsWindow
 
     private async void CloudBackupDeleteSnapshotButton_Click(object sender, RoutedEventArgs e)
     {
-        if (ViewModel.CloudBackupBusy ||
+        if (!_backupSettingsViewModel.ActionsEnabled ||
             SettingsRoot.XamlRoot is null ||
             sender is not FrameworkElement { DataContext: CloudBackupRemoteSnapshotItem snapshot } ||
             !_backupSettingsViewModel.IsActive ||
@@ -212,7 +213,7 @@ public sealed partial class SettingsWindow
             return;
         }
 
-        long generation = ViewModel.CloudBackupEndpointGeneration;
+        long generation = _backupSettingsViewModel.EndpointGeneration;
         int visit = _backupSettingsViewModel.VisitGeneration;
         // Remote deletes are irreversible — confirm first, in the same
         // style as every other destructive dialog in settings.
@@ -239,7 +240,7 @@ public sealed partial class SettingsWindow
         if (!CurrentCloudBackupVisit(generation, visit) ||
             !_backupRestoreActions.IsCurrentEndpoint(snapshot.Endpoint)) return;
 
-        ViewModel.CloudBackupBusy = true;
+        _backupSettingsViewModel.SetCommandBusy(true);
         try
         {
             if (!_backupRestoreActions.IsCurrentEndpoint(snapshot.Endpoint) ||
@@ -260,20 +261,20 @@ public sealed partial class SettingsWindow
             App.Log($"[CloudBackup] Deleting remote snapshot failed: {ex}");
             if (CurrentCloudBackupVisit(generation, visit))
             {
-                ViewModel.CloudBackupConnectionStatusText = _localizationService.Format(
+                _backupSettingsViewModel.ConnectionStatusText = _localizationService.Format(
                     "Settings.CloudBackup.DeleteSnapshot.Failed",
                     ex.Message);
             }
         }
         finally
         {
-            if (!_isClosed) ViewModel.CloudBackupBusy = false;
+            if (!_isClosed) _backupSettingsViewModel.SetCommandBusy(false);
         }
     }
 
     private async void CloudBackupRestoreSnapshotButton_Click(object sender, RoutedEventArgs e)
     {
-        if (ViewModel.CloudBackupBusy ||
+        if (!_backupSettingsViewModel.ActionsEnabled ||
             SettingsRoot.XamlRoot is null ||
             sender is not FrameworkElement { DataContext: CloudBackupRemoteSnapshotItem snapshot } ||
             !_backupSettingsViewModel.IsActive ||
@@ -287,11 +288,11 @@ public sealed partial class SettingsWindow
         // run PrepareScopedRestoreAsync, which deletes the shared pending
         // marker — the first dialog's confirm would then apply the SECOND
         // snapshot. Confirmed must equal applied.
-        ViewModel.CloudBackupBusy = true;
+        _backupSettingsViewModel.SetCommandBusy(true);
         bool restartScheduled = false;
         bool prepareStarted = false;
         string? downloadDirectory = null;
-        long generation = ViewModel.CloudBackupEndpointGeneration;
+        long generation = _backupSettingsViewModel.EndpointGeneration;
         int visit = _backupSettingsViewModel.VisitGeneration;
         try
         {
@@ -547,7 +548,7 @@ public sealed partial class SettingsWindow
             // way (it can be hundreds of MB).
             _backupRestoreActions.DeleteTemporaryDownload(downloadDirectory);
 
-            if (!_isClosed) ViewModel.CloudBackupBusy = false;
+            if (!_isClosed) _backupSettingsViewModel.SetCommandBusy(false);
         }
     }
 }

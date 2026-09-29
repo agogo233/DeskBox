@@ -56,7 +56,7 @@ public sealed class WidgetCoordinatedMoveContractTests
 
         Assert.Contains("<Slider", card, StringComparison.Ordinal);
         Assert.Contains("StepFrequency=\"1\"", card, StringComparison.Ordinal);
-        Assert.Contains("WidgetSnapSpacingText", card, StringComparison.Ordinal);
+        Assert.Contains("SnapSpacingText", card, StringComparison.Ordinal);
         Assert.DoesNotContain("<NumberBox", card, StringComparison.Ordinal);
     }
 

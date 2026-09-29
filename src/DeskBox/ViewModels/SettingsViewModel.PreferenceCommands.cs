@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Collections.ObjectModel;
 using System.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -15,6 +15,16 @@ namespace DeskBox.ViewModels;
 public partial class SettingsViewModel
 {
     public Color GetCurrentAccentColor() => _currentAccentColor;
+
+    // Host-side working state for the accent card. The XAML binding surface
+    // lives on the appearance editor (section-level DataContext switch); the
+    // shell keeps the accent-mode flag its theme-service write chain needs
+    // and pushes the accent presentation onto the editor on every change.
+    internal bool UseSystemAccentColor
+    {
+        get => _useSystemAccentColor;
+        private set => SetProperty(ref _useSystemAccentColor, value);
+    }
 
     public bool SuppressAppearanceNotifications { get; set; }
     public bool DeferAppearancePersistence { get; set; }
@@ -35,10 +45,7 @@ public partial class SettingsViewModel
 
         if (UseSystemAccentColor)
         {
-            _useSystemAccentColor = false;
-            OnPropertyChanged(nameof(UseSystemAccentColor));
-            OnPropertyChanged(nameof(CanEditCustomAccent));
-            OnPropertyChanged(nameof(AccentColorDescription));
+            UseSystemAccentColor = false;
         }
 
         RefreshAccentPreview();
@@ -49,8 +56,10 @@ public partial class SettingsViewModel
         // The coordinator owns the raw-path normalization, the stored write
         // and the debounced save; the file migration that moved widget
         // content to the new root already ran on the host's existing
-        // WidgetManager chain before this commit step.
-        string normalizedPath = _managedStorageSettings.SetDefaultRootPath(path);
+        // WidgetManager chain before this commit step. The editor owns the
+        // section's read-only path display, so the committed path is pushed
+        // onto its binding surface by the commit itself.
+        string normalizedPath = _managedStorageSettings.CommitRootPath(path);
         ManagedStorageRootPath = normalizedPath;
         _ = RefreshQuickAccessStateAsync(showBusy: true);
     }
@@ -69,7 +78,9 @@ public partial class SettingsViewModel
 
             if (App.Current is { } app)
             {
-                app.ResizeGuideOverlay.IsSnapEnabled = _settingsService.Settings.ResizeSnapEnabled;
+                // ApplySettingsSnapshot above already re-projected the
+                // restored snap state onto the interaction editor.
+                app.ResizeGuideOverlay.IsSnapEnabled = _interactionSettings.SnapEnabled;
             }
 
             App.Current?.GlobalHotkeyService?.RefreshRegistration();

@@ -23,20 +23,19 @@ public sealed class FileStackSettingsCoordinatorTests : IDisposable
     {
         var settings = new SettingsService(_root);
         var coordinator = new FileStackSettingsCoordinator(settings);
-        var editor = new FileStackSettingsViewModel(coordinator);
         int notified = 0;
         settings.SettingsChanged += () => notified++;
 
-        editor.SetFileStacksEnabled(false);
-        editor.SetFileStackAutoStacking(true);
-        editor.SetFileStackGroupBy(SettingsService.FileStackGroupByCustom);
-        editor.SetFileStackThreshold(5);
-        editor.SetFileStackOrderBy(SettingsService.FileStackOrderByDateModified);
-        editor.SetFileStackOpenMode(SettingsService.FileStackOpenModePopover);
-        editor.SetFileStackPopoverLayout(SettingsService.FileStackPopoverLayoutAdaptive);
-        editor.SetFileStackPopoverStyle(SettingsService.FileStackPopoverStyleFollowMaterial);
-        editor.SetFileStackUnmatchedBehavior(SettingsService.FileStackUnmatchedOther);
-        editor.SetFileStackCustomRules(
+        coordinator.SetFileStacksEnabled(false);
+        coordinator.SetFileStackAutoStacking(true);
+        coordinator.SetFileStackGroupBy(SettingsService.FileStackGroupByCustom);
+        coordinator.SetFileStackThreshold(5);
+        coordinator.SetFileStackOrderBy(SettingsService.FileStackOrderByDateModified);
+        coordinator.SetFileStackOpenMode(SettingsService.FileStackOpenModePopover);
+        coordinator.SetFileStackPopoverLayout(SettingsService.FileStackPopoverLayoutAdaptive);
+        coordinator.SetFileStackPopoverStyle(SettingsService.FileStackPopoverStyleFollowMaterial);
+        coordinator.SetFileStackUnmatchedBehavior(SettingsService.FileStackUnmatchedOther);
+        coordinator.SetFileStackCustomRules(
         [
             new FileStackCustomRule { Id = "r1", Name = "Docs", Extensions = ["pdf", "docx"] },
             new FileStackCustomRule { Id = "r2", Name = "Images", Extensions = ["png"] },
@@ -58,9 +57,9 @@ public sealed class FileStackSettingsCoordinatorTests : IDisposable
         // must not save again — the stack projection rebuild only reacts to
         // real passes.
         Assert.Equal(10, notified);
-        editor.SetFileStacksEnabled(false);
-        editor.SetFileStackGroupBy(SettingsService.FileStackGroupByCustom);
-        editor.SetFileStackUnmatchedBehavior(SettingsService.FileStackUnmatchedOther);
+        coordinator.SetFileStacksEnabled(false);
+        coordinator.SetFileStackGroupBy(SettingsService.FileStackGroupByCustom);
+        coordinator.SetFileStackUnmatchedBehavior(SettingsService.FileStackUnmatchedOther);
         Assert.Equal(10, notified);
     }
 

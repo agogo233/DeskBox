@@ -1950,6 +1950,8 @@
     "Settings.Search.Hotkey.PresetsTitle": "快捷鍵",
     "Settings.Search.Hotkey.Status.GlobalHotkeyConflict": "此快速鍵已被 DeskBox 主快速鍵佔用。",
     "Settings.GlobalHotkey.Status.SearchHotkeyConflict": "此快速鍵已被搜尋快速鍵佔用。",
+    "Settings.GlobalHotkey.ElevatedNotice.Description": "如果目前正在操作的視窗是以系統管理員身分執行（例如工作管理員），Windows 會基於安全性考量暫時封鎖全域快捷鍵，此時快捷鍵無法喚起 DeskBox。這是 Windows 的系統限制，並非 DeskBox 故障。",
+    "Settings.GlobalHotkey.ElevatedNotice.Title": "為什麼快捷鍵有時沒有反應？",
     "Settings.Search.Hotkey.ChangeTooltip": "按一下後按下新的組合鍵進行設定",
     "Settings.Search.Hotkey.ResetTooltip": "恢復預設快速鍵",
     "Settings.Search.Hotkey.Recording": "請按下組合鍵…",

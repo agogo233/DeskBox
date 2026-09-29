@@ -1982,6 +1982,8 @@
     "Settings.Search.Hotkey.PresetsTitle": "ショートカット",
     "Settings.Search.Hotkey.Status.GlobalHotkeyConflict": "このショートカットは DeskBox のメイン ショートカットで使用されています。",
     "Settings.GlobalHotkey.Status.SearchHotkeyConflict": "このショートカットは検索ショートカットで使用されています。",
+    "Settings.GlobalHotkey.ElevatedNotice.Description": "操作中のウィンドウが管理者として実行されている場合（タスク マネージャーなど）、Windows はセキュリティ上の理由からグローバル ホットキーを一時的にブロックし、DeskBox を呼び出せなくなります。これは Windows のシステム制限であり、DeskBox の不具合ではありません。",
+    "Settings.GlobalHotkey.ElevatedNotice.Title": "ホットキーが反応しないことがある理由",
     "Settings.Search.Hotkey.ChangeTooltip": "クリックしてから新しいキーの組み合わせを押してください",
     "Settings.Search.Hotkey.ResetTooltip": "デフォルトのホットキーを復元",
     "Settings.Search.Hotkey.Recording": "キーの組み合わせを押してください...",

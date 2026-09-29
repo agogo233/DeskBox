@@ -181,6 +181,7 @@
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto" />
                                 <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
                             </Grid.RowDefinitions>
                             <TextBlock
                                 x:Name="SearchHotkeyStatusText"
@@ -217,6 +218,26 @@
                                         <TextBlock svc:Localized.Key="Common.Restore" />
                                     </StackPanel>
                                 </Button>
+                        <InfoBar
+                            Grid.Row="2"
+                            IsClosable="False"
+                            IsIconVisible="True"
+                            IsOpen="True"
+                            Severity="Informational">
+                            <InfoBar.Content>
+                                <StackPanel Margin="4,10,14,10" Spacing="2">
+                                    <TextBlock
+                                        FontSize="14"
+                                        FontWeight="SemiBold"
+                                        svc:Localized.Key="Settings.GlobalHotkey.ElevatedNotice.Title" />
+                                    <TextBlock
+                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                        FontSize="12"
+                                        TextWrapping="WrapWholeWords"
+                                        svc:Localized.Key="Settings.GlobalHotkey.ElevatedNotice.Description" />
+                                </StackPanel>
+                            </InfoBar.Content>
+                        </InfoBar>
                             </Grid>
                         </Grid>
                     </toolkit:SettingsCard>

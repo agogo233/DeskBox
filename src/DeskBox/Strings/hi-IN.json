@@ -1963,6 +1963,8 @@
     "Settings.Search.Hotkey.PresetsTitle": "शॉर्टकट",
     "Settings.Search.Hotkey.Status.GlobalHotkeyConflict": "यह शॉर्टकट DeskBox के मुख्य शॉर्टकट द्वारा उपयोग में है।",
     "Settings.GlobalHotkey.Status.SearchHotkeyConflict": "यह शॉर्टकट खोज शॉर्टकट द्वारा उपयोग में है।",
+    "Settings.GlobalHotkey.ElevatedNotice.Description": "अगर जिस विंडो पर आप काम कर रहे हैं वह व्यवस्थापक (एडमिनिस्ट्रेटर) के रूप में चल रही है (जैसे टास्क मैनेजर), तो Windows सुरक्षा कारणों से ग्लोबल हॉटकी को अस्थायी रूप से ब्लॉक कर देता है और उनसे DeskBox को नहीं बुलाया जा सकता। यह Windows की सिस्टम सीमा है, DeskBox की खराबी नहीं।",
+    "Settings.GlobalHotkey.ElevatedNotice.Title": "हॉटकी कभी-कभी प्रतिक्रिया क्यों नहीं देती?",
     "Settings.Search.Hotkey.ChangeTooltip": "क्लिक करें, फिर नया कुंजी संयोजन दबाएँ",
     "Settings.Search.Hotkey.ResetTooltip": "डिफ़ॉल्ट हॉटकी पुनर्स्थापित करें",
     "Settings.Search.Hotkey.Recording": "एक कुंजी संयोजन दबाएँ...",

@@ -44,7 +44,13 @@ public sealed class SettingsDeferredSectionsTests
         {
             XElement section = Assert.Single(template.Elements());
             Assert.Equal(GetSectionTag(section) + "SectionTemplate", (string?)template.Attribute(Xaml + "Key"));
-            Assert.Equal("viewModels:SettingsViewModel", (string?)template.Attribute(Xaml + "DataType"));
+            // Batch 45: the file-stack template's compiled x:Bind surface is
+            // typed to its section editor; every other template still carries
+            // the shell view model.
+            string expectedDataType = GetSectionTag(section) == "FileStackSettings"
+                ? "fileStack:FileStackSettingsViewModel"
+                : "viewModels:SettingsViewModel";
+            Assert.Equal(expectedDataType, (string?)template.Attribute(Xaml + "DataType"));
             Assert.Null(section.Attribute(Xaml + "Load"));
         });
     }

@@ -175,23 +175,25 @@ public sealed class PerformanceSettingsContractTests
     [Fact]
     public void PerformanceOptions_ExposeOnlyFiniteCleanupAndActivePresets()
     {
+        // Batch 50 moved the performance option tables onto the section
+        // editor; the shell partial is gone.
         string viewModel = ReadRepositoryFile(
-            "src/DeskBox/ViewModels/SettingsViewModel.Performance.cs");
+            "src/DeskBox/Features/Performance/PerformanceSettingsViewModel.cs");
 
         Assert.DoesNotContain(
-            "PerformanceSettingsPolicy.ModeBestVisual,",
+            "ModeBestVisual",
             viewModel,
             StringComparison.Ordinal);
         Assert.DoesNotContain(
-            "PerformanceSettingsPolicy.CleanupNever,",
+            "CleanupNever",
             viewModel,
             StringComparison.Ordinal);
         Assert.Contains(
-            "PerformanceSettingsPolicy.ModeBalanced,",
+            "PerformanceOptionKinds.ModeBalanced,",
             viewModel,
             StringComparison.Ordinal);
         Assert.Contains(
-            "PerformanceSettingsPolicy.ModeResourceSaver,",
+            "PerformanceOptionKinds.ModeResourceSaver,",
             viewModel,
             StringComparison.Ordinal);
         Assert.Contains(

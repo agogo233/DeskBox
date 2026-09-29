@@ -1,6 +1,5 @@
 using DeskBox.Models;
 using DeskBox.Services;
-using Microsoft.UI.Xaml;
 
 namespace DeskBox.ViewModels;
 
@@ -10,131 +9,11 @@ public partial class SettingsViewModel
     private const string GroupBooleanOn = "On";
     private const string GroupBooleanOff = "Off";
 
-    public string WidgetGroupOverviewSummaryText
-    {
-        get
-        {
-            int count = _settingsService.Settings.WidgetGroups.Count(group =>
-                group.MemberIds.Count >= 2);
-            string layout = GetWidgetGroupNavigationDisplayName(
-                SelectedWidgetGroupDefaultNavigationStyle);
-            return count == 0
-                ? _localizationService.Format(
-                    "Settings.WidgetGroups.Overview.Ready",
-                    layout)
-                : _localizationService.Format(
-                    "Settings.WidgetGroups.Overview.Summary",
-                    count,
-                    layout);
-        }
-    }
-
-    public string SelectedWidgetGroupDefaultNavigationStyle
-    {
-        get => WidgetGroupNavigationStyles.Normalize(
-            _settingsService.Settings.WidgetGroupDefaultNavigationStyle,
-            allowFollowDefault: false);
-        set
-        {
-            // The coordinator normalizes, skips unchanged writes and owns the
-            // debounced save; the shell keeps the post-write linkages.
-            if (!_groupNavigationSettings.SetDefaultNavigationStyle(value))
-            {
-                return;
-            }
-
-            AfterWidgetGroupPresentationChange();
-            OnPropertyChanged();
-        }
-    }
-
-    public IReadOnlyList<SettingsOption> AvailableWidgetGroupNavigationStyleOptions =>
-        WrapOptions(
-        [
-            new(WidgetGroupNavigationStyles.Tabs, T("Settings.WidgetGroupNavigation.Tabs")),
-            new(WidgetGroupNavigationStyles.Stack, T("Settings.WidgetGroupNavigation.Stack"))
-        ]);
-
-    public string SelectedWidgetGroupDefaultTitleDisplayMode
-    {
-        get => WidgetGroupTitleDisplayModes.Normalize(
-            _settingsService.Settings.WidgetGroupDefaultTitleDisplayMode,
-            allowFollowDefault: false);
-        set
-        {
-            if (!_groupNavigationSettings.SetDefaultTitleDisplayMode(value))
-            {
-                return;
-            }
-
-            AfterWidgetGroupPresentationChange();
-            OnPropertyChanged();
-        }
-    }
-
-    public IReadOnlyList<SettingsOption> AvailableWidgetGroupTitleDisplayModeOptions =>
-        WrapOptions(
-        [
-            new(WidgetGroupTitleDisplayModes.IconAndText, T("Settings.WidgetGroupTitle.IconAndText")),
-            new(WidgetGroupTitleDisplayModes.IconOnly, T("Settings.WidgetGroupTitle.IconOnly")),
-            new(WidgetGroupTitleDisplayModes.TextOnly, T("Settings.WidgetGroupTitle.TextOnly"))
-        ]);
-
-    public bool IsWidgetGroupWheelSwitchEnabled
-    {
-        get => _settingsService.Settings.WidgetGroupWheelSwitchEnabled;
-        set
-        {
-            if (!_groupNavigationSettings.SetWheelSwitchEnabled(value))
-            {
-                return;
-            }
-
-            AfterWidgetGroupPresentationChange();
-            OnPropertyChanged();
-        }
-    }
-
-    public bool IsWidgetGroupHoverSwitchEnabled
-    {
-        get => _settingsService.Settings.WidgetGroupHoverSwitchEnabled;
-        set
-        {
-            if (!_groupNavigationSettings.SetHoverSwitchEnabled(value))
-            {
-                return;
-            }
-
-            AfterWidgetGroupPresentationChange();
-            OnPropertyChanged();
-        }
-    }
-
-    public IReadOnlyList<WidgetGroupSettingsItem> ExistingWidgetGroupItems =>
-        _settingsService.Settings.WidgetGroups
-            .Where(group => group.MemberIds.Count >= 2)
-            .Select(CreateWidgetGroupSettingsItem)
-            .ToArray();
-
-    public Visibility ExistingWidgetGroupsVisibility =>
-        ExistingWidgetGroupItems.Count > 0
-            ? Visibility.Visible
-            : Visibility.Collapsed;
-
-    public Visibility ExistingWidgetGroupsEmptyVisibility =>
-        ExistingWidgetGroupItems.Count == 0
-            ? Visibility.Visible
-            : Visibility.Collapsed;
-
-    public void RefreshWidgetGroupSettings()
-    {
-        OnPropertyChanged(nameof(SelectedWidgetGroupDefaultNavigationStyle));
-        OnPropertyChanged(nameof(SelectedWidgetGroupDefaultTitleDisplayMode));
-        OnPropertyChanged(nameof(IsWidgetGroupWheelSwitchEnabled));
-        OnPropertyChanged(nameof(IsWidgetGroupHoverSwitchEnabled));
-        OnPropertyChanged(nameof(WidgetGroupOverviewSummaryText));
-        NotifyExistingWidgetGroupPropertiesChanged();
-    }
+    // Batch 44: the section's XAML binding surface (the four defaults plus
+    // the existing-groups projection gates) lives on the group-navigation
+    // editor; this shell keeps the group-editing state machine (rename,
+    // per-group overrides, member reordering, dissolve flows) and pushes the
+    // rebuilt projection into the editor after every real change.
 
     public bool RenameWidgetGroup(string groupId, string? name)
     {
@@ -314,7 +193,7 @@ public partial class SettingsViewModel
                 WidgetCollapseBehavior.System,
                 allowSystem: true) != WidgetCollapseBehavior.System ||
             WidgetGroupChromePolicy.NormalizePersistedMode(group.ChromeMode) !=
-                WidgetChromeMode.Standard;
+            WidgetChromeMode.Standard;
         if (!changed)
         {
             return false;
@@ -334,25 +213,39 @@ public partial class SettingsViewModel
     // The debounced save itself lives in the group-navigation coordinator's
     // write; this keeps the shell-side post-write linkages that the four
     // default-field setters always ran: the explicit host notification that
-    // also covers the silent-save group edits, the overview summary refresh
-    // and the existing-group projection rebuild.
+    // also covers the silent-save group edits and the existing-group
+    // projection rebuild (now pushed into the editor).
     private void AfterWidgetGroupPresentationChange()
     {
         App.Current?.WidgetManager?.NotifyWidgetGroupPresentationSettingsChanged();
-        OnPropertyChanged(nameof(WidgetGroupOverviewSummaryText));
         NotifyExistingWidgetGroupPropertiesChanged();
     }
+
+    // Group-navigation editor host linkage (batch 44): a user edit on one
+    // of the four defaults persisted through the coordinator; the shell
+    // answers with the explicit host notification and the projection rebuild.
+    private void OnGroupNavigationPresentationUserChanged() =>
+        AfterWidgetGroupPresentationChange();
 
     private void CompleteWidgetGroupSettingsChange()
     {
         _settingsService.SaveDebounced(notifySubscribers: false);
         App.Current?.WidgetManager?.NotifyWidgetGroupPresentationSettingsChanged();
-        OnPropertyChanged(nameof(WidgetGroupOverviewSummaryText));
     }
 
     private WidgetGroupConfig? FindWidgetGroup(string groupId) =>
         _settingsService.Settings.WidgetGroups.FirstOrDefault(candidate =>
             string.Equals(candidate.Id, groupId, StringComparison.Ordinal));
+
+    private string CurrentGroupDefaultNavigationStyle() =>
+        WidgetGroupNavigationStyles.Normalize(
+            _settingsService.Settings.WidgetGroupDefaultNavigationStyle,
+            allowFollowDefault: false);
+
+    private string CurrentGroupDefaultTitleDisplayMode() =>
+        WidgetGroupTitleDisplayModes.Normalize(
+            _settingsService.Settings.WidgetGroupDefaultTitleDisplayMode,
+            allowFollowDefault: false);
 
     private WidgetGroupSettingsItem CreateWidgetGroupSettingsItem(
         WidgetGroupConfig group)
@@ -446,7 +339,7 @@ public partial class SettingsViewModel
             new(
                 WidgetGroupNavigationStyles.FollowDefault,
                 FormatFollowDefault(GetWidgetGroupNavigationDisplayName(
-                    SelectedWidgetGroupDefaultNavigationStyle))),
+                    CurrentGroupDefaultNavigationStyle()))),
             new(WidgetGroupNavigationStyles.Tabs, T("Settings.WidgetGroupNavigation.Tabs")),
             new(WidgetGroupNavigationStyles.Stack, T("Settings.WidgetGroupNavigation.Stack"))
         ]);
@@ -457,7 +350,7 @@ public partial class SettingsViewModel
             new(
                 WidgetGroupTitleDisplayModes.FollowDefault,
                 FormatFollowDefault(GetWidgetGroupTitleDisplayName(
-                    SelectedWidgetGroupDefaultTitleDisplayMode))),
+                    CurrentGroupDefaultTitleDisplayMode()))),
             new(WidgetGroupTitleDisplayModes.IconAndText, T("Settings.WidgetGroupTitle.IconAndText")),
             new(WidgetGroupTitleDisplayModes.IconOnly, T("Settings.WidgetGroupTitle.IconOnly")),
             new(WidgetGroupTitleDisplayModes.TextOnly, T("Settings.WidgetGroupTitle.TextOnly"))
@@ -560,45 +453,26 @@ public partial class SettingsViewModel
             _ => T("Settings.WidgetGroupTitle.IconAndText")
         };
 
+    /// <summary>
+    /// Rebuilds the existing-groups projection and pushes it into the
+    /// group-navigation editor (the section's binding surface since batch 44);
+    /// also re-projects the four defaults so pushed and persisted state stay
+    /// in step after external group edits.
+    /// </summary>
+    public void RefreshWidgetGroupSettings()
+    {
+        _groupNavigationSettings.SyncPresentation();
+        NotifyExistingWidgetGroupPropertiesChanged();
+    }
+
     private void NotifyExistingWidgetGroupPropertiesChanged()
     {
-        OnPropertyChanged(nameof(ExistingWidgetGroupItems));
-        OnPropertyChanged(nameof(ExistingWidgetGroupsVisibility));
-        OnPropertyChanged(nameof(ExistingWidgetGroupsEmptyVisibility));
+        _groupNavigationSettings.UpdateExistingGroups(
+            _settingsService.Settings.WidgetGroups
+                .Where(group => group.MemberIds.Count >= 2)
+                .Select(CreateWidgetGroupSettingsItem)
+                .ToArray());
     }
 
     private string T(string key) => _localizationService.T(key);
-}
-
-[WinRT.GeneratedBindableCustomProperty]
-public sealed partial record WidgetGroupSettingsItem(
-    string GroupId,
-    string? FirstMemberId,
-    string DisplayName,
-    string Summary,
-    bool HasOverrides,
-    string NavigationStyle,
-    IReadOnlyList<SettingsOption> NavigationOptions,
-    string TitleDisplayMode,
-    IReadOnlyList<SettingsOption> TitleOptions,
-    string WheelSetting,
-    IReadOnlyList<SettingsOption> WheelOptions,
-    string HoverSetting,
-    IReadOnlyList<SettingsOption> HoverOptions,
-    string CollapseBehavior,
-    IReadOnlyList<SettingsOption> CollapseOptions,
-    string ChromeMode,
-    IReadOnlyList<SettingsOption> ChromeOptions,
-    IReadOnlyList<WidgetGroupMemberSettingsItem> Members);
-
-[WinRT.GeneratedBindableCustomProperty]
-public sealed partial record WidgetGroupMemberSettingsItem(
-    string GroupId,
-    string WidgetId,
-    string DisplayName,
-    string? MoveUpTargetWidgetId,
-    string? MoveDownTargetWidgetId)
-{
-    public bool CanMoveUp => MoveUpTargetWidgetId is not null;
-    public bool CanMoveDown => MoveDownTargetWidgetId is not null;
 }

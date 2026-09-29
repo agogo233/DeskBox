@@ -21,10 +21,10 @@ public static class WidgetChromeModeNames
 {
     public const string MetadataKey = "ChromeMode";
     public const string System = nameof(WidgetChromeMode.System);
-    public const string Standard = nameof(WidgetChromeMode.Standard);
-    public const string Compact = nameof(WidgetChromeMode.Compact);
-    public const string Overlay = nameof(WidgetChromeMode.Overlay);
-    public const string Hidden = nameof(WidgetChromeMode.Hidden);
+    public const string Standard = Contracts.WidgetChromeKinds.Standard;
+    public const string Compact = Contracts.WidgetChromeKinds.Compact;
+    public const string Overlay = Contracts.WidgetChromeKinds.Overlay;
+    public const string Hidden = Contracts.WidgetChromeKinds.Hidden;
 
     public static string ToSettingValue(WidgetChromeMode mode)
     {

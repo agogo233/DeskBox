@@ -13,11 +13,11 @@ public enum WidgetTitleIconMode
 
 public static class WidgetTitleIconModeNames
 {
-    public const string FilledMono = nameof(WidgetTitleIconMode.FilledMono);
-    public const string LineMono = nameof(WidgetTitleIconMode.LineMono);
-    public const string Color = nameof(WidgetTitleIconMode.Color);
-    public const string Hidden = nameof(WidgetTitleIconMode.Hidden);
-    public const string TextLabel = nameof(WidgetTitleIconMode.TextLabel);
+    public const string FilledMono = Contracts.WidgetTitleIconKinds.FilledMono;
+    public const string LineMono = Contracts.WidgetTitleIconKinds.LineMono;
+    public const string Color = Contracts.WidgetTitleIconKinds.Color;
+    public const string Hidden = Contracts.WidgetTitleIconKinds.Hidden;
+    public const string TextLabel = Contracts.WidgetTitleIconKinds.TextLabel;
 
     public static WidgetTitleIconMode NormalizeMode(string? value)
     {

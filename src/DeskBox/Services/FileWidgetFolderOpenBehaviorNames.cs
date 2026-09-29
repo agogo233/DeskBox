@@ -4,15 +4,16 @@ namespace DeskBox.Services;
 
 public static class FileWidgetFolderOpenBehaviorNames
 {
-    public const string Explorer = "Explorer";
-    public const string Embedded = "Embedded";
-    public const string FollowGlobal = "FollowGlobal";
+    // Canonical global values live in Contracts
+    // (FileWidgetFolderOpenBehaviors, batch 45); these historical constants
+    // are aliases so existing consumers keep compiling unchanged.
+    public const string Explorer = DeskBox.Contracts.FileWidgetFolderOpenBehaviors.Explorer;
+    public const string Embedded = DeskBox.Contracts.FileWidgetFolderOpenBehaviors.Embedded;
+    public const string FollowGlobal = DeskBox.Contracts.FileWidgetFolderOpenBehaviors.FollowGlobal;
     public const string MetadataKey = "FolderOpenBehavior";
 
     public static string NormalizeGlobal(string? value) =>
-        string.Equals(value, Embedded, StringComparison.Ordinal)
-            ? Embedded
-            : Explorer;
+        DeskBox.Contracts.FileWidgetFolderOpenBehaviors.NormalizeGlobal(value);
 
     public static string? GetOverride(WidgetConfig config)
     {

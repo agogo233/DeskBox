@@ -1,5 +1,35 @@
 # Changelog
 
+## Unreleased
+
+### English
+
+#### Interface
+
+- The global hotkey and search hotkey cards now carry an informational note explaining that hotkeys cannot reach DeskBox while the focused window runs elevated (for example, Task Manager) - a Windows security limitation, not a DeskBox fault.
+
+### 中文
+
+#### 界面
+
+- 全局快捷键与搜索快捷键卡片新增说明条：当前台窗口以管理员身份运行（例如任务管理器）时，Windows 会出于安全屏蔽全局快捷键——这是系统限制，并非 DeskBox 故障。
+
+
+## Unreleased
+
+### English
+
+#### Interface
+
+- The global hotkey and search hotkey cards now carry an informational note explaining that hotkeys cannot reach DeskBox while the focused window runs elevated (for example, Task Manager) - a Windows security limitation, not a DeskBox fault.
+
+### 中文
+
+#### 界面
+
+- 全局快捷键与搜索快捷键卡片新增说明条：当前台窗口以管理员身份运行（例如任务管理器）时，Windows 会出于安全屏蔽全局快捷键——这是系统限制，并非 DeskBox 故障。
+
+
 ## 1.5.5 - 2026-09-22
 
 ### English

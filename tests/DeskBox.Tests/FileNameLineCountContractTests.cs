@@ -1,4 +1,4 @@
-using DeskBox.Services;
+﻿using DeskBox.Services;
 using DeskBox.ViewModels;
 
 namespace DeskBox.Tests;
@@ -10,13 +10,13 @@ public class FileNameLineCountContractTests
     {
         string root = FindRepositoryRoot();
         string settingsXaml = File.ReadAllText(Path.Combine(root, "src/DeskBox/Views/SettingsWindow.xaml"));
-        string selectionOptions = File.ReadAllText(Path.Combine(root, "src/DeskBox/ViewModels/SettingsViewModel.SelectionOptions.cs"));
+        string editor = File.ReadAllText(Path.Combine(root, "src/DeskBox/Features/Appearance/AppearanceSettingsViewModel.cs"));
 
         Assert.Contains("Settings.FileNameLines.Title", settingsXaml, StringComparison.Ordinal);
         Assert.Contains("AvailableFileNameLineCountOptions", settingsXaml, StringComparison.Ordinal);
-        Assert.Contains("Settings.FileNameLines.Hidden", selectionOptions, StringComparison.Ordinal);
-        Assert.Contains("Settings.FileNameLines.Single", selectionOptions, StringComparison.Ordinal);
-        Assert.Contains("Settings.FileNameLines.Double", selectionOptions, StringComparison.Ordinal);
+        Assert.Contains("Settings.FileNameLines.Hidden", editor, StringComparison.Ordinal);
+        Assert.Contains("Settings.FileNameLines.Single", editor, StringComparison.Ordinal);
+        Assert.Contains("Settings.FileNameLines.Double", editor, StringComparison.Ordinal);
     }
 
     [Fact]

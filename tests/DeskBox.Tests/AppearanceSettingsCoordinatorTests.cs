@@ -1,4 +1,4 @@
-using DeskBox.Contracts;
+﻿using DeskBox.Contracts;
 using DeskBox.Features.Appearance;
 using DeskBox.Models;
 using DeskBox.Services;
@@ -23,28 +23,27 @@ public sealed class AppearanceSettingsCoordinatorTests : IDisposable
     {
         var settings = new SettingsService(_root);
         var coordinator = new AppearanceSettingsCoordinator(settings);
-        var editor = new AppearanceSettingsViewModel(coordinator);
 
-        AppearanceValueUpdate icon = editor.UpdateIconSize(25);
+        AppearanceValueUpdate icon = coordinator.UpdateIconSize(25);
         Assert.False(icon.Committed);
         Assert.Equal(26, icon.Value);
 
-        Assert.True(editor.UpdateIconSize(26).Committed);
+        Assert.True(coordinator.UpdateIconSize(26).Committed);
         Assert.Equal(26, settings.Settings.WidgetShell.IconSize);
 
-        AppearanceValueUpdate halfPoint = editor.UpdateTextSize(12.3);
+        AppearanceValueUpdate halfPoint = coordinator.UpdateTextSize(12.3);
         Assert.False(halfPoint.Committed);
         Assert.Equal(12.5, halfPoint.Value);
-        Assert.True(editor.UpdateTextSize(12.5).Committed);
+        Assert.True(coordinator.UpdateTextSize(12.5).Committed);
         Assert.Equal(12.5, settings.Settings.WidgetShell.TextSize);
 
-        AppearanceValueUpdate spacing = editor.UpdateHorizontalSpacingScale(0.413);
+        AppearanceValueUpdate spacing = coordinator.UpdateHorizontalSpacingScale(0.413);
         Assert.False(spacing.Committed);
         Assert.Equal(0.42, spacing.Value);
-        Assert.True(editor.UpdateHorizontalSpacingScale(0.42).Committed);
+        Assert.True(coordinator.UpdateHorizontalSpacingScale(0.42).Committed);
         Assert.Equal(0.42, settings.Settings.WidgetShell.HorizontalSpacingScale);
 
-        AppearanceValueUpdate clamped = editor.UpdateLayoutDensityScale(4);
+        AppearanceValueUpdate clamped = coordinator.UpdateLayoutDensityScale(4);
         Assert.False(clamped.Committed);
         Assert.Equal(1.0, clamped.Value);
 

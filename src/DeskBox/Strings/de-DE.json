@@ -1982,6 +1982,8 @@
     "Settings.Search.Hotkey.PresetsTitle": "Tastenkürzel",
     "Settings.Search.Hotkey.Status.GlobalHotkeyConflict": "Diese Tastenkombination wird bereits von der Haupt-Tastenkombination von DeskBox verwendet.",
     "Settings.GlobalHotkey.Status.SearchHotkeyConflict": "Diese Tastenkombination wird bereits von der Such-Tastenkombination verwendet.",
+    "Settings.GlobalHotkey.ElevatedNotice.Description": "Wenn das gerade genutzte Fenster mit Administratorrechten ausgeführt wird (z. B. der Task-Manager), blockiert Windows aus Sicherheitsgründen vorübergehend globale Hotkeys, sodass DeskBox nicht darüber aufgerufen werden kann. Dies ist eine Systemeinschränkung von Windows und kein Fehler von DeskBox.",
+    "Settings.GlobalHotkey.ElevatedNotice.Title": "Warum reagieren die Hotkeys manchmal nicht?",
     "Settings.Search.Hotkey.ChangeTooltip": "Zum Festlegen eine neue Tastenkombination drücken",
     "Settings.Search.Hotkey.ResetTooltip": "Standard-Tastenkürzel wiederherstellen",
     "Settings.Search.Hotkey.Recording": "Tastenkombination drücken...",

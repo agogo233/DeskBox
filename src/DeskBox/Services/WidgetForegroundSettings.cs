@@ -11,12 +11,12 @@ namespace DeskBox.Services;
 /// </summary>
 public static class WidgetForegroundSettings
 {
-    public const string ModeFollowTheme = "FollowTheme";
-    public const string ModeLight = "Light";
-    public const string ModeDark = "Dark";
-    public const string ModeCustom = "Custom";
+    public const string ModeFollowTheme = Contracts.WidgetForegroundKinds.FollowTheme;
+    public const string ModeLight = Contracts.WidgetForegroundKinds.Light;
+    public const string ModeDark = Contracts.WidgetForegroundKinds.Dark;
+    public const string ModeCustom = Contracts.WidgetForegroundKinds.Custom;
 
-    public const string DefaultCustomColorHex = "#F5F5F5";
+    public const string DefaultCustomColorHex = Contracts.WidgetForegroundKinds.DefaultCustomColorHex;
 
     public const string ModeOverrideMetadataKey = "WidgetForegroundMode";
     public const string ColorOverrideMetadataKey = "WidgetForegroundColor";

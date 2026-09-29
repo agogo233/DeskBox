@@ -1,79 +1,44 @@
-using System.Globalization;
-using System.Collections.ObjectModel;
-using System.Threading;
-using CommunityToolkit.Mvvm.ComponentModel;
-using CommunityToolkit.Mvvm.Input;
+﻿using CommunityToolkit.Mvvm.Input;
 using DeskBox.Helpers;
 using DeskBox.Models;
 using DeskBox.Services;
-using Microsoft.UI.Xaml;
-using Microsoft.UI.Xaml.Media;
-using Windows.UI;
 
 namespace DeskBox.ViewModels;
 
 public partial class SettingsViewModel
 {
-    public string SelectedTheme
-    {
-        get => _selectedTheme;
-        set
-        {
-            if (!SetProperty(ref _selectedTheme, value))
-            {
-                return;
-            }
+    public bool CanToggleHoverActionLockPosition => CanToggleHoverButtonAction(ShowHoverActionLockPosition);
+    public bool CanToggleHoverActionLockSize => CanToggleHoverButtonAction(ShowHoverActionLockSize);
+    public bool CanToggleHoverActionAdd => CanToggleHoverButtonAction(ShowHoverActionAdd);
+    public bool CanToggleHoverActionMore => CanToggleHoverButtonAction(ShowHoverActionMore);
+    public bool CanToggleHoverActionDelete => CanToggleHoverButtonAction(ShowHoverActionDelete);
+    // The hover-button action summary is owned by this shell's flyout
+    // selection state machine; the interaction editor binds the section's
+    // DropDownButton to a pushed projection of it.
+    internal string BuildHoverButtonActionsSummary() => !ShowHoverButtons
+        ? _localizationService.T("Settings.HoverButtonActions.None")
+        : string.Join(
+            _localizationService.IsChinese ? "、" : ", ",
+            AvailableWidgetHoverButtonActions
+                .Where(IsHoverButtonActionSelected)
+                .Select(GetHoverButtonActionDisplayName));
 
-            string themeValue = value is ThemeLight or ThemeDark ? value : ThemeSystem;
-
-            if (_isRestoringDefaults)
-            {
-                return;
-            }
-
-            _themeService.SetTheme(themeValue);
-            OnPropertyChanged(nameof(SelectedThemeText));
-        }
-    }
-
-    public string SelectedThemeText => GetThemeDisplayName(SelectedTheme);
-
-    public string SelectedTrayIconStyle
-    {
-        get => _selectedTrayIconStyle;
-        set
-        {
-            if (!SetProperty(ref _selectedTrayIconStyle, value))
-            {
-                return;
-            }
-
-            string styleValue = value is TrayIconStyleColorful or TrayIconStyleBlack or TrayIconStyleWhite
-                ? value
-                : TrayIconStyleSystem;
-
-            if (_isRestoringDefaults)
-            {
-                return;
-            }
-
-            _appearanceSettings.SetTrayIconStyle(styleValue);
-            App.Current.UpdateTrayIcon();
-            OnPropertyChanged(nameof(SelectedTrayIconStyleText));
-        }
-    }
-
-    public string SelectedTrayIconStyleText => GetTrayIconStyleDisplayName(SelectedTrayIconStyle);
-
-    public string[] AvailableTrayIconStyles { get; } =
+    public string[] AvailableWidgetHoverButtonActions { get; } =
     [
-        TrayIconStyleSystem,
-        TrayIconStyleColorful,
-        TrayIconStyleBlack,
-        TrayIconStyleWhite
+        SettingsService.WidgetHoverActionLockPosition,
+        SettingsService.WidgetHoverActionLockSize,
+        SettingsService.WidgetHoverActionAdd,
+        SettingsService.WidgetHoverActionMore,
+        SettingsService.WidgetHoverActionDelete
     ];
 
-    public string[] AvailableTrayIconStyleDisplayNames => _cachedTrayIconStyleDisplayNames ??= AvailableTrayIconStyles.Select(GetTrayIconStyleDisplayName).ToArray();
+    // Host linkage for the interaction editor: the editor persists the layer
+    // mode through the coordinator; the desktop-layer refresh stays on the
+    // shell because it reaches the host's widget manager.
+    private void OnInteractionLayerModeUserChanged()
+    {
+        App.Current?.WidgetManager?.RefreshVisibleWidgetDesktopLayers("settings-layer-mode");
+    }
 
     public string SelectedLanguage
     {
@@ -97,557 +62,126 @@ public partial class SettingsViewModel
 
     public string SelectedLanguageText => _localizationService.GetLanguageDisplayName(SelectedLanguage);
 
-    public bool UseSystemAccentColor
+    // --- Appearance-section host linkage ---
+    //
+    // The appearance editor owns the section family's binding surface and
+    // persisted writes; these handlers run the host-side effects that used to
+    // surround the legacy facade writes. The live-preview orchestration
+    // (SaveAppearanceChange / CommitAppearanceChanges / the slider drag
+    // flags) stays on this shell and is driven by the editor's value events.
+    // Batch 44 recycled the group-navigation push group into the
+    // group-navigation editor (the WidgetGroups section owns those fields).
+
+    private void OnAppearanceThemeUserChanged(string value)
     {
-        get => _useSystemAccentColor;
-        set
+        _themeService.SetTheme(value is ThemeLight or ThemeDark ? value : ThemeSystem);
+    }
+
+    private void OnAppearanceTrayIconStyleUserChanged(string value)
+    {
+        // The editor already persisted the style through the appearance
+        // coordinator; the tray icon refresh reaches the host.
+        App.Current.UpdateTrayIcon();
+    }
+
+    private void OnAppearanceAccentColorSourceUserChanged(bool useSystem)
+    {
+        _themeService.SetAccentMode(
+            useSystem ? ThemeService.AccentModeSystem : ThemeService.AccentModeCustom);
+        RefreshAccentPreview();
+    }
+
+    private void OnAppearanceAccentColorUserChanged(string colorHex)
+    {
+        if (AccentColorHelper.TryParseHex(colorHex, out Windows.UI.Color color))
         {
-            if (!SetProperty(ref _useSystemAccentColor, value))
-            {
-                return;
-            }
-
-            OnPropertyChanged(nameof(CanEditCustomAccent));
-            OnPropertyChanged(nameof(AccentColorDescription));
-            OnPropertyChanged(nameof(SelectedAccentColorSource));
-
-            if (_isRestoringDefaults)
-            {
-                return;
-            }
-
-            _themeService.SetAccentMode(value ? ThemeService.AccentModeSystem : ThemeService.AccentModeCustom);
-            RefreshAccentPreview();
+            SetCustomAccentColor(color);
         }
     }
 
-    public bool CanEditCustomAccent => !UseSystemAccentColor;
-
-    public string SelectedAccentColorSource
+    private void OnAppearanceValueCommitted()
     {
-        get => UseSystemAccentColor
-            ? ThemeService.AccentModeSystem
-            : ThemeService.AccentModeCustom;
-        set => UseSystemAccentColor = !string.Equals(
-            value,
-            ThemeService.AccentModeCustom,
-            StringComparison.OrdinalIgnoreCase);
+        SaveAppearanceChange();
     }
 
-    public IReadOnlyList<SettingsOption> AvailableAccentColorSourceOptions =>
-        WrapOptions(
-        [
-            new(ThemeService.AccentModeSystem, _localizationService.T("Settings.Accent.Source.System")),
-            new(ThemeService.AccentModeCustom, _localizationService.T("Settings.Accent.Source.Custom"))
-        ]);
-
-    public string SelectedWidgetCornerPreference
+    private void OnAppearanceTextSizeCommitted()
     {
-        get => _selectedWidgetCornerPreference;
-        set
-        {
-            if (!SetProperty(ref _selectedWidgetCornerPreference, value))
-            {
-                return;
-            }
-
-            if (_isRestoringDefaults)
-            {
-                return;
-            }
-
-            _appearanceSettings.SetWidgetCornerPreference(value);
-            OnPropertyChanged(nameof(SelectedWidgetCornerPreferenceText));
-        }
+        SaveAppearanceChange();
+        // Global text size also drives the effective inherited font sizes of
+        // the Todo and Quick Capture sections; keep them in sync immediately
+        // (batch 22 regression) while their raw override values stay as-is.
+        _todoSettings.Refresh();
+        _quickCaptureSettings.RefreshFromSettings();
     }
 
-    public string SelectedWidgetCornerPreferenceText => GetCornerDisplayName(SelectedWidgetCornerPreference);
-
-    public string SelectedWidgetMaterialType
+    private void OnAppearanceLayoutDensityMarkedCustom()
     {
-        get => _selectedWidgetMaterialType;
-        set
-        {
-            if (!SetProperty(ref _selectedWidgetMaterialType, value))
-            {
-                return;
-            }
-
-            if (_isRestoringDefaults)
-            {
-                return;
-            }
-
-            _appearanceSettings.SetWidgetMaterialType(value);
-
-            OnPropertyChanged(nameof(SelectedWidgetMaterialTypeText));
-            OnPropertyChanged(nameof(IsOpacitySliderEnabled));
-            OnPropertyChanged(nameof(WidgetOpacityVisibility));
-            OnPropertyChanged(nameof(MaterialIntensityVisibility));
-        }
+        _settingsService.SaveDebounced();
     }
 
-    public string SelectedWidgetMaterialTypeText => GetMaterialTypeDisplayName(SelectedWidgetMaterialType);
-
-    public bool IsWindows10VisualCompatibilityMode =>
-        !WindowsCompatibilityService.IsWindows11OrLater;
-
-    public bool SupportsNativeWidgetCorners =>
-        WindowsCompatibilityService.SupportsNativeWindowCorners;
-
-    public string Windows10VisualCompatibilityTitle =>
-        _localizationService.T("Settings.Windows10VisualCompatibility.Title");
-
-    public string Windows10VisualCompatibilityMessage =>
-        _localizationService.T("Settings.Windows10VisualCompatibility.Message");
-
-    public bool IsOpacitySliderEnabled =>
-        SettingsService.SupportsWidgetOpacity(_selectedWidgetMaterialType);
-
-    public Visibility WidgetOpacityVisibility => IsOpacitySliderEnabled
-        ? Visibility.Visible
-        : Visibility.Collapsed;
-
-    public Visibility MaterialIntensityVisibility =>
-        SettingsService.SupportsMaterialIntensity(_selectedWidgetMaterialType)
-            ? Visibility.Visible
-            : Visibility.Collapsed;
-
-    public string SelectedWidgetBorderColorMode
+    private void OnAppearanceAnimationPresetApplied()
     {
-        get => _selectedWidgetBorderColorMode;
-        set
-        {
-            if (!SetProperty(ref _selectedWidgetBorderColorMode, value))
-            {
-                return;
-            }
-
-            if (_isRestoringDefaults)
-            {
-                return;
-            }
-
-            _appearanceSettings.SetWidgetBorderColorMode(value);
-            OnPropertyChanged(nameof(SelectedWidgetBorderColorModeText));
-            OnPropertyChanged(nameof(IsWidgetBorderStyleEnabled));
-        }
+        _settingsService.SaveDebounced();
     }
 
-    public string SelectedWidgetBorderColorModeText =>
-        GetBorderColorModeDisplayName(SelectedWidgetBorderColorMode);
+    // --- Appearance-section push surface ---
+    //
+    // Selections whose state machines stay on this shell (theme service,
+    // accent mode/effective color, OS capability probes) are pushed onto the
+    // editor; the editor never writes them back except through the
+    // user-changed events above. The group-navigation push moved to the
+    // group-navigation editor in batch 44.
 
-
-    public bool IsWidgetBorderStyleEnabled =>
-        _selectedWidgetBorderColorMode != BorderColorNone;
-
-    public string SelectedWidgetBorderStyle
+    private void PushAppearanceThemeSelection()
     {
-        get => _selectedWidgetBorderStyle;
-        set
-        {
-            if (!SetProperty(ref _selectedWidgetBorderStyle, value))
-            {
-                return;
-            }
-
-            if (_isRestoringDefaults)
-            {
-                return;
-            }
-
-            _appearanceSettings.SetWidgetBorderStyle(value);
-            OnPropertyChanged(nameof(SelectedWidgetBorderStyleText));
-        }
+        string theme = _settingsService.Settings.Core.Theme;
+        _appearanceSettings.UpdateThemeSelection(
+            theme is ThemeLight or ThemeDark ? theme : ThemeSystem);
     }
 
-    public string SelectedWidgetBorderStyleText => GetBorderStyleDisplayName(SelectedWidgetBorderStyle);
-
-    public string SelectedWidgetCollapseBehavior
+    private void PushAppearanceAccentPresentation()
     {
-        get => _selectedWidgetCollapseBehavior;
-        set
-        {
-            string normalized = SettingsService.NormalizeWidgetCollapseBehavior(value);
-            if (!SetProperty(ref _selectedWidgetCollapseBehavior, normalized))
-            {
-                return;
-            }
-
-            OnPropertyChanged(nameof(SelectedWidgetCollapseBehaviorText));
-            OnPropertyChanged(nameof(IsSmartWidgetCollapseBehavior));
-            OnPropertyChanged(nameof(IsSmartWidgetCollapseBehaviorSelected));
-            OnPropertyChanged(nameof(CapsuleHoverResponseEntryVisibility));
-            OnPropertyChanged(nameof(IsWidgetCapsuleBarEnabled));
-            OnPropertyChanged(nameof(IsWidgetCapsuleBarSpacingEnabled));
-
-            if (_isRestoringDefaults || _isApplyingSettingsSnapshot)
-            {
-                return;
-            }
-
-            _capsuleSettings.SetWidgetCollapseBehavior(normalized);
-        }
+        _appearanceSettings.UpdateAccentPresentation(
+            UseSystemAccentColor,
+            AccentColorHelper.ToHex(_currentAccentColor));
     }
 
-    public string SelectedWidgetCollapseBehaviorText =>
-        GetWidgetCollapseBehaviorDisplayName(SelectedWidgetCollapseBehavior);
-
-
-    public string SelectedWidgetCompactContentMode
+    private void PushAppearanceHostEnvironment()
     {
-        get => _selectedWidgetCompactContentMode;
-        set
-        {
-            string normalized = SettingsService.NormalizeWidgetCompactContentMode(value);
-            if (!SetProperty(ref _selectedWidgetCompactContentMode, normalized))
-            {
-                return;
-            }
-
-            if (_isRestoringDefaults || _isApplyingSettingsSnapshot)
-            {
-                return;
-            }
-
-            _capsuleSettings.SetWidgetCompactContentMode(normalized);
-            OnPropertyChanged(nameof(SelectedWidgetCompactContentModeText));
-        }
+        string[] materialKinds = WindowsCompatibilityService.IsWindows11OrLater
+            ?
+            [
+                SettingsService.WidgetMaterialTypeAcrylic,
+                SettingsService.WidgetMaterialTypeAcrylicBase,
+                SettingsService.WidgetMaterialTypeMica,
+                SettingsService.WidgetMaterialTypeMicaAlt,
+                SettingsService.WidgetMaterialTypeSolid
+            ]
+            :
+            [
+                SettingsService.WidgetMaterialTypeAcrylic,
+                SettingsService.WidgetMaterialTypeAcrylicBase,
+                SettingsService.WidgetMaterialTypeSolid
+            ];
+        _appearanceSettings.UpdateHostEnvironment(
+            !WindowsCompatibilityService.IsWindows11OrLater,
+            WindowsCompatibilityService.SupportsNativeWindowCorners,
+            materialKinds);
     }
-
-    public string SelectedWidgetCompactContentModeText =>
-        GetWidgetCompactContentModeDisplayName(SelectedWidgetCompactContentMode);
-
-
-    public string SelectedLayoutDensity
-    {
-        get => _selectedLayoutDensity;
-        set
-        {
-            string normalizedValue = value is
-                SettingsService.LayoutDensityCompact or
-                SettingsService.LayoutDensityStandard or
-                SettingsService.LayoutDensityRelaxed or
-                SettingsService.LayoutDensityCustom
-                    ? value
-                    : SettingsService.LayoutDensityCustom;
-            if (!SetProperty(ref _selectedLayoutDensity, normalizedValue))
-            {
-                return;
-            }
-
-            OnPropertyChanged(nameof(SelectedLayoutDensityText));
-            if (_isRestoringDefaults || _isApplyingSettingsSnapshot)
-            {
-                return;
-            }
-
-            if (normalizedValue == SettingsService.LayoutDensityCustom)
-            {
-                _appearanceSettings.MarkLayoutDensityCustom();
-                _settingsService.SaveDebounced();
-                return;
-            }
-
-            ApplyLayoutDensityPreset(normalizedValue);
-        }
-    }
-
-    public string SelectedLayoutDensityText => GetLayoutDensityDisplayName(SelectedLayoutDensity);
-
-    public int FileNameLineCount
-    {
-        get => _fileNameLineCount;
-        set
-        {
-            int normalizedValue = SettingsService.NormalizeFileNameLineCount(value);
-            if (!SetProperty(ref _fileNameLineCount, normalizedValue))
-            {
-                return;
-            }
-
-            if (_isRestoringDefaults || _isApplyingSettingsSnapshot)
-            {
-                return;
-            }
-
-            _appearanceSettings.SetFileNameLineCount(normalizedValue);
-            SaveAppearanceChange();
-        }
-    }
-
-    public string SelectedAnimationPreset
-    {
-        get => _selectedAnimationPreset;
-        set
-        {
-            string normalizedValue = value is
-                AnimationPresetGentle or
-                AnimationPresetStandard or
-                AnimationPresetEmphasized or
-                AnimationPresetCustom
-                    ? value
-                    : AnimationPresetStandard;
-            if (!SetProperty(ref _selectedAnimationPreset, normalizedValue))
-            {
-                return;
-            }
-
-            OnPropertyChanged(nameof(SelectedAnimationPresetText));
-            if (_isRestoringDefaults || _isApplyingSettingsSnapshot || normalizedValue == AnimationPresetCustom)
-            {
-                return;
-            }
-
-            ApplyAnimationPreset(normalizedValue);
-        }
-    }
-
-    public string SelectedAnimationPresetText => GetAnimationPresetDisplayName(SelectedAnimationPreset);
-
-    public string SelectedWidgetAnimationEffect
-    {
-        get => _selectedWidgetAnimationEffect;
-        set
-        {
-            if (!SetProperty(ref _selectedWidgetAnimationEffect, NormalizeWidgetAnimationEffect(value)))
-            {
-                return;
-            }
-
-            if (_isRestoringDefaults)
-            {
-                return;
-            }
-
-            _appearanceSettings.SetAnimationEffect(
-                _selectedWidgetAnimationEffect,
-                scheduleSave: !_isApplyingAnimationPreset);
-            if (_selectedWidgetAnimationEffect == SettingsService.WidgetAnimationEffectSlideFade &&
-                _selectedWidgetAnimationSlideDirection == SettingsService.WidgetAnimationSlideDirectionNone)
-            {
-                SelectedWidgetAnimationSlideDirection = SettingsService.WidgetAnimationSlideDirectionRight;
-            }
-
-            OnPropertyChanged(nameof(SelectedWidgetAnimationEffectText));
-            OnPropertyChanged(nameof(IsDirectionEnabled));
-            OnPropertyChanged(nameof(IsEasingEnabled));
-            OnPropertyChanged(nameof(IsSpeedEnabled));
-            SyncAnimationPresetSelection();
-        }
-    }
-
-    public string SelectedWidgetAnimationEffectText => GetWidgetAnimationEffectDisplayName(SelectedWidgetAnimationEffect);
-
-    public bool IsDirectionEnabled => _selectedWidgetAnimationEffect is
-        SettingsService.WidgetAnimationEffectSlideFade or
-        SettingsService.WidgetAnimationEffectScaleSlide;
-
-    public bool IsEasingEnabled => _selectedWidgetAnimationEffect != SettingsService.WidgetAnimationEffectNone;
-
-    public bool IsSpeedEnabled => _selectedWidgetAnimationEffect != SettingsService.WidgetAnimationEffectNone;
-
-    public string SelectedWidgetAnimationSpeed
-    {
-        get => _selectedWidgetAnimationSpeed;
-        set
-        {
-            if (!SetProperty(ref _selectedWidgetAnimationSpeed, NormalizeWidgetAnimationSpeed(value)))
-            {
-                return;
-            }
-
-            if (_isRestoringDefaults)
-            {
-                return;
-            }
-
-            _appearanceSettings.SetAnimationSpeed(
-                _selectedWidgetAnimationSpeed,
-                scheduleSave: !_isApplyingAnimationPreset);
-            OnPropertyChanged(nameof(SelectedWidgetAnimationSpeedText));
-            SyncAnimationPresetSelection();
-        }
-    }
-
-    public string SelectedWidgetAnimationSpeedText => GetWidgetAnimationSpeedDisplayName(SelectedWidgetAnimationSpeed);
-
-    public string SelectedWidgetAnimationSlideDirection
-    {
-        get => _selectedWidgetAnimationSlideDirection;
-        set
-        {
-            if (!SetProperty(ref _selectedWidgetAnimationSlideDirection, NormalizeWidgetAnimationSlideDirection(value)))
-            {
-                return;
-            }
-
-            if (_isRestoringDefaults)
-            {
-                return;
-            }
-
-            _appearanceSettings.SetAnimationSlideDirection(
-                _selectedWidgetAnimationSlideDirection,
-                scheduleSave: !_isApplyingAnimationPreset);
-            OnPropertyChanged(nameof(SelectedWidgetAnimationSlideDirectionText));
-            SyncAnimationPresetSelection();
-        }
-    }
-
-    public string SelectedWidgetAnimationSlideDirectionText => GetWidgetAnimationSlideDirectionDisplayName(SelectedWidgetAnimationSlideDirection);
-
-    public string SelectedWidgetAnimationEasingIntensity
-    {
-        get => _selectedWidgetAnimationEasingIntensity;
-        set
-        {
-            if (!SetProperty(ref _selectedWidgetAnimationEasingIntensity, NormalizeWidgetAnimationEasingIntensity(value)))
-            {
-                return;
-            }
-
-            if (_isRestoringDefaults)
-            {
-                return;
-            }
-
-            _appearanceSettings.SetAnimationEasingIntensity(
-                _selectedWidgetAnimationEasingIntensity,
-                scheduleSave: !_isApplyingAnimationPreset);
-            OnPropertyChanged(nameof(SelectedWidgetAnimationEasingIntensityText));
-            SyncAnimationPresetSelection();
-        }
-    }
-
-    public string SelectedWidgetAnimationEasingIntensityText => GetWidgetAnimationEasingIntensityDisplayName(SelectedWidgetAnimationEasingIntensity);
-
-    public string SelectedDisplayWidgetChromeMode
-    {
-        get => _selectedDisplayWidgetChromeMode;
-        set
-        {
-            if (!SetProperty(ref _selectedDisplayWidgetChromeMode, NormalizeWidgetChromeModeSetting(value, WidgetChromeMode.Overlay)))
-            {
-                return;
-            }
-
-            if (_isRestoringDefaults || _isApplyingSettingsSnapshot)
-            {
-                return;
-            }
-
-            _appearanceSettings.SetDisplayWidgetChromeMode(_selectedDisplayWidgetChromeMode);
-            OnPropertyChanged(nameof(SelectedDisplayWidgetChromeModeText));
-        }
-    }
-
-    public string SelectedDisplayWidgetChromeModeText => GetWidgetChromeModeDisplayName(SelectedDisplayWidgetChromeMode);
-
-    public string SelectedInteractiveWidgetChromeMode
-    {
-        get => _selectedInteractiveWidgetChromeMode;
-        set
-        {
-            if (!SetProperty(ref _selectedInteractiveWidgetChromeMode, NormalizeWidgetChromeModeSetting(value, WidgetChromeMode.Standard)))
-            {
-                return;
-            }
-
-            if (_isRestoringDefaults || _isApplyingSettingsSnapshot)
-            {
-                return;
-            }
-
-            _appearanceSettings.SetInteractiveWidgetChromeMode(_selectedInteractiveWidgetChromeMode);
-            OnPropertyChanged(nameof(SelectedInteractiveWidgetChromeModeText));
-        }
-    }
-
-    public string SelectedInteractiveWidgetChromeModeText => GetWidgetChromeModeDisplayName(SelectedInteractiveWidgetChromeMode);
-
-    public string SelectedWidgetTitleIconMode
-    {
-        get => _selectedWidgetTitleIconMode;
-        set
-        {
-            if (!SetProperty(ref _selectedWidgetTitleIconMode, NormalizeWidgetTitleIconModeSetting(value)))
-            {
-                return;
-            }
-
-            if (_isRestoringDefaults || _isApplyingSettingsSnapshot)
-            {
-                return;
-            }
-
-            _appearanceSettings.SetWidgetTitleIconMode(_selectedWidgetTitleIconMode);
-            SaveAppearanceChange();
-            OnPropertyChanged(nameof(SelectedWidgetTitleIconModeText));
-        }
-    }
-
-    public string SelectedWidgetTitleIconModeText => GetWidgetTitleIconModeDisplayName(SelectedWidgetTitleIconMode);
-
-    public bool CanToggleHoverActionLockPosition => CanToggleHoverButtonAction(ShowHoverActionLockPosition);
-    public bool CanToggleHoverActionLockSize => CanToggleHoverButtonAction(ShowHoverActionLockSize);
-    public bool CanToggleHoverActionAdd => CanToggleHoverButtonAction(ShowHoverActionAdd);
-    public bool CanToggleHoverActionMore => CanToggleHoverButtonAction(ShowHoverActionMore);
-    public bool CanToggleHoverActionDelete => CanToggleHoverButtonAction(ShowHoverActionDelete);
-    public string HoverButtonActionsSummaryText => !ShowHoverButtons
-        ? _localizationService.T("Settings.HoverButtonActions.None")
-        : string.Join(
-            _localizationService.IsChinese ? "、" : ", ",
-            AvailableWidgetHoverButtonActions
-                .Where(IsHoverButtonActionSelected)
-                .Select(GetHoverButtonActionDisplayName));
-
-    public string[] AvailableWidgetHoverButtonActions { get; } =
-    [
-        SettingsService.WidgetHoverActionLockPosition,
-        SettingsService.WidgetHoverActionLockSize,
-        SettingsService.WidgetHoverActionAdd,
-        SettingsService.WidgetHoverActionMore,
-        SettingsService.WidgetHoverActionDelete
-    ];
-
-    public string SelectedWidgetLayerMode
-    {
-        get => _selectedWidgetLayerMode;
-        set
-        {
-            string normalizedValue = SettingsService.NormalizeWidgetLayerModeSetting(value);
-            if (!SetProperty(ref _selectedWidgetLayerMode, normalizedValue))
-            {
-                return;
-            }
-
-            if (_isRestoringDefaults || _isApplyingSettingsSnapshot)
-            {
-                return;
-            }
-
-            _interactionSettings.SetWidgetLayerMode(normalizedValue);
-            App.Current?.WidgetManager?.RefreshVisibleWidgetDesktopLayers("settings-layer-mode");
-            OnPropertyChanged(nameof(SelectedWidgetLayerModeText));
-        }
-    }
-
-    public string SelectedWidgetLayerModeText => GetWidgetLayerModeDisplayName(SelectedWidgetLayerMode);
 
     [RelayCommand]
     public void ResetDisplayWidgetChromeOverrides()
     {
-        ResetWidgetChromeOverrides(WidgetChromeCategory.Display, SelectedDisplayWidgetChromeMode);
+        ResetWidgetChromeOverrides(WidgetChromeCategory.Display);
     }
 
     [RelayCommand]
     public void ResetInteractiveWidgetChromeOverrides()
     {
-        ResetWidgetChromeOverrides(WidgetChromeCategory.Interactive, SelectedInteractiveWidgetChromeMode);
+        ResetWidgetChromeOverrides(WidgetChromeCategory.Interactive);
     }
 
-    internal int ResetWidgetChromeOverrides(WidgetChromeCategory category, string mode)
+    internal int ResetWidgetChromeOverrides(WidgetChromeCategory category)
     {
         int changed = ResetWidgetChromeOverrides(
             _settingsService.Settings,

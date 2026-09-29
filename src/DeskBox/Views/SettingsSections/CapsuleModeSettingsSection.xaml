@@ -12,6 +12,7 @@
             <ResourceDictionary.MergedDictionaries>
                 <ResourceDictionary Source="ms-appx:///Styles/SettingsOverviewResources.xaml" />
             </ResourceDictionary.MergedDictionaries>
+            <controls:SettingsBoolToVisibilityConverter x:Key="SettingsBoolToVisibilityConverter" />
             <Style x:Key="CapsuleGroupTitleStyle" TargetType="TextBlock" BasedOn="{StaticResource SettingTitleTextStyle}">
                 <Setter Property="FontSize" Value="15" />
                 <Setter Property="FontWeight" Value="SemiBold" />
@@ -32,8 +33,8 @@
                     </toolkit:SettingsCard.HeaderIcon>
                     <ComboBox
                         MinWidth="{StaticResource SettingsControlMinWidth}"
-                        ItemsSource="{Binding AvailableWidgetCollapseBehaviorOptions}"
-                        controls:SettingsComboBox.Value="{Binding SelectedWidgetCollapseBehavior, Mode=TwoWay}" />
+                        ItemsSource="{Binding AvailableCollapseBehaviorOptions}"
+                        controls:SettingsComboBox.Value="{Binding CollapseBehavior, Mode=TwoWay}" />
                 </toolkit:SettingsCard>
 
             <TextBlock Style="{StaticResource CapsuleGroupTitleStyle}" svc:Localized.Key="Settings.Capsule.Group.Common" />
@@ -48,15 +49,15 @@
                 <StackPanel Orientation="Horizontal" Spacing="8">
                     <Button
                         Command="{x:Bind ViewModel.ResetCapsuleWidthOverridesCommand, Mode=OneWay}"
-                        IsEnabled="{Binding HasCapsuleWidthOverrides}"
+                        IsEnabled="{Binding HasWidthOverrides}"
                         Style="{StaticResource IconActionButtonStyle}"
                         svc:Localized.ToolTipKey="Settings.Capsule.Overrides.ResetWidth">
                         <FontIcon FontSize="14" Glyph="&#xE72C;" />
                     </Button>
                     <ComboBox
                         MinWidth="{StaticResource SettingsControlMinWidth}"
-                        ItemsSource="{Binding AvailableWidgetCompactWidthModeOptions}"
-                        controls:SettingsComboBox.Value="{Binding SelectedWidgetCompactWidthMode, Mode=TwoWay}" />
+                        ItemsSource="{Binding AvailableWidthModeOptions}"
+                        controls:SettingsComboBox.Value="{Binding WidthMode, Mode=TwoWay}" />
                 </StackPanel>
             </toolkit:SettingsCard>
 
@@ -69,8 +70,8 @@
                 </toolkit:SettingsCard.HeaderIcon>
                 <ComboBox
                     MinWidth="{StaticResource SettingsControlMinWidth}"
-                    ItemsSource="{Binding AvailableWidgetCompactExpansionDirectionOptions}"
-                    controls:SettingsComboBox.Value="{Binding SelectedWidgetCompactExpansionDirection, Mode=TwoWay}" />
+                    ItemsSource="{Binding AvailableExpansionDirectionOptions}"
+                    controls:SettingsComboBox.Value="{Binding ExpansionDirection, Mode=TwoWay}" />
             </toolkit:SettingsCard>
 
             <toolkit:SettingsCard
@@ -82,8 +83,8 @@
                 </toolkit:SettingsCard.HeaderIcon>
                 <ComboBox
                     MinWidth="{StaticResource SettingsControlMinWidth}"
-                    ItemsSource="{Binding AvailableWidgetCompactContentModeOptions}"
-                    controls:SettingsComboBox.Value="{Binding SelectedWidgetCompactContentMode, Mode=TwoWay}" />
+                    ItemsSource="{Binding AvailableContentModeOptions}"
+                    controls:SettingsComboBox.Value="{Binding ContentMode, Mode=TwoWay}" />
             </toolkit:SettingsCard>
 
             <toolkit:SettingsCard
@@ -95,8 +96,8 @@
                 </toolkit:SettingsCard.HeaderIcon>
                 <ComboBox
                     MinWidth="{StaticResource SettingsControlMinWidth}"
-                    ItemsSource="{Binding AvailableWidgetCapsuleArrangementOptions}"
-                    controls:SettingsComboBox.Value="{Binding SelectedWidgetCapsuleArrangementMode, Mode=TwoWay}" />
+                    ItemsSource="{Binding AvailableArrangementOptions}"
+                    controls:SettingsComboBox.Value="{Binding ArrangementMode, Mode=TwoWay}" />
             </toolkit:SettingsCard>
 
             <toolkit:SettingsCard
@@ -110,20 +111,20 @@
                     MinWidth="0"
                     OffContent=""
                     OnContent=""
-                    IsOn="{Binding WidgetCompactHideSensitiveContent, Mode=TwoWay}" />
+                    IsOn="{Binding HideSensitiveContent, Mode=TwoWay}" />
             </toolkit:SettingsCard>
 
             <TextBlock Style="{StaticResource CapsuleGroupTitleStyle}" svc:Localized.Key="Settings.Capsule.Group.Details" />
 
             <Border
                 Style="{StaticResource SettingsGroupStyle}"
-                Visibility="{Binding CapsuleHoverResponseEntryVisibility}">
+                Visibility="{Binding ShowHoverResponseEntry, Converter={StaticResource SettingsBoolToVisibilityConverter}}">
                 <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="12" Margin="4">
                     <Button
                         Grid.Column="0"
                         Click="NestedSettingsButton_Click"
-                        IsHitTestVisible="{Binding CanOpenWidgetCompactHoverResponseDetails}"
-                        IsTabStop="{Binding CanOpenWidgetCompactHoverResponseDetails}"
+                        IsHitTestVisible="{Binding CanOpenHoverResponseDetails}"
+                        IsTabStop="{Binding CanOpenHoverResponseDetails}"
                         Style="{StaticResource DrillDownRowStyle}"
                         Tag="CapsuleBehaviorSettings">
                         <Grid ColumnDefinitions="Auto,*" Style="{StaticResource SettingCardIdentityGridStyle}">
@@ -138,34 +139,34 @@
                         Grid.Column="1"
                         MinWidth="{StaticResource SettingsControlMinWidth}"
                         VerticalAlignment="Center"
-                        ItemsSource="{Binding AvailableWidgetCompactHoverResponseOptions}"
-                        controls:SettingsComboBox.Value="{Binding SelectedWidgetCompactHoverResponse, Mode=TwoWay}" />
+                        ItemsSource="{Binding AvailableHoverResponseOptions}"
+                        controls:SettingsComboBox.Value="{Binding HoverResponse, Mode=TwoWay}" />
                     <FontIcon
                         Grid.Column="2"
                         FontSize="12"
                         Glyph="&#xE76C;"
                         IsHitTestVisible="False"
                         VerticalAlignment="Center"
-                        Visibility="{Binding WidgetCompactHoverResponseCustomVisibility}" />
+                        Visibility="{Binding ShowHoverResponseCustom, Converter={StaticResource SettingsBoolToVisibilityConverter}}" />
                 </Grid>
             </Border>
 
             <Border
                 Style="{StaticResource SettingsGroupStyle}"
-                Visibility="{Binding CapsuleArrangementEntryVisibility}">
+                Visibility="{Binding ShowArrangementEntry, Converter={StaticResource SettingsBoolToVisibilityConverter}}">
                 <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="12" Margin="4">
                     <Button
                         Grid.Column="0"
                         Click="NestedSettingsButton_Click"
-                        IsHitTestVisible="{Binding IsWidgetCapsuleBarEnabled}"
-                        IsTabStop="{Binding IsWidgetCapsuleBarEnabled}"
+                        IsHitTestVisible="{Binding IsBarEnabled}"
+                        IsTabStop="{Binding IsBarEnabled}"
                         Style="{StaticResource DrillDownRowStyle}"
                         Tag="CapsuleArrangementSettings">
                         <Grid ColumnDefinitions="Auto,*" Style="{StaticResource SettingCardIdentityGridStyle}">
                             <FontIcon Grid.Column="0" FontSize="18" Glyph="&#xE707;" IsHitTestVisible="False" VerticalAlignment="Center" />
                             <StackPanel Grid.Column="1" IsHitTestVisible="False" Spacing="3" VerticalAlignment="Center">
                                 <TextBlock Style="{StaticResource SettingTitleTextStyle}" svc:Localized.Key="Settings.Capsule.ArrangementDetails.Title" />
-                                <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" Text="{Binding CapsuleArrangementDetailsSummaryText}" />
+                                <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" Text="{Binding ArrangementDetailsSummary}" />
                             </StackPanel>
                         </Grid>
                     </Button>
@@ -173,9 +174,9 @@
                         Grid.Column="1"
                         MinWidth="{StaticResource SettingsControlMinWidth}"
                         VerticalAlignment="Center"
-                        IsEnabled="{Binding IsWidgetCapsuleBarEnabled}"
-                        ItemsSource="{Binding AvailableWidgetCapsuleBarPlacementOptions}"
-                        controls:SettingsComboBox.Value="{Binding SelectedWidgetCapsuleBarPlacement, Mode=TwoWay}" />
+                        IsEnabled="{Binding IsBarEnabled}"
+                        ItemsSource="{Binding AvailableBarPlacementOptions}"
+                        controls:SettingsComboBox.Value="{Binding BarPlacement, Mode=TwoWay}" />
                     <FontIcon Grid.Column="2" FontSize="12" Glyph="&#xE76C;" IsHitTestVisible="False" VerticalAlignment="Center" />
                 </Grid>
             </Border>
@@ -185,8 +186,8 @@
                     <Button
                         Grid.Column="0"
                         Click="NestedSettingsButton_Click"
-                        IsHitTestVisible="{Binding CanOpenWidgetCompactAnimationDetails}"
-                        IsTabStop="{Binding CanOpenWidgetCompactAnimationDetails}"
+                        IsHitTestVisible="{Binding CanOpenAnimationDetails}"
+                        IsTabStop="{Binding CanOpenAnimationDetails}"
                         Style="{StaticResource DrillDownRowStyle}"
                         Tag="CapsuleAnimationSettings">
                         <Grid ColumnDefinitions="Auto,*" Style="{StaticResource SettingCardIdentityGridStyle}">
@@ -201,21 +202,21 @@
                         Grid.Column="1"
                         MinWidth="{StaticResource SettingsControlMinWidth}"
                         VerticalAlignment="Center"
-                        ItemsSource="{Binding AvailableWidgetCompactAnimationEffectOptions}"
-                        controls:SettingsComboBox.Value="{Binding SelectedWidgetCompactAnimationEffect, Mode=TwoWay}" />
+                        ItemsSource="{Binding AvailableAnimationEffectOptions}"
+                        controls:SettingsComboBox.Value="{Binding AnimationEffect, Mode=TwoWay}" />
                     <FontIcon
                         Grid.Column="2"
                         FontSize="12"
                         Glyph="&#xE76C;"
                         IsHitTestVisible="False"
                         VerticalAlignment="Center"
-                        Visibility="{Binding WidgetCompactAnimationCustomVisibility}" />
+                        Visibility="{Binding ShowAnimationCustom, Converter={StaticResource SettingsBoolToVisibilityConverter}}" />
                 </Grid>
             </Border>
 
             <Border
                 Style="{StaticResource SettingsGroupStyle}"
-                Visibility="{Binding CapsuleOverridesEntryVisibility}">
+                Visibility="{Binding ShowOverridesEntry, Converter={StaticResource SettingsBoolToVisibilityConverter}}">
                 <Button
                     Click="NestedSettingsButton_Click"
                     Style="{StaticResource DrillDownRowStyle}"
@@ -224,7 +225,7 @@
                         <FontIcon Grid.Column="0" FontSize="18" Glyph="&#xE713;" IsHitTestVisible="False" VerticalAlignment="Center" />
                         <StackPanel Grid.Column="1" IsHitTestVisible="False" Spacing="3" VerticalAlignment="Center">
                             <TextBlock Style="{StaticResource SettingTitleTextStyle}" svc:Localized.Key="Settings.Capsule.Overrides.Title" />
-                            <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" Text="{Binding CapsuleOverrideSummaryText}" />
+                            <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" Text="{Binding OverrideSummaryText}" />
                         </StackPanel>
                         <FontIcon Grid.Column="2" FontSize="12" Glyph="&#xE76C;" IsHitTestVisible="False" VerticalAlignment="Center" />
                     </Grid>

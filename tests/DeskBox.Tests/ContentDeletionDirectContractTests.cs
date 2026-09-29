@@ -47,7 +47,8 @@ public sealed class ContentDeletionDirectContractTests
             "src/DeskBox/Models/AppSettings.cs",
             "src/DeskBox/Services/SettingsService.cs",
             "src/DeskBox/ViewModels/SettingsViewModel.cs",
-            "src/DeskBox/ViewModels/SettingsViewModel.FeatureCallbacks.cs",
+            // Batch 47 moved the Todo switch chain onto the section editor.
+            "src/DeskBox/Features/Todo/TodoSettingsViewModel.cs",
             "src/DeskBox/ViewModels/SettingsViewModel.FeatureOptions.cs",
             "src/DeskBox/ViewModels/SettingsViewModel.SettingsSync.cs",
             "src/DeskBox/ViewModels/TodoWidgetViewModel.cs",

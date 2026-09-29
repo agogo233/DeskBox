@@ -1,15 +1,41 @@
-using DeskBox.ViewModels;
+using DeskBox.Features.FeatureWidgets;
+using DeskBox.Features.FileStack;
+using DeskBox.Features.Interaction;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 
 namespace DeskBox.Views.SettingsSections;
 
+/// <summary>
+/// The file-widget overview page. Its five compiled bindings span three
+/// feature domains, so instead of one shell-facade dependency property the
+/// control carries three typed editor dependencies (batch 45, the
+/// blueprint-approved x:Bind bridge-free exception): the stack master
+/// switch and its summary read the file-stack editor, the folder-open
+/// combo reads the feature-widgets editor, and the file-item context-menu
+/// toggle reads the interaction editor. Each editor owns its persisted
+/// projection and writes through its coordinator.
+/// </summary>
 public sealed partial class FileWidgetSettingsSection : UserControl
 {
-    public static readonly DependencyProperty ViewModelProperty =
+    public static readonly DependencyProperty FileStackProperty =
         DependencyProperty.Register(
-            nameof(ViewModel),
-            typeof(SettingsViewModel),
+            nameof(FileStack),
+            typeof(FileStackSettingsViewModel),
+            typeof(FileWidgetSettingsSection),
+            new PropertyMetadata(null));
+
+    public static readonly DependencyProperty FeatureWidgetsProperty =
+        DependencyProperty.Register(
+            nameof(FeatureWidgets),
+            typeof(FeatureWidgetsSettingsViewModel),
+            typeof(FileWidgetSettingsSection),
+            new PropertyMetadata(null));
+
+    public static readonly DependencyProperty InteractionProperty =
+        DependencyProperty.Register(
+            nameof(Interaction),
+            typeof(InteractionSettingsViewModel),
             typeof(FileWidgetSettingsSection),
             new PropertyMetadata(null));
 
@@ -18,10 +44,22 @@ public sealed partial class FileWidgetSettingsSection : UserControl
         InitializeComponent();
     }
 
-    public SettingsViewModel? ViewModel
+    public FileStackSettingsViewModel? FileStack
     {
-        get => (SettingsViewModel?)GetValue(ViewModelProperty);
-        set => SetValue(ViewModelProperty, value);
+        get => (FileStackSettingsViewModel?)GetValue(FileStackProperty);
+        set => SetValue(FileStackProperty, value);
+    }
+
+    public FeatureWidgetsSettingsViewModel? FeatureWidgets
+    {
+        get => (FeatureWidgetsSettingsViewModel?)GetValue(FeatureWidgetsProperty);
+        set => SetValue(FeatureWidgetsProperty, value);
+    }
+
+    public InteractionSettingsViewModel? Interaction
+    {
+        get => (InteractionSettingsViewModel?)GetValue(InteractionProperty);
+        set => SetValue(InteractionProperty, value);
     }
 
     public event EventHandler<SettingsSectionNavigationRequestedEventArgs>? NavigationRequested;

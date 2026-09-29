@@ -8,6 +8,19 @@ namespace DeskBox.Models;
 /// properties below are the serialization facade and the legacy access
 /// surface. Declaration order here defines the on-disk member order.
 /// </summary>
+/// <remarks>
+/// Batch 51 adjudication (schema-equivalent narrowing): the 220 passthrough
+/// properties below are the frozen settings.json wire contract, not removable
+/// facade weight. Serializing slice members directly was evaluated and
+/// rejected — the flat member order interleaves all 13 slices, and the one
+/// legacy wire-attribute pair (<see cref="LegacyWidgetCapsuleModeEnabled"/>
+/// JsonPropertyName + WhenWritingNull) lives here — so no byte-equivalent
+/// path removes these properties. Adding or removing a passthrough is a
+/// disk-schema change and requires a schema-versioned migration; runtime code
+/// reads the slices (<c>Settings.&lt;Slice&gt;.&lt;Prop&gt;</c>) and the
+/// SettingsSliceOwnershipContractTests access ratchet keeps facade references
+/// shrinking toward that end state.
+/// </remarks>
 public class AppSettings
 {
     /// <summary>

@@ -69,7 +69,7 @@
                             <FontIcon Grid.Column="0" FontSize="18" Glyph="&#xE81E;" IsHitTestVisible="False" VerticalAlignment="Center" />
                             <StackPanel Grid.Column="1" IsHitTestVisible="False" Spacing="3" VerticalAlignment="Center">
                                 <TextBlock Style="{StaticResource SettingTitleTextStyle}" svc:Localized.Key="Settings.FileStacks.Title" />
-                                <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" Text="{x:Bind ViewModel.FileStackSettingsSummaryText, Mode=OneWay}" />
+                                <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" Text="{x:Bind FileStack.SettingsSummaryText, Mode=OneWay}" />
                             </StackPanel>
                         </Grid>
                     </Button>
@@ -79,7 +79,7 @@
                         VerticalAlignment="Center"
                         OnContent=""
                         OffContent=""
-                        IsOn="{x:Bind ViewModel.FileStacksEnabled, Mode=TwoWay}" />
+                        IsOn="{x:Bind FileStack.StacksEnabled, Mode=TwoWay}" />
                     <FontIcon Grid.Column="2" FontSize="12" Glyph="&#xE76C;" IsHitTestVisible="False" VerticalAlignment="Center" />
                 </Grid>
             </Border>
@@ -101,8 +101,8 @@
                         Grid.Column="1"
                         MinWidth="{StaticResource SettingsControlMinWidth}"
                         VerticalAlignment="Center"
-                        ItemsSource="{x:Bind ViewModel.AvailableFileWidgetFolderOpenBehaviorOptionItems, Mode=OneWay}"
-                        controls:SettingsComboBox.Value="{x:Bind ViewModel.SelectedFileWidgetFolderOpenBehavior, Mode=TwoWay}" />
+                        ItemsSource="{x:Bind FeatureWidgets.AvailableFolderOpenBehaviorOptionItems, Mode=OneWay}"
+                        controls:SettingsComboBox.Value="{x:Bind FeatureWidgets.FolderOpenBehavior, Mode=TwoWay}" />
                 </Grid>
             </Border>
 
@@ -125,7 +125,7 @@
                         VerticalAlignment="Center"
                         OnContent=""
                         OffContent=""
-                        IsOn="{x:Bind ViewModel.FileItemSystemContextMenuEnabled, Mode=TwoWay}" />
+                        IsOn="{x:Bind Interaction.FileItemContextMenuEnabled, Mode=TwoWay}" />
                 </Grid>
             </Border>
 

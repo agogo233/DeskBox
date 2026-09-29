@@ -21,15 +21,17 @@ public sealed class ManagedStorageSettingsCoordinatorTests : IDisposable
     {
         var settings = new SettingsService(_root);
         var coordinator = new ManagedStorageSettingsCoordinator(settings);
-        var editor = new ManagedStorageSettingsViewModel(coordinator);
+        var editor = new ManagedStorageSettingsViewModel(
+            coordinator, static key => key);
         int notified = 0;
         settings.SettingsChanged += () => notified++;
 
         string rawPath = Path.Combine(_root, "nested", "..", "store ");
-        string normalized = editor.SetDefaultRootPath(rawPath);
+        string normalized = editor.CommitRootPath(rawPath);
 
         Assert.Equal(Path.GetFullPath(Path.Combine(_root, "store")), normalized);
-        Assert.Equal(normalized, editor.ReadDefaultRootPath());
+        Assert.Equal(normalized, coordinator.ReadDefaultRootPath());
+        Assert.Equal(normalized, editor.RootPath);
         Assert.Equal(normalized, settings.Settings.FileWidget.DefaultManagedStorageRootPath);
         // The post-migration commit keeps the regular SettingsChanged pass
         // so widget consumers re-read the stored root, exactly as the

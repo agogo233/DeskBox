@@ -6,17 +6,17 @@ public sealed class WidgetForegroundContractTests
     public void SettingsSurface_ExposesPaletteAndColorControlsWithoutTextEdge()
     {
         string xaml = Read("src/DeskBox/Views/SettingsWindow.xaml");
-        string bindable = Read(
-            "src/DeskBox/ViewModels/SettingsViewModel.AotBindableProperties.cs");
+        string bridge = Read(
+            "src/DeskBox/Features/Appearance/AppearanceSettingsViewModel.AotBindableProperties.cs");
 
-        Assert.Contains("AvailableWidgetForegroundModeOptions", xaml, StringComparison.Ordinal);
-        Assert.Contains("SelectedWidgetForegroundColor", xaml, StringComparison.Ordinal);
-        Assert.Contains("nameof(SelectedWidgetForegroundColor)", bindable, StringComparison.Ordinal);
+        Assert.Contains("AvailableForegroundModeOptions", xaml, StringComparison.Ordinal);
+        Assert.Contains("ForegroundColorHex", xaml, StringComparison.Ordinal);
+        Assert.Contains("nameof(ForegroundColorHex)", bridge, StringComparison.Ordinal);
         // The text edge experiment was removed in 1.5.1 (too many platform
         // traps for the value it added); nothing may quietly reintroduce a
         // shadow surface, host or setting.
         Assert.DoesNotContain("WidgetTextEdge", xaml, StringComparison.Ordinal);
-        Assert.DoesNotContain("WidgetTextEdge", bindable, StringComparison.Ordinal);
+        Assert.DoesNotContain("WidgetTextEdge", bridge, StringComparison.Ordinal);
     }
 
     [Theory]

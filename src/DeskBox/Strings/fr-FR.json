@@ -1963,6 +1963,8 @@
     "Settings.Search.Hotkey.PresetsTitle": "Raccourci",
     "Settings.Search.Hotkey.Status.GlobalHotkeyConflict": "Ce raccourci est déjà utilisé par le raccourci principal de DeskBox.",
     "Settings.GlobalHotkey.Status.SearchHotkeyConflict": "Ce raccourci est déjà utilisé par le raccourci de recherche.",
+    "Settings.GlobalHotkey.ElevatedNotice.Description": "Si la fenêtre sur laquelle vous travaillez est exécutée en tant qu'administrateur (par exemple le Gestionnaire des tâches), Windows bloque temporairement les raccourcis globaux pour des raisons de sécurité et DeskBox ne peut alors pas être appelé. Il s'agit d'une limitation du système Windows, et non d'un dysfonctionnement de DeskBox.",
+    "Settings.GlobalHotkey.ElevatedNotice.Title": "Pourquoi les raccourcis ne répondent-ils parfois pas ?",
     "Settings.Search.Hotkey.ChangeTooltip": "Cliquez, puis appuyez sur la nouvelle combinaison de touches",
     "Settings.Search.Hotkey.ResetTooltip": "Restaurer le raccourci clavier par défaut",
     "Settings.Search.Hotkey.Recording": "Appuyez sur une combinaison de touches...",

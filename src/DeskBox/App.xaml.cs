@@ -1,4 +1,4 @@
-// Copyright (c) DeskBox. All rights reserved.
+﻿// Copyright (c) DeskBox. All rights reserved.
 
 using CommunityToolkit.Mvvm.Input;
 using DeskBox.Contracts;
@@ -121,6 +121,7 @@ public partial class App : Application
     private FeatureWidgetsSettingsCoordinator? _featureWidgetsSettings;
     private ManagedStorageSettingsCoordinator? _managedStorageSettings;
     private MaintenanceSettingsCoordinator? _maintenanceSettings;
+    private PerformanceSettingsCoordinator? _performanceSettings;
     private QuickCaptureClipboardRuntime? _quickCaptureClipboardRuntime;
     private BackupRuntime? _backupRuntime;
     private readonly ShutdownSequence _shutdownSequence = new(Log);
@@ -1035,6 +1036,7 @@ public partial class App : Application
             _featureWidgetsSettings = new FeatureWidgetsSettingsCoordinator(SettingsService);
             _managedStorageSettings = new ManagedStorageSettingsCoordinator(SettingsService);
             _maintenanceSettings = new MaintenanceSettingsCoordinator(SettingsService);
+            _performanceSettings = new PerformanceSettingsCoordinator(SettingsService);
             _quickCaptureClipboardRuntime = _featureRuntimes.Register(QuickCaptureFeatureRuntimeId,
                 new QuickCaptureClipboardRuntime(
                     () => !IsShuttingDown &&
@@ -2926,7 +2928,14 @@ RunCriticalStartupStep("widget-manager", () =>
             SettingsService, ThemeService, LocalizationService,
             new TodoSettingsViewModel(
                 _todoSettings ?? throw new InvalidOperationException("Todo settings are not initialized."),
+                LocalizationService.T,
+                (key, args) => LocalizationService.Format(key, args),
                 ex => Log($"[TodoSettings] Update failed: {ex}")),
+            new DeskBox.Features.Weather.WeatherSettingsViewModel(
+                _featureWidgetsSettings ?? throw new InvalidOperationException("Feature widgets settings are not initialized."),
+                LocalizationService.T,
+                (key, args) => LocalizationService.Format(key, args),
+                ex => Log($"[WeatherSettings] Update failed: {ex}")),
             new SearchSettingsViewModel(
                 _searchSettings ?? throw new InvalidOperationException("Search settings are not initialized."),
                 action => UiDispatcherQueue.TryEnqueue(() => action()),
@@ -2934,33 +2943,55 @@ RunCriticalStartupStep("widget-manager", () =>
             new BackupSettingsViewModel(
                 _backupSettings ?? throw new InvalidOperationException("Backup settings are not initialized."),
                 action => UiDispatcherQueue.TryEnqueue(() => action()),
-                ex => Log($"[BackupSettings] Operation failed: {ex}")),
+                ex => Log($"[BackupSettings] Operation failed: {ex}"),
+                localize: LocalizationService.T,
+                format: (key, args) => LocalizationService.Format(key, args)),
             _backupRestoreActions ?? throw new InvalidOperationException(
                 "Backup restore actions are not initialized."),
             _quickCaptureSettings ?? throw new InvalidOperationException("Quick Capture is not initialized."),
+            new DeskBox.Features.QuickCapture.QuickCaptureSettingsViewModel(
+                _quickCaptureSettings ?? throw new InvalidOperationException("Quick Capture is not initialized."),
+                LocalizationService.T,
+                (key, args) => LocalizationService.Format(key, args),
+                message => Log(message),
+                ex => Log($"[QuickCapture] Settings operation failed: {ex}")),
             _searchSettings ?? throw new InvalidOperationException("Search settings are not initialized."),
             _backupRuntime ?? throw new InvalidOperationException("Backup runtime is not initialized."),
             new DeskBox.Features.Appearance.AppearanceSettingsViewModel(
-                _appearanceSettings ?? throw new InvalidOperationException("Appearance settings are not initialized.")),
+                _appearanceSettings ?? throw new InvalidOperationException("Appearance settings are not initialized."),
+                LocalizationService.T),
             new DeskBox.Features.Capsule.CapsuleSettingsViewModel(
-                _capsuleSettings ?? throw new InvalidOperationException("Capsule settings are not initialized.")),
+                _capsuleSettings ?? throw new InvalidOperationException("Capsule settings are not initialized."),
+                LocalizationService.T,
+                (key, args) => LocalizationService.Format(key, args)),
             new DeskBox.Features.Interaction.InteractionSettingsViewModel(
-                _interactionSettings ?? throw new InvalidOperationException("Interaction settings are not initialized.")),
+                _interactionSettings ?? throw new InvalidOperationException("Interaction settings are not initialized."),
+                LocalizationService.T),
             new DeskBox.Features.FileDisplay.FileDisplaySettingsViewModel(
                 _fileDisplaySettings ?? throw new InvalidOperationException("File display settings are not initialized.")),
             new DeskBox.Features.FileStack.FileStackSettingsViewModel(
-                _fileStackSettings ?? throw new InvalidOperationException("File stack settings are not initialized.")),
+                _fileStackSettings ?? throw new InvalidOperationException("File stack settings are not initialized."),
+                LocalizationService.T,
+                (key, args) => LocalizationService.Format(key, args)),
             new DeskBox.Features.GroupNavigation.GroupNavigationSettingsViewModel(
-                _groupNavigationSettings ?? throw new InvalidOperationException("Group navigation settings are not initialized.")),
+                _groupNavigationSettings ?? throw new InvalidOperationException("Group navigation settings are not initialized."),
+                LocalizationService.T),
             new DeskBox.Features.FeatureWidgets.FeatureWidgetsSettingsViewModel(
-                _featureWidgetsSettings ?? throw new InvalidOperationException("Feature widgets settings are not initialized.")),
+                _featureWidgetsSettings ?? throw new InvalidOperationException("Feature widgets settings are not initialized."),
+                LocalizationService.T),
             new DeskBox.Features.Music.MusicSettingsViewModel(
                 _featureWidgetsSettings ?? throw new InvalidOperationException("Feature widgets settings are not initialized."),
                 LocalizationService.T),
             new DeskBox.Features.ManagedStorage.ManagedStorageSettingsViewModel(
-                _managedStorageSettings ?? throw new InvalidOperationException("Managed storage settings are not initialized.")),
+                _managedStorageSettings ?? throw new InvalidOperationException("Managed storage settings are not initialized."),
+                LocalizationService.T),
             new DeskBox.Features.Maintenance.MaintenanceSettingsViewModel(
-                _maintenanceSettings ?? throw new InvalidOperationException("Maintenance settings are not initialized.")));
+                _maintenanceSettings ?? throw new InvalidOperationException("Maintenance settings are not initialized.")),
+            new DeskBox.Features.Performance.PerformanceSettingsViewModel(
+                _performanceSettings ?? throw new InvalidOperationException("Performance settings are not initialized."),
+                _interactionSettings ?? throw new InvalidOperationException("Interaction settings are not initialized."),
+                LocalizationService.T,
+                () => LocalizationService.IsChinese));
         _settingsWindow.Closed += SettingsWindow_ClosedForApp;
         return _settingsWindow;
     }

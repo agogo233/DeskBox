@@ -155,10 +155,12 @@ public sealed class FeatureSettingsBoundaryContractTests
     {
         string[] paths =
         [
-            "src/DeskBox/ViewModels/SettingsViewModel.DataBackupOptions.cs",
-            "src/DeskBox/ViewModels/SettingsViewModel.CloudBackupOptions.cs",
+            // Batch 49 deleted the shell backup option partials (the
+            // binding surface lives on the backup editor now).
             "src/DeskBox/Views/SettingsWindow.CloudBackup.cs",
             "src/DeskBox/Features/Backup/BackupSettingsViewModel.cs",
+            "src/DeskBox/Features/Backup/BackupSettingsViewModel.SettingsSurface.cs",
+            "src/DeskBox/Features/Backup/CloudBackupRemoteSnapshotItem.cs",
             "src/DeskBox/Services/BackupSettingsCoordinator.cs",
             "src/DeskBox/Services/BackupRestoreActions.cs"
         ];

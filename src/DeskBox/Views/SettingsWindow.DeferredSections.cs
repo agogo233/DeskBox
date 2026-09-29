@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using CommunityToolkit.WinUI.Controls;
 using DeskBox.Services;
 using DeskBox.Views.SettingsSections;
@@ -73,7 +73,13 @@ public sealed partial class SettingsWindow
         section.DataContext = ViewModel;
         // LoadContent is used outside an ItemsControl, so initialize the
         // template's generated compiled bindings with the actual view model.
-        XamlBindingHelper.GetDataTemplateComponent(section)?.ProcessBindings(ViewModel, 0, 0, out _);
+        // The file-stack template keeps its compiled x:Bind surface typed to
+        // the section editor (batch 45), so its bindings initialize with the
+        // editor instead of the shell view model.
+        object compiledBindingsRoot = sectionTag == "FileStackSettings"
+            ? _fileStackSettingsViewModel
+            : ViewModel;
+        XamlBindingHelper.GetDataTemplateComponent(section)?.ProcessBindings(compiledBindingsRoot, 0, 0, out _);
 
         switch (section)
         {
@@ -81,7 +87,9 @@ public sealed partial class SettingsWindow
                 searchSettings.Configure(_searchSettingsViewModel, _localizationService, _hWnd);
                 break;
             case FileWidgetSettingsSection fileSettings:
-                fileSettings.ViewModel = ViewModel;
+                fileSettings.FileStack = _fileStackSettingsViewModel;
+                fileSettings.FeatureWidgets = _featureWidgetsSettingsViewModel;
+                fileSettings.Interaction = _interactionSettingsViewModel;
                 break;
             case CapsuleModeSettingsSection capsuleSettings:
                 capsuleSettings.ViewModel = ViewModel;
@@ -101,11 +109,126 @@ public sealed partial class SettingsWindow
             section.DataContext = _musicSettingsViewModel;
         }
 
+        if (sectionTag is "Interaction" or "InteractionWindowSettings")
+        {
+            section.DataContext = _interactionSettingsViewModel;
+        }
+
+        // The Quick Capture section binds through the Quick Capture editor
+        // (batch 46): {Binding} markup resolves through its generated custom
+        // property provider under Native AOT. The clipboard-diagnostics and
+        // image-cache lines are pushed in by the shell (host services).
+        if (sectionTag == "QuickCaptureSettings")
+        {
+            section.DataContext = _quickCaptureSettingsViewModel;
+        }
+
+        // The Todo section binds through the Todo editor (batch 47):
+        // {Binding} markup resolves through its generated custom property
+        // provider under Native AOT; the batch-14 default-filter/tab
+        // linkage renders through the coordinator's snapshot
+        // re-projection.
+        if (sectionTag == "TodoSettings")
+        {
+            section.DataContext = _todoSettingsViewModel;
+        }
+
+        // The Weather section binds through the Weather editor (batch 48):
+        // {Binding} markup resolves through its generated custom property
+        // provider under Native AOT. The city-search state machine (the
+        // search service, the Windows location lookup, the debounced
+        // cancellation) stays on the shell and pushes the suggestion list
+        // and the location status into the editor; the editor answers
+        // user location-mode edits with the AutoLocationUserChanged event.
+        if (sectionTag == "WeatherSettings")
+        {
+            section.DataContext = _weatherSettingsViewModel;
+        }
+
+        // The backup family (local backups, cloud backups and the
+        // compatibility-diagnostics section, batch 49) binds through the
+        // backup editor: {Binding} markup resolves through its generated
+        // custom property provider under Native AOT. The batch-4 visit
+        // state machine (endpoint-scoped reads, generations, cancellation)
+        // stays inside the editor; the manual backup/restore/delete flows
+        // and the drag-drop/runtime diagnostics computation stay on the
+        // shell (host services) and push their results into the editor.
+        if (sectionTag is "BackupRestoreSettings" or
+            "CloudBackupSettings" or
+            "CompatibilityDiagnosticsSettings")
+        {
+            section.DataContext = _backupSettingsViewModel;
+        }
+
+        // The performance section binds through the performance editor
+        // (batch 50): {Binding} markup resolves through its generated custom
+        // property provider under Native AOT. The section's writes (the
+        // legacy eleven custom-mode lambda facade writes, the preset write
+        // and the quiescence trim switch) go through the performance
+        // coordinator; the idle and immediate-hidden trim switches persist
+        // through the interaction coordinator from the editor's handlers.
+        if (sectionTag == "PerformanceSettings")
+        {
+            section.DataContext = _performanceSettingsViewModel;
+        }
+
+        // The file-stack section binds through the file-stack editor
+        // (batch 45): {Binding} markup resolves through its generated custom
+        // property provider under Native AOT, and the template's compiled
+        // x:Bind paths (open-mode combo and the rule list) are typed to the
+        // editor as well.
+        if (sectionTag == "FileStackSettings")
+        {
+            section.DataContext = _fileStackSettingsViewModel;
+        }
+
+        if (sectionTag == "FileDisplaySettings")
+        {
+            section.DataContext = _fileDisplaySettingsViewModel;
+        }
+
         if (sectionTag == "FileStorageSettings")
         {
+            section.DataContext = _managedStorageSettingsViewModel;
             RefreshManagedStoragePathWarning();
             RefreshManagedStorageDesktopShortcutState();
         }
+
+        // The appearance family (main section plus the material, density,
+        // window and animation subsections) binds through the appearance
+        // editor; {Binding} markup resolves through its generated custom
+        // property provider under Native AOT.
+        if (sectionTag is "Appearance" or
+            "AppearanceMaterialSettings" or
+            "AppearanceDensitySettings" or
+            "AppearanceWindowSettings" or
+            "AppearanceAnimationSettings")
+        {
+            section.DataContext = _appearanceSettingsViewModel;
+        }
+
+        // The WidgetGroups section binds through the group-navigation
+        // editor (batch 44); the four defaults are the editor's own persisted
+        // surface and the existing-groups projection is pushed in by the
+        // shell's group-editing state machine.
+        if (sectionTag == "WidgetGroups")
+        {
+            section.DataContext = _groupNavigationSettingsViewModel;
+        }
+
+        // The capsule family (main capsule section plus the behavior,
+        // arrangement, animation and overrides subsections) binds through the
+        // capsule editor (batch 44); the override-list projection is pushed
+        // in by the shell's override state machine.
+        if (sectionTag is "CapsuleMode" or
+            "CapsuleBehaviorSettings" or
+            "CapsuleArrangementSettings" or
+            "CapsuleAnimationSettings" or
+            "CapsuleOverridesSettings")
+        {
+            section.DataContext = _capsuleSettingsViewModel;
+        }
+
         if (sectionTag == "InteractionWindowSettings")
         {
             ViewModel.RefreshGlobalHotkeyState();

@@ -1981,6 +1981,8 @@
     "Settings.Search.Hotkey.PresetsTitle": "快捷键",
     "Settings.Search.Hotkey.Status.GlobalHotkeyConflict": "此快捷键已被 DeskBox 主快捷键占用。",
     "Settings.GlobalHotkey.Status.SearchHotkeyConflict": "此快捷键已被搜索快捷键占用。",
+    "Settings.GlobalHotkey.ElevatedNotice.Description": "如果当前正在操作的窗口是以管理员身份运行的（例如任务管理器），Windows 会出于安全考虑暂时屏蔽全局快捷键，此时快捷键无法唤起 DeskBox。这是 Windows 的系统限制，并非 DeskBox 故障。",
+    "Settings.GlobalHotkey.ElevatedNotice.Title": "为什么快捷键有时没有反应？",
     "Settings.Search.Hotkey.ChangeTooltip": "点击后按下新的组合键进行设置",
     "Settings.Search.Hotkey.ResetTooltip": "恢复默认快捷键",
     "Settings.Search.Hotkey.Recording": "请按下组合键…",

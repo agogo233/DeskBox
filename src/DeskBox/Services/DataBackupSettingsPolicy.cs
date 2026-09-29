@@ -1,4 +1,5 @@
 using System.Text.Json;
+using DeskBox.Contracts;
 using DeskBox.Models;
 
 namespace DeskBox.Services;
@@ -28,25 +29,26 @@ public sealed record AutomaticBackupOptions(
 /// </summary>
 public static class DataBackupSettingsPolicy
 {
-    public const bool DefaultEnabled = true;
-    public const int DefaultIntervalMinutes = 24 * 60;
-    public const int DefaultRetentionCount = 7;
+    // Canonical values/normalization live in Contracts (batch 49) so the
+    // backup settings editor shares them without referencing Services.
+    public const bool DefaultEnabled = BackupOptionKinds.DefaultLocalEnabled;
+    public const int DefaultIntervalMinutes = BackupOptionKinds.DefaultLocalIntervalMinutes;
+    public const int DefaultRetentionCount = BackupOptionKinds.DefaultLocalRetentionCount;
 
     /// <summary>Interval presets offered in settings, in ascending order.</summary>
-    public static readonly int[] SupportedIntervalMinutes =
-        [5, 30, 60, 12 * 60, 24 * 60, 5 * 24 * 60];
+    public static readonly int[] SupportedIntervalMinutes = BackupOptionKinds.LocalIntervalMinutes;
 
     /// <summary>Retention presets offered in settings, in ascending order.</summary>
-    public static readonly int[] SupportedRetentionCounts = [3, 5, 7, 14, 30];
+    public static readonly int[] SupportedRetentionCounts = BackupOptionKinds.LocalRetentionCounts;
 
     public static int NormalizeIntervalMinutes(int value) =>
-        SupportedIntervalMinutes.Contains(value) ? value : DefaultIntervalMinutes;
+        BackupOptionKinds.NormalizeLocalIntervalMinutes(value);
 
     public static int NormalizeRetentionCount(int value) =>
-        SupportedRetentionCounts.Contains(value) ? value : DefaultRetentionCount;
+        BackupOptionKinds.NormalizeLocalRetentionCount(value);
 
     public static string? NormalizeCustomDirectory(string? path) =>
-        string.IsNullOrWhiteSpace(path) ? null : path.Trim();
+        BackupOptionKinds.NormalizeLocalDirectory(path);
 
     public static void SetIntervalMinutes(AppSettings settings, int value) =>
         settings.AutomaticBackupIntervalMinutes = NormalizeIntervalMinutes(value);

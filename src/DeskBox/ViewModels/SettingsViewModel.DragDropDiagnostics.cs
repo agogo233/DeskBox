@@ -3,48 +3,16 @@ using DeskBox.Services;
 
 namespace DeskBox.ViewModels;
 
+/// <summary>
+/// Drag-drop permission diagnostics, batch 49 form: the diagnose/repair
+/// computation and the localized text projection run on the shell (host
+/// services), and the results are pushed into the backup settings editor
+/// (<see cref="Features.Backup.BackupSettingsViewModel"/>) which owns the
+/// section's XAML binding surface. The editor holds no diagnostic state of
+/// its own beyond the pushed texts.
+/// </summary>
 public partial class SettingsViewModel
 {
-    public string DragDropPermissionSummaryText => GetDragDropPermissionSummaryText();
-    public string DragDropPermissionDetailText => GetDragDropPermissionDetailText();
-    public string DragDropPermissionSeverityKind => _dragDropPermissionDiagnostic?.Severity switch
-    {
-        DragDropDiagnosticSeverity.Warning => "Warning",
-        DragDropDiagnosticSeverity.Error => "Error",
-        _ => "Normal"
-    };
-    public string DragDropPermissionProcessText => _dragDropPermissionDiagnostic?.CurrentProcessIntegrity ?? _localizationService.T("Settings.DragDropPermission.Unknown");
-    public string DragDropPermissionExplorerText => _dragDropPermissionDiagnostic?.ExplorerIntegrity ?? _localizationService.T("Settings.DragDropPermission.Unknown");
-    public string DragDropPermissionUacText => _dragDropPermissionDiagnostic?.UacStatus ?? _localizationService.T("Settings.DragDropPermission.Unknown");
-    public string DragDropPermissionAppCompatText => _dragDropPermissionDiagnostic?.AppCompatStatus ?? _localizationService.T("Settings.DragDropPermission.Unknown");
-    public string DragDropPermissionStartupText => _dragDropPermissionDiagnostic?.StartupStatus ?? _localizationService.T("Settings.DragDropPermission.Unknown");
-    public string DragDropPermissionShortcutText => _dragDropPermissionDiagnostic?.ShortcutStatus ?? _localizationService.T("Settings.DragDropPermission.Unknown");
-    public string DragDropPermissionRepairStatusText
-    {
-        get => _dragDropPermissionRepairStatusText;
-        private set => SetProperty(ref _dragDropPermissionRepairStatusText, value);
-    }
-    public bool IsDragDropPermissionRepairing
-    {
-        get => _isDragDropPermissionRepairing;
-        private set
-        {
-            if (!SetProperty(ref _isDragDropPermissionRepairing, value))
-            {
-                return;
-            }
-
-            OnPropertyChanged(nameof(CanRepairDragDropPermission));
-        }
-    }
-    public bool CanRepairDragDropPermission =>
-        !IsDragDropPermissionRepairing &&
-        _dragDropPermissionDiagnostic is not null &&
-        (_dragDropPermissionDiagnostic.HasAppCompatIssue ||
-         _dragDropPermissionDiagnostic.HasStartupIssue ||
-         _dragDropPermissionDiagnostic.HasShortcutIssue ||
-         _dragDropPermissionDiagnostic.NeedsRelaunch);
-
     public void RefreshDragDropPermissionDiagnostic()
     {
         try
@@ -82,26 +50,52 @@ public partial class SettingsViewModel
                 false);
         }
 
-        NotifyDragDropPermissionPropertiesChanged();
+        PushDragDropDiagnosticProjection();
     }
 
     public DragDropPermissionRepairResult RepairDragDropPermission()
     {
-        IsDragDropPermissionRepairing = true;
+        _backupSettings.SetDragDropRepairBusy(true);
         try
         {
             var result = DragDropPermissionService.Repair(_settingsService);
-            DragDropPermissionRepairStatusText = result.Success
+            _backupSettings.SetDragDropRepairStatus(result.Success
                 ? _localizationService.Format("Settings.DragDropPermission.RepairStatus", result.RepairedCount)
-                : _localizationService.Format("Settings.DragDropPermission.RepairFailedStatus", result.FailureMessage);
+                : _localizationService.Format("Settings.DragDropPermission.RepairFailedStatus", result.FailureMessage));
             RefreshDragDropPermissionDiagnostic();
             return result;
         }
         finally
         {
-            IsDragDropPermissionRepairing = false;
+            _backupSettings.SetDragDropRepairBusy(false);
         }
     }
+
+    /// <summary>
+    /// Re-projects the localized diagnostic texts from the last diagnose
+    /// run without re-running it (the language-changed path).
+    /// </summary>
+    private void PushDragDropDiagnosticProjection()
+    {
+        DragDropPermissionDiagnostic? diagnostic = _dragDropPermissionDiagnostic;
+        _backupSettings.SetDragDropDiagnostic(new(
+            GetDragDropPermissionSummaryText(),
+            GetDragDropPermissionDetailText(),
+            diagnostic?.CurrentProcessIntegrity ?? _localizationService.T("Settings.DragDropPermission.Unknown"),
+            diagnostic?.ExplorerIntegrity ?? _localizationService.T("Settings.DragDropPermission.Unknown"),
+            diagnostic?.UacStatus ?? _localizationService.T("Settings.DragDropPermission.Unknown"),
+            diagnostic?.AppCompatStatus ?? _localizationService.T("Settings.DragDropPermission.Unknown"),
+            diagnostic?.StartupStatus ?? _localizationService.T("Settings.DragDropPermission.Unknown"),
+            diagnostic?.ShortcutStatus ?? _localizationService.T("Settings.DragDropPermission.Unknown"),
+            CanRepairFromDiagnostic));
+    }
+
+    private bool CanRepairFromDiagnostic =>
+        _dragDropPermissionDiagnostic is not null &&
+        (_dragDropPermissionDiagnostic.HasAppCompatIssue ||
+         _dragDropPermissionDiagnostic.HasStartupIssue ||
+         _dragDropPermissionDiagnostic.HasShortcutIssue ||
+         _dragDropPermissionDiagnostic.NeedsRelaunch);
 
     private string GetDragDropPermissionSummaryText()
     {
@@ -135,19 +129,5 @@ public partial class SettingsViewModel
             DragDropDiagnosticIssue.StartupShortcutIssue => _localizationService.T("Settings.DragDropPermission.Detail.StartupShortcutIssue"),
             _ => _localizationService.T("Settings.DragDropPermission.Detail.Ok")
         };
-    }
-
-    private void NotifyDragDropPermissionPropertiesChanged()
-    {
-        OnPropertyChanged(nameof(DragDropPermissionSummaryText));
-        OnPropertyChanged(nameof(DragDropPermissionDetailText));
-        OnPropertyChanged(nameof(DragDropPermissionSeverityKind));
-        OnPropertyChanged(nameof(DragDropPermissionProcessText));
-        OnPropertyChanged(nameof(DragDropPermissionExplorerText));
-        OnPropertyChanged(nameof(DragDropPermissionUacText));
-        OnPropertyChanged(nameof(DragDropPermissionAppCompatText));
-        OnPropertyChanged(nameof(DragDropPermissionStartupText));
-        OnPropertyChanged(nameof(DragDropPermissionShortcutText));
-        OnPropertyChanged(nameof(CanRepairDragDropPermission));
     }
 }

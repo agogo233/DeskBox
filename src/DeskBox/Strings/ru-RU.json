@@ -1963,6 +1963,8 @@
     "Settings.Search.Hotkey.PresetsTitle": "Сочетание клавиш",
     "Settings.Search.Hotkey.Status.GlobalHotkeyConflict": "Это сочетание клавиш уже используется основным сочетанием клавиш DeskBox.",
     "Settings.GlobalHotkey.Status.SearchHotkeyConflict": "Это сочетание клавиш уже используется сочетанием клавиш поиска.",
+    "Settings.GlobalHotkey.ElevatedNotice.Description": "Если окно, в котором вы работаете, запущено от имени администратора (например, диспетчер задач), Windows временно блокирует глобальные горячие клавиши в целях безопасности, и вызвать DeskBox с их помощью не получится. Это ограничение системы Windows, а не сбой DeskBox.",
+    "Settings.GlobalHotkey.ElevatedNotice.Title": "Почему горячие клавиши иногда не срабатывают?",
     "Settings.Search.Hotkey.ChangeTooltip": "Нажмите, затем нажмите новую комбинацию клавиш",
     "Settings.Search.Hotkey.ResetTooltip": "Восстановить горячую клавишу по умолчанию",
     "Settings.Search.Hotkey.Recording": "Нажмите комбинацию клавиш...",

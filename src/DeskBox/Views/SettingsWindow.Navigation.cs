@@ -1,4 +1,4 @@
-using DeskBox.Controls;
+﻿using DeskBox.Controls;
 using DeskBox.Helpers;
 using DeskBox.Models;
 using DeskBox.Services;
@@ -576,7 +576,7 @@ public sealed partial class SettingsWindow
         }
         if (sectionTag == "BackupRestoreSettings")
         {
-            ViewModel.RefreshAutomaticBackupStatus();
+            _backupSettingsViewModel.RefreshLocalStatus();
             _ = RefreshBackupSnapshotInventoryAsync();
         }
         SettingsNavigationView.IsBackButtonVisible = isNestedSection
@@ -855,14 +855,14 @@ public sealed partial class SettingsWindow
 
     private void AddFileStackRuleButton_Click(object sender, RoutedEventArgs e)
     {
-        ViewModel.AddFileStackCustomRule();
+        _fileStackSettingsViewModel.AddRule();
     }
 
     private void RemoveFileStackRuleButton_Click(object sender, RoutedEventArgs e)
     {
         if (sender is Button { DataContext: FileStackCustomRuleEditor editor })
         {
-            ViewModel.RemoveFileStackCustomRule(editor);
+            _fileStackSettingsViewModel.RemoveRule(editor);
         }
     }
 
@@ -870,7 +870,7 @@ public sealed partial class SettingsWindow
     {
         if (sender is Button { DataContext: FileStackCustomRuleEditor editor })
         {
-            ViewModel.MoveFileStackCustomRule(editor, -1);
+            _fileStackSettingsViewModel.MoveRule(editor, -1);
         }
     }
 
@@ -878,7 +878,7 @@ public sealed partial class SettingsWindow
     {
         if (sender is Button { DataContext: FileStackCustomRuleEditor editor })
         {
-            ViewModel.MoveFileStackCustomRule(editor, 1);
+            _fileStackSettingsViewModel.MoveRule(editor, 1);
         }
     }
 
@@ -886,96 +886,7 @@ public sealed partial class SettingsWindow
         ListViewBase sender,
         DragItemsCompletedEventArgs args)
     {
-        ViewModel.CommitFileStackCustomRuleOrder();
-    }
-
-    private void SettingsDropDownButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (sender is not DropDownButton button || button.Tag is not string menuKind)
-        {
-            return;
-        }
-
-        string selectedValue;
-        IReadOnlyList<string> values;
-        Action<string> applyValue;
-        Func<string, string> displayValue;
-
-        switch (menuKind)
-        {
-            case "Theme":
-                selectedValue = ViewModel.SelectedTheme;
-                values = ViewModel.AvailableThemes;
-                applyValue = value => ViewModel.SelectedTheme = value;
-                displayValue = ViewModel.GetThemeDisplayName;
-                break;
-
-            case "Language":
-                selectedValue = ViewModel.SelectedLanguage;
-                values = ViewModel.AvailableLanguages;
-                applyValue = value => ViewModel.SelectedLanguage = value;
-                displayValue = ViewModel.GetLanguageDisplayName;
-                break;
-
-            case "WidgetCorner":
-                selectedValue = ViewModel.SelectedWidgetCornerPreference;
-                values = ViewModel.AvailableWidgetCornerPreferences;
-                applyValue = value => ViewModel.SelectedWidgetCornerPreference = value;
-                displayValue = ViewModel.GetCornerDisplayName;
-                break;
-
-            case "WidgetAnimationEffect":
-                selectedValue = ViewModel.SelectedWidgetAnimationEffect;
-                values = ViewModel.AvailableWidgetAnimationEffects;
-                applyValue = value => ViewModel.SelectedWidgetAnimationEffect = value;
-                displayValue = ViewModel.GetWidgetAnimationEffectDisplayName;
-                break;
-
-            case "WidgetAnimationSpeed":
-                selectedValue = ViewModel.SelectedWidgetAnimationSpeed;
-                values = ViewModel.AvailableWidgetAnimationSpeeds;
-                applyValue = value => ViewModel.SelectedWidgetAnimationSpeed = value;
-                displayValue = ViewModel.GetWidgetAnimationSpeedDisplayName;
-                break;
-
-            case "WidgetAnimationSlideDirection":
-                selectedValue = ViewModel.SelectedWidgetAnimationSlideDirection;
-                values = ViewModel.AvailableWidgetAnimationSlideDirections;
-                applyValue = value => ViewModel.SelectedWidgetAnimationSlideDirection = value;
-                displayValue = ViewModel.GetWidgetAnimationSlideDirectionDisplayName;
-                break;
-
-            case "WidgetAnimationEasingIntensity":
-                selectedValue = ViewModel.SelectedWidgetAnimationEasingIntensity;
-                values = ViewModel.AvailableWidgetAnimationEasingIntensities;
-                applyValue = value => ViewModel.SelectedWidgetAnimationEasingIntensity = value;
-                displayValue = ViewModel.GetWidgetAnimationEasingIntensityDisplayName;
-                break;
-
-            default:
-                return;
-        }
-
-        var flyout = new MenuFlyout
-        {
-            ShouldConstrainToRootBounds = false
-        };
-
-        foreach (string value in values)
-        {
-            var item = new MenuFlyoutItem
-            {
-                Text = displayValue(value),
-                MinWidth = button.ActualWidth > 0 ? button.ActualWidth : button.MinWidth,
-                Icon = string.Equals(value, selectedValue, StringComparison.Ordinal)
-                    ? new FontIcon { Glyph = "\uE73E" }
-                    : null
-            };
-            item.Click += (_, _) => applyValue(value);
-            flyout.Items.Add(item);
-        }
-
-        flyout.ShowAt(button);
+        _fileStackSettingsViewModel.CommitRuleOrder();
     }
 
     private void FeatureSettingsExpander_Loaded(object sender, RoutedEventArgs e)
@@ -1045,13 +956,17 @@ public sealed partial class SettingsWindow
             return;
         }
 
+        // The tab-visibility flyout state machine lives on the Quick Capture
+        // section editor (batch 46); the section reaches it through its
+        // DataContext.
+        var quickCaptureSettings = _quickCaptureSettingsViewModel;
         SettingsMultiSelectMenu.Show(
             button,
-            ViewModel.AvailableQuickCaptureDefaultViews,
-            ViewModel.GetQuickCaptureTabDisplayName,
-            ViewModel.IsQuickCaptureTabSelected,
-            ViewModel.CanToggleQuickCaptureTab,
-            ViewModel.ToggleQuickCaptureTab);
+            quickCaptureSettings.AvailableDefaultViews,
+            quickCaptureSettings.GetDefaultViewDisplayName,
+            quickCaptureSettings.IsTabSelected,
+            quickCaptureSettings.CanToggleTab,
+            quickCaptureSettings.ToggleTab);
     }
 
     private void TodoTabsDropDown_Click(object sender, RoutedEventArgs e)
@@ -1061,13 +976,16 @@ public sealed partial class SettingsWindow
             return;
         }
 
+        // The tab-visibility flyout state machine lives on the Todo section
+        // editor (batch 47); the section reaches it through its DataContext.
+        var todoSettings = _todoSettingsViewModel;
         SettingsMultiSelectMenu.Show(
             button,
-            ViewModel.AvailableTodoDefaultFilters,
-            ViewModel.GetTodoTabDisplayName,
-            ViewModel.IsTodoTabSelected,
-            ViewModel.CanToggleTodoTab,
-            ViewModel.ToggleTodoTab);
+            todoSettings.AvailableDefaultFilters,
+            todoSettings.GetTabDisplayName,
+            todoSettings.IsTabSelected,
+            todoSettings.CanToggleTab,
+            todoSettings.ToggleTab);
     }
 
     private void TodoFooterDisplayDropDown_Click(object sender, RoutedEventArgs e)
@@ -1077,13 +995,14 @@ public sealed partial class SettingsWindow
             return;
         }
 
+        var todoSettings = _todoSettingsViewModel;
         SettingsMultiSelectMenu.Show(
             button,
-            ["Stats", "ClearCompleted"],
-            ViewModel.GetTodoFooterDisplayOptionName,
-            ViewModel.IsTodoFooterDisplayOptionSelected,
+            todoSettings.AvailableFooterDisplayOptions,
+            todoSettings.GetFooterDisplayOptionName,
+            todoSettings.IsFooterDisplayOptionSelected,
             _ => true,
-            ViewModel.ToggleTodoFooterDisplayOption);
+            todoSettings.ToggleFooterDisplayOption);
     }
 
     private void WeatherDisplayOptionsDropDown_Click(object sender, RoutedEventArgs e)
@@ -1093,13 +1012,17 @@ public sealed partial class SettingsWindow
             return;
         }
 
+        // The weather display flyout's selection surface lives on the
+        // section editor (batch 48); the section reaches it through its
+        // DataContext.
+        var weatherSettings = _weatherSettingsViewModel;
         SettingsMultiSelectMenu.Show(
             button,
-            ViewModel.AvailableWeatherDisplayOptions,
-            ViewModel.GetWeatherDisplayOptionName,
-            ViewModel.IsWeatherDisplayOptionSelected,
+            weatherSettings.AvailableDisplayOptions,
+            weatherSettings.GetDisplayOptionName,
+            weatherSettings.IsDisplayOptionSelected,
             _ => true,
-            ViewModel.ToggleWeatherDisplayOption);
+            weatherSettings.ToggleDisplayOption);
     }
 
     private void ContinuousDecorativeAnimationsDropDown_Click(
@@ -1111,13 +1034,17 @@ public sealed partial class SettingsWindow
             return;
         }
 
+        // The decorative-animation flyout's selection surface lives on the
+        // performance editor (batch 50); the section reaches it through its
+        // DataContext.
+        var performanceSettings = _performanceSettingsViewModel;
         SettingsMultiSelectMenu.Show(
             button,
-            ViewModel.AvailableContinuousDecorativeAnimationOptions,
-            ViewModel.GetContinuousDecorativeAnimationDisplayName,
-            ViewModel.IsContinuousDecorativeAnimationSelected,
+            performanceSettings.AvailableContinuousDecorativeAnimationOptions,
+            performanceSettings.GetContinuousDecorativeAnimationDisplayName,
+            performanceSettings.IsContinuousDecorativeAnimationSelected,
             _ => true,
-            ViewModel.ToggleContinuousDecorativeAnimation);
+            performanceSettings.ToggleContinuousDecorativeAnimation);
     }
 
     private void HoverButtonActionsDropDown_Click(object sender, RoutedEventArgs e)

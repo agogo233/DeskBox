@@ -1982,6 +1982,8 @@
     "Settings.Search.Hotkey.PresetsTitle": "Atalho",
     "Settings.Search.Hotkey.Status.GlobalHotkeyConflict": "Este atalho já é usado pelo atalho principal do DeskBox.",
     "Settings.GlobalHotkey.Status.SearchHotkeyConflict": "Este atalho já é usado pelo atalho de pesquisa.",
+    "Settings.GlobalHotkey.ElevatedNotice.Description": "Se a janela em uso estiver sendo executada como administrador (por exemplo, o Gerenciador de Tarefas), o Windows bloqueia temporariamente os atalhos globais por segurança, e o DeskBox não pode ser aberto por eles. É uma limitação do sistema Windows, não um defeito do DeskBox.",
+    "Settings.GlobalHotkey.ElevatedNotice.Title": "Por que os atalhos às vezes não respondem?",
     "Settings.Search.Hotkey.ChangeTooltip": "Clique e pressione a nova combinação de teclas",
     "Settings.Search.Hotkey.ResetTooltip": "Restaurar atalho padrão",
     "Settings.Search.Hotkey.Recording": "Pressione uma combinação de teclas...",

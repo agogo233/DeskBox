@@ -53,6 +53,9 @@ public sealed partial class SettingsWindow
             return;
         }
 
+        // The search state machine (debounce, cancellation, the search
+        // service) stays on the shell; it pushes the results into the
+        // section editor (batch 48).
         _ = ViewModel.UpdateWeatherCitySuggestionsAsync(sender.Text);
     }
 
@@ -61,7 +64,7 @@ public sealed partial class SettingsWindow
         if (args.SelectedItem is WeatherCitySearchResult result)
         {
             _isSelectingCity = true;
-            ViewModel.SelectWeatherCity(result);
+            _weatherSettingsViewModel.SelectCity(result);
             // Reset on next dispatch cycle, after TextChanged and QuerySubmitted have fired
             DispatcherQueue.TryEnqueue(() => _isSelectingCity = false);
         }
@@ -76,10 +79,10 @@ public sealed partial class SettingsWindow
         }
 
         // User pressed Enter without selecting a suggestion — pick the first match
-        if (!string.IsNullOrWhiteSpace(args.QueryText) && ViewModel.WeatherCitySuggestions.Count > 0)
+        if (!string.IsNullOrWhiteSpace(args.QueryText) && _weatherSettingsViewModel.HasCitySuggestions)
         {
             _isSelectingCity = true;
-            ViewModel.SelectWeatherCity(ViewModel.WeatherCitySuggestions[0]);
+            _weatherSettingsViewModel.TrySelectFirstCitySuggestion();
             DispatcherQueue.TryEnqueue(() => _isSelectingCity = false);
         }
     }
@@ -89,8 +92,8 @@ public sealed partial class SettingsWindow
         // Clear search results and restore the saved city name if the user didn't select anything.
         DispatcherQueue.TryEnqueue(() =>
         {
-            ViewModel.ClearWeatherCitySuggestions();
-            ViewModel.RestoreWeatherCitySearchText();
+            _weatherSettingsViewModel.ClearCitySuggestions();
+            _weatherSettingsViewModel.RestoreCitySearchText();
         });
     }
 
@@ -394,7 +397,7 @@ public sealed partial class SettingsWindow
         {
             if (!_isRecordingHotkey)
             {
-                GlobalHotkeyCaptureButton.Content = ViewModel.GlobalHotkeyText;
+                GlobalHotkeyCaptureButton.Content = _interactionSettingsViewModel.HotkeyText;
             }
 
             GlobalHotkeyPresetF7Button.IsChecked =

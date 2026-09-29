@@ -295,13 +295,13 @@ public sealed partial class SettingsWindow
 
     private async void PinManagedStorageToQuickAccessButton_Click(object sender, RoutedEventArgs e)
     {
-        if (!ViewModel.CanInvokeQuickAccessAction)
+        if (!_managedStorageSettingsViewModel.CanInvokeQuickAccessAction)
         {
             return;
         }
 
         string path = ViewModel.ManagedStorageRootPath;
-        bool shouldUnpin = ViewModel.ShouldUnpinManagedStorageFromQuickAccess;
+        bool shouldUnpin = _managedStorageSettingsViewModel.ShouldUnpinQuickAccessAction;
 
         ViewModel.SetQuickAccessBusy(true);
         try

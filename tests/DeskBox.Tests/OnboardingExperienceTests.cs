@@ -430,19 +430,21 @@ public sealed class OnboardingExperienceTests
             "src/DeskBox/Services/WidgetManager.cs"));
         string featureManager = File.ReadAllText(TestPaths.SourceFile(
             "src/DeskBox/Services/WidgetManager.FeatureWidgets.cs"));
-        string settingsCallbacks = File.ReadAllText(Path.Combine(
-            root,
-            "src/DeskBox/ViewModels/SettingsViewModel.FeatureCallbacks.cs"));
         string quickCaptureCoordinator = File.ReadAllText(Path.Combine(
             root,
             "src/DeskBox/Services/QuickCaptureSettingsCoordinator.cs"));
+        string quickCaptureEditor = File.ReadAllText(Path.Combine(
+            root,
+            "src/DeskBox/Features/QuickCapture/QuickCaptureSettingsViewModel.cs"));
 
         Assert.Contains("_featureWidgetUpdateLocks", featureManager, StringComparison.Ordinal);
         Assert.Contains("await updateLock.WaitAsync()", featureManager, StringComparison.Ordinal);
         Assert.Contains("updateLock.Release()", featureManager, StringComparison.Ordinal);
         Assert.Contains("config.IsVisible = true;", manager, StringComparison.Ordinal);
-        Assert.Contains("_quickCaptureSettings.SetEnabledAsync(value, reveal: value)",
-            settingsCallbacks, StringComparison.Ordinal);
+        // Batch 46: the enable chain moved from the shell callback onto the
+        // Quick Capture section editor.
+        Assert.Contains("_settings.SetEnabledAsync(value, reveal: value)",
+            quickCaptureEditor, StringComparison.Ordinal);
         Assert.Contains("await _widgetGate.WaitAsync(linked.Token)",
             quickCaptureCoordinator, StringComparison.Ordinal);
     }

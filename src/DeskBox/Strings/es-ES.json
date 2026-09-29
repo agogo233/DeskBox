@@ -1963,6 +1963,8 @@
     "Settings.Search.Hotkey.PresetsTitle": "Atajo",
     "Settings.Search.Hotkey.Status.GlobalHotkeyConflict": "Este atajo ya lo usa el atajo principal de DeskBox.",
     "Settings.GlobalHotkey.Status.SearchHotkeyConflict": "Este atajo ya lo usa el atajo de búsqueda.",
+    "Settings.GlobalHotkey.ElevatedNotice.Description": "Si la ventana en la que está trabajando se ejecuta como administrador (por ejemplo, el Administrador de tareas), Windows bloquea temporalmente los atajos globales por motivos de seguridad y DeskBox no se puede invocar con ellos. Es una limitación del sistema Windows, no un fallo de DeskBox.",
+    "Settings.GlobalHotkey.ElevatedNotice.Title": "¿Por qué los atajos de teclado a veces no responden?",
     "Settings.Search.Hotkey.ChangeTooltip": "Haga clic y luego presione la nueva combinación de teclas",
     "Settings.Search.Hotkey.ResetTooltip": "Restaurar tecla de acceso rápido predeterminada",
     "Settings.Search.Hotkey.Recording": "Presione una combinación de teclas...",

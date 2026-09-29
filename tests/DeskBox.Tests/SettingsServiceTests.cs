@@ -1,5 +1,6 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using System.Text.Json.Serialization;
+using DeskBox.Contracts;
 using DeskBox.Models;
 using DeskBox.Services;
 

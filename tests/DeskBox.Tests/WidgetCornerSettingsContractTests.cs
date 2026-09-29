@@ -1,21 +1,19 @@
-namespace DeskBox.Tests;
+﻿namespace DeskBox.Tests;
 
 public sealed class WidgetCornerSettingsContractTests
 {
     [Fact]
     public void CornerSelector_OffersRoundSmallAndSquareWithRoundFirst()
     {
-        string options = File.ReadAllText(TestPaths.FromRepository(
-            "src/DeskBox/ViewModels/SettingsViewModel.FeatureOptions.cs"));
-        string displayNames = File.ReadAllText(TestPaths.FromRepository(
-            "src/DeskBox/ViewModels/SettingsViewModel.DisplayNames.cs"));
+        string editor = File.ReadAllText(TestPaths.FromRepository(
+            "src/DeskBox/Features/Appearance/AppearanceSettingsViewModel.cs"));
 
         Assert.Contains(
-            "[CornerRound, CornerSmall, CornerSquare]",
-            options,
+            "WidgetCornerKinds.Round,\n        WidgetCornerKinds.Small,\n        WidgetCornerKinds.Square",
+            editor.Replace("\r\n", "\n"),
             StringComparison.Ordinal);
-        Assert.DoesNotContain("CornerDefault", options, StringComparison.Ordinal);
-        Assert.DoesNotContain("Settings.Corner.Default", displayNames, StringComparison.Ordinal);
+        Assert.DoesNotContain("CornerDefault", editor, StringComparison.Ordinal);
+        Assert.DoesNotContain("Settings.Corner.Default", editor, StringComparison.Ordinal);
     }
 
     [Fact]

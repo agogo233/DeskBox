@@ -52,22 +52,24 @@ internal sealed record CloudBackupOptions(
 
 internal static class CloudBackupSettingsPolicy
 {
-    internal const string ProviderNone = "none";
-    internal const string ProviderWebDav = "webdav";
-    internal const int DefaultRetentionCount = 5;
-    internal const int DefaultIntervalMinutes = 24 * 60;
+    // Canonical values/normalization live in Contracts (batch 49) so the
+    // backup settings editor shares them without referencing Services.
+    internal const string ProviderNone = BackupOptionKinds.ProviderNone;
+    internal const string ProviderWebDav = BackupOptionKinds.ProviderWebDav;
+    internal const int DefaultRetentionCount = BackupOptionKinds.DefaultCloudRetentionCount;
+    internal const int DefaultIntervalMinutes = BackupOptionKinds.DefaultCloudIntervalMinutes;
 
     /// <summary>Preset interval choices for the settings ComboBox.</summary>
-    internal static readonly int[] SupportedIntervalMinutes = [60, 360, 720, 1440, 10080];
+    internal static readonly int[] SupportedIntervalMinutes = BackupOptionKinds.CloudIntervalMinutes;
 
     /// <summary>Preset retention choices for the settings ComboBox.</summary>
-    internal static readonly int[] SupportedRetentionCounts = [3, 5, 7, 10, 14];
+    internal static readonly int[] SupportedRetentionCounts = BackupOptionKinds.CloudRetentionCounts;
 
     internal static int NormalizeIntervalMinutes(int minutes) =>
-        SupportedIntervalMinutes.Contains(minutes) ? minutes : DefaultIntervalMinutes;
+        BackupOptionKinds.NormalizeCloudIntervalMinutes(minutes);
 
     internal static int NormalizeRetentionCount(int count) =>
-        SupportedRetentionCounts.Contains(count) ? count : DefaultRetentionCount;
+        BackupOptionKinds.NormalizeCloudRetentionCount(count);
 
     internal static CloudBackupOptions GetOptions(AppSettings settings)
     {

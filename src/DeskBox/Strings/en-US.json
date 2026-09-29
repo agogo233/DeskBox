@@ -1994,6 +1994,8 @@
     "Settings.Search.Hotkey.PresetsTitle": "Shortcut",
     "Settings.Search.Hotkey.Status.GlobalHotkeyConflict": "This shortcut is already used by the main DeskBox shortcut.",
     "Settings.GlobalHotkey.Status.SearchHotkeyConflict": "This shortcut is already used by the search shortcut.",
+    "Settings.GlobalHotkey.ElevatedNotice.Description": "If the window you are working in is running as administrator (for example, Task Manager), Windows blocks global hotkeys for security reasons, so the hotkey cannot bring up DeskBox. This is a Windows system limitation, not a DeskBox malfunction.",
+    "Settings.GlobalHotkey.ElevatedNotice.Title": "Why do hotkeys sometimes not respond?",
     "Settings.Search.Hotkey.ChangeTooltip": "Click, then press the new key combination",
     "Settings.Search.Hotkey.ResetTooltip": "Restore default hotkey",
     "Settings.Search.Hotkey.Recording": "Press a key combination...",

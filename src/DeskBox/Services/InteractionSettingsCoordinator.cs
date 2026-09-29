@@ -50,6 +50,18 @@ public sealed class InteractionSettingsCoordinator : IInteractionSettings
             performance.ImmediateHiddenWorkingSetTrimEnabled);
     }
 
+    public InteractionPresentationSettings ReadInteractionPresentation()
+    {
+        WidgetShellSettingsSlice shell = _settings.Settings.WidgetShell;
+        return new(
+            SettingsService.NormalizeWidgetLayerModeSetting(shell.WidgetLayerMode),
+            shell.ResizeSnapEnabled,
+            SettingsService.NormalizeWidgetSnapSpacing(shell.WidgetSnapSpacing),
+            _settings.Settings.FileWidget.DoubleClickToOpen,
+            shell.KeepWidgetsVisibleOnShowDesktop,
+            _settings.Settings.FileWidget.FileItemSystemContextMenuEnabled);
+    }
+
     public void SetAutoStart(bool value)
     {
         ThrowIfStopped();

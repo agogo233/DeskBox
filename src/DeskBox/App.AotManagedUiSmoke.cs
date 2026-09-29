@@ -1,4 +1,4 @@
-#if DESKBOX_NATIVE_AOT
+﻿#if DESKBOX_NATIVE_AOT
 using DeskBox.Models;
 using DeskBox.Services;
 using DeskBox.ViewModels;
@@ -1189,7 +1189,10 @@ public partial class App
         await WaitForManagedUiSettingsAsync("Appearance");
         SettingsWindow settingsWindow = _settingsWindow ??
             throw new InvalidOperationException("The settings window is unavailable.");
-        SettingsViewModel settingsViewModel = settingsWindow.ViewModel;
+        DeskBox.Features.FileDisplay.FileDisplaySettingsViewModel fileDisplaySettings =
+            settingsWindow.FileDisplaySettings;
+        DeskBox.Features.Appearance.AppearanceSettingsViewModel appearanceSettings =
+            settingsWindow.AppearanceSettings;
         WidgetManager manager = WidgetManager ??
             throw new InvalidOperationException("WidgetManager is unavailable.");
         AotManagedUiPersistenceEvidence evidence = result.Persistence ??
@@ -1198,7 +1201,8 @@ public partial class App
 
         evidence.Before = CaptureAotManagedUiPersistenceState(
             manager,
-            settingsViewModel);
+            fileDisplaySettings,
+            appearanceSettings);
         RequireAotManagedUiPersistenceLiveState(evidence.Before);
 
         switch (phase)
@@ -1209,10 +1213,10 @@ public partial class App
                     IsAotManagedUiPersistenceBaseline(evidence.Before),
                     "PersistenceBaselineCaptured",
                     "The first process did not start from the seeded persistence baseline.");
-                settingsViewModel.ShowFileExtensions = true;
-                settingsViewModel.FileNameLineCount = SettingsService.MinFileNameLineCount;
-                settingsViewModel.TextSize = AotManagedUiMutatedTextSize;
-                settingsViewModel.SelectedTrayIconStyle =
+                fileDisplaySettings.ShowFileExtensions = true;
+                appearanceSettings.FileNameLineCount = SettingsService.MinFileNameLineCount;
+                appearanceSettings.TextSize = AotManagedUiMutatedTextSize;
+                appearanceSettings.TrayIconStyle =
                     AotManagedUiMutatedTrayIconStyle;
                 await manager.ApplyAotPersistenceFileWidgetMutationAsync(
                     AotManagedUiFileWidgetId,
@@ -1228,10 +1232,10 @@ public partial class App
                     IsAotManagedUiPersistenceMutation(evidence.Before),
                     "PersistenceRestartVerified",
                     "The second process did not reload every mutated settings and widget field.");
-                settingsViewModel.ShowFileExtensions = false;
-                settingsViewModel.FileNameLineCount = SettingsService.DefaultFileNameLineCount;
-                settingsViewModel.TextSize = AotManagedUiBaselineTextSize;
-                settingsViewModel.SelectedTrayIconStyle =
+                fileDisplaySettings.ShowFileExtensions = false;
+                appearanceSettings.FileNameLineCount = SettingsService.DefaultFileNameLineCount;
+                appearanceSettings.TextSize = AotManagedUiBaselineTextSize;
+                appearanceSettings.TrayIconStyle =
                     AotManagedUiBaselineTrayIconStyle;
                 await manager.RestoreAotPersistenceFileWidgetBaselineAsync(
                     AotManagedUiFileWidgetId,
@@ -1264,7 +1268,8 @@ public partial class App
         await Task.Delay(150);
         evidence.After = CaptureAotManagedUiPersistenceState(
             manager,
-            settingsViewModel);
+            fileDisplaySettings,
+            appearanceSettings);
         RequireAotManagedUiPersistenceLiveState(evidence.After);
 
         bool expectedAfterState = phase switch
@@ -1284,7 +1289,8 @@ public partial class App
 
     private AotManagedUiPersistenceStateEvidence CaptureAotManagedUiPersistenceState(
         WidgetManager manager,
-        SettingsViewModel settingsViewModel)
+        DeskBox.Features.FileDisplay.FileDisplaySettingsViewModel fileDisplaySettings,
+        DeskBox.Features.Appearance.AppearanceSettingsViewModel appearanceSettings)
     {
         AppSettings settings = SettingsService.Settings;
         return new AotManagedUiPersistenceStateEvidence
@@ -1293,10 +1299,10 @@ public partial class App
             FileNameLineCount = settings.FileNameLineCount,
             TextSize = settings.TextSize,
             TrayIconStyle = settings.TrayIconStyle ?? string.Empty,
-            ViewModelShowFileExtensions = settingsViewModel.ShowFileExtensions,
-            ViewModelFileNameLineCount = settingsViewModel.FileNameLineCount,
-            ViewModelTextSize = settingsViewModel.TextSize,
-            ViewModelTrayIconStyle = settingsViewModel.SelectedTrayIconStyle,
+            ViewModelShowFileExtensions = fileDisplaySettings.ShowFileExtensions,
+            ViewModelFileNameLineCount = appearanceSettings.FileNameLineCount,
+            ViewModelTextSize = appearanceSettings.TextSize,
+            ViewModelTrayIconStyle = appearanceSettings.TrayIconStyle,
             FileWidget = MapAotManagedUiPersistenceWidget(
                 manager.CaptureAotPersistenceWidgetSnapshot(AotManagedUiFileWidgetId)),
             SearchWidget = MapAotManagedUiPersistenceWidget(

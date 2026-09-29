@@ -161,14 +161,14 @@ public sealed class WidgetCompactExpansionDirectionPolicyTests
     {
         string xaml = File.ReadAllText(TestPaths.FromRepository(
             "src/DeskBox/Views/SettingsSections/CapsuleModeSettingsSection.xaml"));
-        string viewModel = File.ReadAllText(TestPaths.FromRepository(
-            "src/DeskBox/ViewModels/SettingsViewModel.CapsuleOptions.cs"));
+        string contracts = File.ReadAllText(TestPaths.FromRepository(
+            "src/DeskBox/Contracts/CapsuleOptionKinds.cs"));
 
         Assert.Contains("Settings.Capsule.ExpansionDirection.Title", xaml, StringComparison.Ordinal);
-        Assert.Contains("AvailableWidgetCompactExpansionDirectionOptions", xaml, StringComparison.Ordinal);
-        Assert.Contains("SelectedWidgetCompactExpansionDirection, Mode=TwoWay", xaml, StringComparison.Ordinal);
-        Assert.Contains("WidgetCompactExpansionDirectionAuto", viewModel, StringComparison.Ordinal);
-        Assert.Contains("WidgetCompactExpansionDirectionDown", viewModel, StringComparison.Ordinal);
-        Assert.Contains("WidgetCompactExpansionDirectionUp", viewModel, StringComparison.Ordinal);
+        Assert.Contains("AvailableExpansionDirectionOptions", xaml, StringComparison.Ordinal);
+        Assert.Contains("controls:SettingsComboBox.Value=\"{Binding ExpansionDirection, Mode=TwoWay}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("ExpansionDirectionAuto", contracts, StringComparison.Ordinal);
+        Assert.Contains("ExpansionDirectionDown", contracts, StringComparison.Ordinal);
+        Assert.Contains("ExpansionDirectionUp", contracts, StringComparison.Ordinal);
     }
 }

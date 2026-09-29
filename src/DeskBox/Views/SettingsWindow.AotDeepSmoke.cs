@@ -143,7 +143,7 @@ public sealed partial class SettingsWindow
                 FileStackRulesListView.ItemsSource is System.Collections.IEnumerable items
                     ? items.Cast<object>().OfType<FileStackCustomRuleEditor>().ToList()
                     : [];
-            if (projectedRules.Count == ViewModel.FileStackCustomRules.Count &&
+            if (projectedRules.Count == _fileStackSettingsViewModel.CustomRules.Count &&
                 projectedRules.Count > 0 &&
                 FileStackRulesListView.ContainerFromIndex(0) is FrameworkElement
                 {

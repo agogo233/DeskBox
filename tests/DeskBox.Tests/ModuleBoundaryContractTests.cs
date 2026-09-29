@@ -1,4 +1,4 @@
-using System.Text.RegularExpressions;
+﻿using System.Text.RegularExpressions;
 using System.Reflection;
 using System.Reflection.Emit;
 using DeskBox.Models;
@@ -238,10 +238,12 @@ public sealed class ModuleBoundaryContractTests
     {
         string[] paths =
         [
-            "src/DeskBox/ViewModels/SettingsViewModel.DataBackupOptions.cs",
-            "src/DeskBox/ViewModels/SettingsViewModel.CloudBackupOptions.cs",
+            // Batch 49 deleted the shell backup option partials (the
+            // binding surface lives on the backup editor now).
             "src/DeskBox/Views/SettingsWindow.CloudBackup.cs",
             "src/DeskBox/Features/Backup/BackupSettingsViewModel.cs",
+            "src/DeskBox/Features/Backup/BackupSettingsViewModel.SettingsSurface.cs",
+            "src/DeskBox/Features/Backup/CloudBackupRemoteSnapshotItem.cs",
             "src/DeskBox/Services/BackupSettingsCoordinator.cs",
             "src/DeskBox/Services/BackupRestoreActions.cs"
         ];
@@ -260,7 +262,22 @@ public sealed class ModuleBoundaryContractTests
         {
             "src/DeskBox/Features/QuickCapture/QuickCaptureClipboardRuntime.cs",
             "src/DeskBox/Services/QuickCaptureSettingsCoordinator.cs",
-            "src/DeskBox/ViewModels/SettingsViewModel.QuickCaptureSettings.cs"
+            "src/DeskBox/ViewModels/SettingsViewModel.QuickCaptureSettings.cs",
+            // Batch 46: the enablement/recording switch chain (the old
+            // OnQuickCapture*Changed partials) lives on the section editor.
+            "src/DeskBox/Features/QuickCapture/QuickCaptureSettingsViewModel.cs",
+            // Batch 47: the Todo switch chain (the old OnTodo*Changed
+            // partials) lives on the Todo section editor as well.
+            "src/DeskBox/Services/TodoSettingsCoordinator.cs",
+            "src/DeskBox/Features/Todo/TodoSettingsViewModel.cs",
+            // Batch 48: the Weather section's binding surface (incl. the
+            // pushed city-search projection) lives on the section editor.
+            "src/DeskBox/Features/Weather/WeatherSettingsViewModel.cs",
+            // Batch 50: the performance section's binding surface (incl. the
+            // three working-set trim switches whose change handlers replaced
+            // the old On*Changed partials) lives on the section editor.
+            "src/DeskBox/Features/Performance/PerformanceSettingsViewModel.cs",
+            "src/DeskBox/Services/PerformanceSettingsCoordinator.cs"
         })
         {
             string source = ProductionSource().Single(item => item.Path == path).Source;
@@ -268,14 +285,16 @@ public sealed class ModuleBoundaryContractTests
             Assert.DoesNotContain("IServiceProvider", source, StringComparison.Ordinal);
         }
 
-        string callbacks = ProductionSource().Single(item =>
-            item.Path == "src/DeskBox/ViewModels/SettingsViewModel.FeatureCallbacks.cs").Source;
-        string enablement = callbacks[callbacks.IndexOf("partial void OnQuickCaptureEnabledChanged", StringComparison.Ordinal)..
-            callbacks.IndexOf("partial void OnQuickCaptureShowTabBarChanged", StringComparison.Ordinal)];
-        string recording = callbacks[callbacks.IndexOf("partial void OnQuickCaptureClipboardEnabledChanged", StringComparison.Ordinal)..
-            callbacks.IndexOf("partial void OnQuickCaptureRecentLimitChanged", StringComparison.Ordinal)];
-        Assert.DoesNotContain("App.Current", enablement, StringComparison.Ordinal);
-        Assert.DoesNotContain("App.Current", recording, StringComparison.Ordinal);
+        // Batch 47 deleted the shell callback partials entirely (both the
+        // Quick Capture and the Todo chains now live on their editors).
+        Assert.DoesNotContain(
+            "src/DeskBox/ViewModels/SettingsViewModel.FeatureCallbacks.cs",
+            ProductionSource().Select(item => item.Path),
+            StringComparer.Ordinal);
+        Assert.DoesNotContain("partial void OnTodo",
+            ProductionSource().Single(item =>
+                item.Path == "src/DeskBox/ViewModels/SettingsViewModel.FeatureOptions.cs").Source,
+            StringComparison.Ordinal);
     }
 
     [Fact]
@@ -488,6 +507,12 @@ public sealed class ModuleBoundaryContractTests
     private static readonly string[] LegacyModelsUiExpectedFiles =
     {
         "src/DeskBox/Models/GlanceWidgetData.cs",
+        // Batch 44 moved the settings-section projection records (widget
+        // groups and capsule overrides) from the settings-shell partials
+        // into Models so the WinUI-free editors can expose them as pushed
+        // binding surfaces; they keep the WinRT bindable attribute.
+        "src/DeskBox/Models/CapsuleOverrideSettingsItem.cs",
+        "src/DeskBox/Models/WidgetGroupSettingsItems.cs",
         "src/DeskBox/Models/SearchModels.cs",
         "src/DeskBox/Models/SettingsOption.cs",
         "src/DeskBox/Models/WeatherData.cs",

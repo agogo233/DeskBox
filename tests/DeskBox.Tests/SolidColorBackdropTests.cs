@@ -1,4 +1,4 @@
-using DeskBox.Services;
+﻿using DeskBox.Services;
 
 namespace DeskBox.Tests;
 
@@ -101,10 +101,12 @@ public sealed class SolidColorBackdropTests
         string compatibility = File.ReadAllText(TestPaths.FromRepository(
             "src/DeskBox/Services/WindowsCompatibilityService.cs"));
 
-        Assert.Contains("WindowsCompatibilityService.IsWindows11OrLater", featureOptions, StringComparison.Ordinal);
-        Assert.Contains("[MaterialAcrylic, MaterialAcrylicBase, MaterialSolid]", featureOptions, StringComparison.Ordinal);
-        Assert.Contains("IsOpen=\"{Binding IsWindows10VisualCompatibilityMode}\"", settingsWindow, StringComparison.Ordinal);
-        Assert.Contains("IsEnabled=\"{Binding SupportsNativeWidgetCorners}\"", settingsWindow, StringComparison.Ordinal);
+        string appearanceOptions = File.ReadAllText(TestPaths.FromRepository(
+            "src/DeskBox/ViewModels/SettingsViewModel.AppearanceOptions.cs"));
+        Assert.Contains("WindowsCompatibilityService.IsWindows11OrLater", appearanceOptions, StringComparison.Ordinal);
+        Assert.Contains("SettingsService.WidgetMaterialTypeSolid", appearanceOptions, StringComparison.Ordinal);
+        Assert.Contains("IsOpen=\"{Binding Windows10Compatibility}\"", settingsWindow, StringComparison.Ordinal);
+        Assert.Contains("IsEnabled=\"{Binding NativeCornersSupported}\"", settingsWindow, StringComparison.Ordinal);
         Assert.Contains("ResolveWidgetMaterialType", backdrop, StringComparison.Ordinal);
         Assert.Contains("ApplyAcrylicController", backdrop, StringComparison.Ordinal);
         Assert.Contains("WindowsCompatibilityService.SupportsDesktopAcrylic", backdrop, StringComparison.Ordinal);

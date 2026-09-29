@@ -23,7 +23,7 @@ public sealed class CapsuleSettingsCoordinatorTests : IDisposable
     {
         var settings = new SettingsService(_root);
         var coordinator = new CapsuleSettingsCoordinator(settings);
-        var editor = new CapsuleSettingsViewModel(coordinator);
+        var editor = new CapsuleSettingsViewModel(coordinator, _ => _, (_, args) => string.Empty);
         int notified = 0;
         settings.SettingsChanged += () => notified++;
 

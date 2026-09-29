@@ -23,7 +23,7 @@ public sealed class FeatureWidgetsSettingsCoordinatorTests : IDisposable
     {
         var settings = new SettingsService(_root);
         var coordinator = new FeatureWidgetsSettingsCoordinator(settings);
-        var editor = new FeatureWidgetsSettingsViewModel(coordinator);
+        var editor = new FeatureWidgetsSettingsViewModel(coordinator, _ => throw new InvalidOperationException("unexpected localization"));
         int notified = 0;
         settings.SettingsChanged += () => notified++;
 

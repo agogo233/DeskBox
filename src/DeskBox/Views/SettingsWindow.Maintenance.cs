@@ -353,7 +353,7 @@ public sealed partial class SettingsWindow
             return;
         }
 
-        if (!ViewModel.IsValidAutomaticBackupDirectory(
+        if (!_backupSettingsViewModel.IsValidLocalDirectory(
                 folderPath,
                 out string? rejectionReasonKey))
         {
@@ -363,13 +363,13 @@ public sealed partial class SettingsWindow
             return;
         }
 
-        ViewModel.UpdateAutomaticBackupDirectory(folderPath);
+        _backupSettingsViewModel.UpdateLocalDirectory(folderPath);
         await RefreshBackupSnapshotInventoryAsync();
     }
 
     private async void ResetAutomaticBackupDirectoryButton_Click(object sender, RoutedEventArgs e)
     {
-        ViewModel.UpdateAutomaticBackupDirectory(string.Empty);
+        _backupSettingsViewModel.UpdateLocalDirectory(string.Empty);
         await RefreshBackupSnapshotInventoryAsync();
     }
 

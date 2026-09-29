@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Collections.ObjectModel;
 using System.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -14,11 +14,40 @@ namespace DeskBox.ViewModels;
 
 public partial class SettingsViewModel
 {
-    private void OnLanguageChanged()
-    {
-        RefreshLocalizedProperties();
-        _musicSettings.RefreshLocalization();
-    }
+private void OnLanguageChanged()
+{
+    RefreshLocalizedProperties();
+    _musicSettings.RefreshLocalization();
+    _interactionSettings.RefreshLocalization();
+    _interactionSettings.UpdateHoverButtonActionsSummary(BuildHoverButtonActionsSummary());
+    RefreshGlobalHotkeyState();
+    // The managed-storage editor's option list re-localizes itself and
+    // the quick-access card is re-pushed in the new language.
+    _managedStorageSettings.RefreshLocalization();
+    PushQuickAccessPresentation();
+    // The appearance editor's option tables and value texts re-localize
+    // themselves. The group-navigation and capsule editors rebuild their
+    // option tables too; their pushed projections (existing groups, override
+    // lists/summaries) are rebuilt by the notify calls below.
+    _appearanceSettings.RefreshLocalization();
+    _groupNavigationSettings.RefreshLocalization();
+    _capsuleSettings.RefreshLocalization();
+    RefreshWidgetGroupSettings();
+    // The Quick Capture editor re-localizes its option tables, summaries and
+    // the clipboard-diagnostics line (batch 46); the Todo editor rebuilds
+    // its option tables, summaries and tab texts (batch 47); the Weather
+    // editor rebuilds its option tables, summary, placeholder and no-results
+    // text, and its suggestion list is dropped so the popular cities
+    // repopulate in the new language (batch 48).
+    _quickCaptureSettingsEditor.RefreshLocalization();
+    _todoSettings.RefreshLocalization();
+    _weatherSettings.RefreshLocalization();
+    _weatherSettings.ClearCitySuggestions();
+    // The performance editor's option tables and the decorative-animation
+    // summary re-localize themselves (batch 50).
+    _performanceSettings.RefreshLocalization();
+}
+
 
     private void OnSettingsChanged()
     {
@@ -40,168 +69,78 @@ public partial class SettingsViewModel
         _isRestoringDefaults = true;
         try
         {
-            SelectedTheme = settings.Theme is ThemeLight or ThemeDark ? settings.Theme : ThemeSystem;
-            SelectedTrayIconStyle = settings.TrayIconStyle is TrayIconStyleColorful or TrayIconStyleBlack or TrayIconStyleWhite
-                ? settings.TrayIconStyle
-                : TrayIconStyleSystem;
             SelectedLanguage = LocalizationService.NormalizeLanguageSetting(settings.Language);
+            AutoCheckForUpdates = settings.AutoCheckForUpdates;
+            ShowHoverButtons = settings.ShowHoverButtons;
+            ApplyHoverButtonActionSelection(settings.WidgetHoverButtonActions);
+
+            // The file-stack section (including its custom-rule collection)
+            // and the file-widget overview's folder-open combo live on their
+            // section editors now: re-project from the coordinator snapshots
+            // instead of assigning shell facade properties.
+            _fileStackSettings.SyncPresentation();
+            _featureWidgetsSettings.SyncPresentation();
+
+            // The Quick Capture section's whole presentation lives on its
+            // editor (batch 46): re-project from the coordinator snapshots.
+            _quickCaptureSettingsEditor.SyncPresentation();
+            // The performance section's whole presentation (incl. the three
+            // working-set trim switches) and the General section's
+            // attachment-storage combo live on their editors now (batch 50):
+            // re-project from the coordinator read snapshots.
+            _performanceSettings.SyncPresentation();
+
+            // The Todo section's whole presentation lives on its editor
+            // (batch 47); the Weather section's whole presentation lives on
+            // its editor (batch 48): re-project from the coordinator
+            // snapshots instead of assigning shell facade properties.
+            _todoSettings.Refresh();
+            _weatherSettings.Refresh();
+
+            // Appearance presentation (material, density, window chrome, animation,
+            // foreground, tray icon style) lives on the appearance editor now;
+            // the shell only re-projects the selections whose state machines
+            // stay here (theme, accent mode/effective color, group-nav).
+            _appearanceSettings.SyncPresentation();
+            PushAppearanceThemeSelection();
             UseSystemAccentColor = !string.Equals(
                 settings.AccentColorMode,
                 ThemeService.AccentModeCustom,
                 StringComparison.OrdinalIgnoreCase);
+            PushAppearanceAccentPresentation();
 
-            AutoCheckForUpdates = settings.AutoCheckForUpdates;
-            DoubleClickToOpen = settings.DoubleClickToOpen;
-            FileItemSystemContextMenuEnabled = settings.FileItemSystemContextMenuEnabled;
-            SelectedFileWidgetFolderOpenBehavior =
-                FileWidgetFolderOpenBehaviorNames.NormalizeGlobal(
-                    settings.FileWidgetFolderOpenBehavior);
-            DefaultWidth = settings.DefaultWidgetWidth;
-            DefaultHeight = settings.DefaultWidgetHeight;
-            HideShortcutArrowOverlay = settings.HideShortcutArrowOverlay;
-            ShowImageFilesAsIcons = settings.ShowImageFilesAsIcons;
-            ShowHoverButtons = settings.ShowHoverButtons;
-            ResizeSnapEnabled = settings.ResizeSnapEnabled;
-            WidgetSnapSpacing = SettingsService.NormalizeWidgetSnapSpacing(
-                settings.WidgetSnapSpacing);
-            KeepWidgetsVisibleOnShowDesktop = settings.KeepWidgetsVisibleOnShowDesktop;
-            ShowListItemDetails = settings.ShowListItemDetails;
-            ShowFileItemPathTooltips = settings.ShowFileItemPathTooltips;
-            ApplyHoverButtonActionSelection(settings.WidgetHoverButtonActions);
+            // The group-navigation defaults and the capsule family's whole
+            // presentation live on their section editors now: re-project them
+            // from the coordinator snapshots instead of assigning shell
+            // facade properties.
+            _groupNavigationSettings.SyncPresentation();
+            _capsuleSettings.SyncPresentation();
 
-            WidgetOpacity = settings.WidgetOpacity;
-            WidgetMaterialIntensity = settings.WidgetMaterialIntensity;
-            ApplyWidgetForegroundSettingsSnapshot(settings);
-            SelectedWidgetCornerPreference = WindowsCompatibilityService.ResolveEffectiveWidgetCornerPreference(
-                settings.WidgetCornerPreference);
-            SelectedWidgetMaterialType = WindowsCompatibilityService.ResolveWidgetMaterialType(
-                settings.WidgetMaterialType);
-            SelectedWidgetBorderColorMode = settings.WidgetBorderColorMode is BorderColorNeutral or BorderColorAccent or BorderColorNone
-                ? settings.WidgetBorderColorMode
-                : BorderColorNeutral;
-            SelectedWidgetBorderStyle = settings.WidgetBorderStyle is BorderThin or BorderMedium or BorderThick
-                ? settings.WidgetBorderStyle
-                : BorderThin;
-
-            SelectedWidgetCompactWidthMode = SettingsService.NormalizeWidgetCompactWidthMode(
-                settings.WidgetCompactWidthMode);
-            SelectedWidgetCompactExpansionDirection =
-                SettingsService.NormalizeWidgetCompactExpansionDirection(
-                    settings.WidgetCompactExpansionDirection);
-            SelectedWidgetCapsuleArrangementMode = SettingsService.NormalizeWidgetCapsuleArrangementMode(
-                settings.WidgetCapsuleArrangementMode);
-            WidgetCapsuleBarSpacing = SettingsService.NormalizeWidgetCapsuleBarSpacing(
-                settings.WidgetCapsuleBarSpacing);
-            SelectedWidgetCapsuleBarPlacement = SettingsService.NormalizeWidgetCapsuleBarPlacement(
-                settings.WidgetCapsuleBarPlacement);
-            SelectedWidgetCapsuleBarDirection = SettingsService.NormalizeWidgetCapsuleBarDirection(
-                settings.WidgetCapsuleBarDirection);
-            WidgetCompactHideSensitiveContent = settings.WidgetCompactHideSensitiveContent;
-            SelectedWidgetCollapseBehavior = SettingsService.NormalizeWidgetCollapseBehavior(
-                settings.WidgetCollapseBehavior);
-            SelectedWidgetCompactContentMode = SettingsService.NormalizeWidgetCompactContentMode(settings.WidgetCompactContentMode);
-            SelectedWidgetCompactAnimationEffect = SettingsService.NormalizeWidgetCompactAnimationEffect(settings.WidgetCompactAnimationEffect);
-            WidgetCompactAnimationDurationMs = SettingsService.NormalizeWidgetCompactAnimationDurationMs(settings.WidgetCompactAnimationDurationMs);
-            WidgetCompactExpandDelayMs = SettingsService.NormalizeWidgetCompactExpandDelayMs(settings.WidgetCompactExpandDelayMs);
-            WidgetCompactCollapseDelayMs = SettingsService.NormalizeWidgetCompactCollapseDelayMs(settings.WidgetCompactCollapseDelayMs);
-            SelectedWidgetCompactHoverResponse = SettingsService.ResolveWidgetCompactHoverResponse(
-                settings.WidgetCompactExpandDelayMs,
-                settings.WidgetCompactCollapseDelayMs);
-            SelectedWidgetCompactMediaCornerMode = SettingsService.NormalizeWidgetCompactMediaCornerMode(settings.WidgetCompactMediaCornerMode);
-
-            SelectedWidgetAnimationEffect = NormalizeWidgetAnimationEffect(settings.WidgetAnimationEffect);
-            SelectedWidgetAnimationSpeed = NormalizeWidgetAnimationSpeed(settings.WidgetAnimationSpeed);
-            SelectedWidgetAnimationSlideDirection = NormalizeWidgetAnimationSlideDirection(settings.WidgetAnimationSlideDirection);
-            SelectedWidgetAnimationEasingIntensity = NormalizeWidgetAnimationEasingIntensity(settings.WidgetAnimationEasingIntensity);
-            SelectedAnimationPreset = ResolveAnimationPreset();
-            SelectedDisplayWidgetChromeMode = NormalizeWidgetChromeModeSetting(
-                settings.DisplayWidgetChromeMode,
-                WidgetChromeMode.Overlay);
-            SelectedInteractiveWidgetChromeMode = NormalizeWidgetChromeModeSetting(
-                settings.InteractiveWidgetChromeMode,
-                WidgetChromeMode.Standard);
-            SelectedWidgetTitleIconMode = NormalizeWidgetTitleIconModeSetting(settings.WidgetTitleIconMode);
-            SelectedWidgetLayerMode = SettingsService.NormalizeWidgetLayerModeSetting(settings.WidgetLayerMode);
-
-            IconSize = settings.IconSize;
-            TextSize = settings.TextSize;
-            LayoutDensityScale = settings.LayoutDensityScale;
-            HorizontalSpacingScale = settings.HorizontalSpacingScale;
-            VerticalSpacingScale = settings.VerticalSpacingScale;
-            FileNameWidthScale = settings.FileNameWidthScale;
-            FileNameLineCount = SettingsService.NormalizeFileNameLineCount(settings.FileNameLineCount);
-            SelectedLayoutDensity = SettingsService.ResolveLayoutDensityPreset(settings);
-            ShowFileExtensions = settings.ShowFileExtensions;
-            HideShortcutExtensionWhenShowingFileExtensions = settings.HideShortcutExtensionWhenShowingFileExtensions;
-            IdleWorkingSetTrimEnabled = settings.IdleWorkingSetTrimEnabled;
-            ImmediateHiddenWorkingSetTrimEnabled = settings.ImmediateHiddenWorkingSetTrimEnabled;
-            QuiescenceWorkingSetTrimEnabled = settings.Performance.QuiescenceWorkingSetTrimEnabled;
-
-            ApplyContentEditorSettingsSnapshot(settings);
-            ApplyFileStackSettingsSnapshot(settings);
-
-            SyncQuickCaptureSettingsFacade();
-            SyncQuickCapturePresentationFacade();
-            SyncQuickCaptureRecentLimitFacade();
-            SyncQuickCaptureTextSizeFacade();
-            SelectedAttachmentStorageMode = SettingsService.NormalizeAttachmentStorageMode(settings.AttachmentStorageMode);
-            ApplyPerformanceSettingsSnapshot(settings);
-            SelectedManagedDropAction = settings.ManagedDropAction switch
-            {
-                SettingsService.ManagedDropActionMove =>
-                    SettingsService.ManagedDropActionMove,
-                SettingsService.ManagedDropActionFollowWindows =>
-                    SettingsService.ManagedDropActionFollowWindows,
-                SettingsService.ManagedDropActionShortcutOutsideDesktop =>
-                    SettingsService.ManagedDropActionShortcutOutsideDesktop,
-                _ => SettingsService.ManagedDropActionCopy
-            };
-            SyncQuickCaptureTabsFacade();
-
-            _todoSettings.Refresh();
-            SyncTodoTabFacade();
-            SyncTodoDisplayFacade();
-            SyncTodoTextSizeFacade();
-            TodoUseWideDetailPane = _todoSettings.LayoutMode != SettingsService.TodoLayoutModeSinglePane;
-            TodoAutoSelectFirstInWideLayout = _todoSettings.AutoSelectFirstInWideLayout;
 
             // Music presentation lives on the section editor now: refresh the
             // editor projection instead of assigning shell facade properties.
             _musicSettings.SyncPresentation();
 
-            WeatherAutoLocation = settings.WeatherAutoLocation;
-            WeatherCityName = settings.WeatherCityName;
-            WeatherCitySearchText = settings.WeatherCityName;
-            SelectedWeatherTemperatureUnit = settings.WeatherTemperatureUnit == SettingsService.WeatherTemperatureUnitFahrenheit
-                ? SettingsService.WeatherTemperatureUnitFahrenheit
-                : SettingsService.WeatherTemperatureUnitCelsius;
-            SelectedWeatherWindSpeedUnit = settings.WeatherWindSpeedUnit is SettingsService.WeatherWindSpeedUnitMs or SettingsService.WeatherWindSpeedUnitMph
-                ? settings.WeatherWindSpeedUnit
-                : SettingsService.WeatherWindSpeedUnitKmh;
-            SelectedWeatherDefaultView = settings.WeatherDefaultView == SettingsService.WeatherDefaultViewWeek
-                ? SettingsService.WeatherDefaultViewWeek
-                : SettingsService.WeatherDefaultViewToday;
-            SelectedWeatherSkin = settings.WeatherSkin == SettingsService.WeatherSkinRich
-                ? SettingsService.WeatherSkinRich
-                : SettingsService.WeatherSkinStandard;
-            SelectedWeatherDataSource = settings.WeatherDataSource == SettingsService.WeatherDataSourceOpenMeteo
-                ? SettingsService.WeatherDataSourceOpenMeteo
-                : SettingsService.WeatherDataSourceMsn;
-            WeatherShowForecast = settings.WeatherShowForecast;
-            WeatherShowSunrise = settings.WeatherShowSunrise;
-            WeatherShowUvIndex = settings.WeatherShowUvIndex;
-            WeatherShowPrecipitation = settings.WeatherShowPrecipitation;
-            WeatherShowHumidity = settings.WeatherShowHumidity;
-            WeatherShowWind = settings.WeatherShowWind;
-            WeatherShowPressure = settings.WeatherShowPressure;
-            SelectedWeatherRefreshInterval = Math.Clamp(
-                settings.WeatherRefreshIntervalMinutes,
-                SettingsService.WeatherRefreshMinMinutes,
-                SettingsService.WeatherRefreshMaxMinutes);
+            // Interaction presentation (layer mode, snap enable/spacing,
+            // open method, show-desktop behavior) lives on the section
+            // editor now; the pushed hover summary follows the flyout state
+            // re-projection above.
+            _interactionSettings.SyncPresentation();
+            _interactionSettings.UpdateHoverButtonActionsSummary(BuildHoverButtonActionsSummary());
+
+            // The file-display and managed-storage section presentation
+            // (batch 48 note: the weather snapshot block that used to live
+            // here moved into the weather editor's Refresh above), the
+            // file-display and managed-storage editors' presentation live on
+            // their section editors now: refresh the editor projections
+            // instead of assigning shell facade properties. The root-path
+            // working state below still feeds the shell's picker /
+            // migration / quick-access chains.
+            _fileDisplaySettings.SyncPresentation();
+            _managedStorageSettings.SyncPresentation();
 
             ManagedStorageRootPath = SettingsService.NormalizeManagedStorageRootPath(settings.DefaultManagedStorageRootPath);
             _backupSettings.RefreshState();
-            GlobalHotkeyEnabled = settings.GlobalHotkeyEnabled;
         }
         finally
         {
@@ -209,14 +148,8 @@ public partial class SettingsViewModel
             _isRestoringDefaults = wasRestoringDefaults;
         }
 
-        RefreshNumberInputs();
         RefreshSelectionProperties(refreshLocalizedOptions: false);
         RefreshGlobalHotkeyState();
-        OnPropertyChanged(nameof(CanEditCustomAccent));
-        OnPropertyChanged(nameof(AccentColorDescription));
-        OnPropertyChanged(nameof(WeatherCityNameVisibility));
-        OnPropertyChanged(nameof(QuickCaptureStatusText));
-        OnPropertyChanged(nameof(QuickCaptureDependencyStatusText));
         OnPropertyChanged(nameof(FeatureWidgetEntries));
         NotifyCapsuleOverridePropertiesChanged();
         RefreshQuickCaptureClipboardDiagnostics();
@@ -226,7 +159,6 @@ public partial class SettingsViewModel
     private void RefreshLocalizedProperties()
     {
         RefreshSelectionProperties(refreshLocalizedOptions: true);
-        OnPropertyChanged(nameof(AccentColorDescription));
         OnPropertyChanged(nameof(DistributionChannelText));
         OnPropertyChanged(nameof(OfficialWebsiteDisplayText));
         OnPropertyChanged(nameof(OpenSourceRepositoryDisplayText));
@@ -244,29 +176,19 @@ public partial class SettingsViewModel
                 UpdateDetailText = GetReadyUpdateDetailText();
             }
         }
-        OnPropertyChanged(nameof(QuickAccessStatusText));
-        OnPropertyChanged(nameof(PinQuickAccessButtonText));
-        OnPropertyChanged(nameof(PinQuickAccessToolTipText));
         OnPropertyChanged(nameof(AutoStartStatusText));
         OnPropertyChanged(nameof(AvailableAutoStartModeOptions));
-        OnPropertyChanged(nameof(GlobalHotkeyDescription));
-        OnPropertyChanged(nameof(GlobalHotkeyWarningText));
-        OnPropertyChanged(nameof(GlobalHotkeyText));
-        OnPropertyChanged(nameof(GlobalHotkeyStatusText));
-        OnPropertyChanged(nameof(GlobalHotkeyStatusKind));
-        OnPropertyChanged(nameof(CanShowGlobalHotkeyWarning));
-        NotifyDragDropPermissionPropertiesChanged();
-        OnPropertyChanged(nameof(QuickCaptureStatusText));
-        OnPropertyChanged(nameof(QuickCaptureDependencyStatusText));
-        OnPropertyChanged(nameof(QuickCaptureRecentLimitText));
+        // The global-hotkey card text lives on the interaction editor now;
+        // the shell refreshes it through the editor push instead of shell
+        // property notifications.
+        // The drag-drop diagnostic texts re-localize through the editor
+        // push (batch 49), not through shell property notifications.
+        PushDragDropDiagnosticProjection();
         OnPropertyChanged(nameof(FeatureWidgetEntries));
         NotifyCapsuleOverridePropertiesChanged();
-        OnPropertyChanged(nameof(AvailableWidgetGroupNavigationStyleOptions));
-        OnPropertyChanged(nameof(AvailableWidgetGroupTitleDisplayModeOptions));
+        // The group-navigation editor rebuilds its option tables itself; the
+        // existing-groups projection rebuild follows.
         RefreshWidgetGroupSettings();
-        OnPropertyChanged(nameof(WeatherCitySearchPlaceholder));
-        OnPropertyChanged(nameof(WeatherCityNoResultsText));
-        RefreshWeatherCityPopularCities();
         RefreshQuickCaptureClipboardDiagnostics();
     }
 
@@ -276,170 +198,22 @@ public partial class SettingsViewModel
         // WinUI reset every bound ComboBox.SelectedIndex to -1.
         if (refreshLocalizedOptions)
         {
-            RefreshFileStackSelectionProperties();
-            _cachedThemeDisplayNames = null;
-            _cachedTrayIconStyleDisplayNames = null;
+            // The file-stack option tables, rule priorities, preview texts
+            // and the overview summary re-project in the new language
+            // through the section editor (batch 45).
+            _fileStackSettings.RefreshLocalization();
+            _featureWidgetsSettings.RefreshLocalization();
+            // The backup family's option tables and status lines live on the
+            // backup editor now (batch 49); its localization refresh clears
+            // the display-name caches and re-projects the pushed texts.
+            _backupSettings.RefreshLocalization();
             _cachedLanguageDisplayNames = null;
-            _cachedWidgetCornerPreferenceDisplayNames = null;
-            _cachedWidgetMaterialTypeDisplayNames = null;
-            _cachedWidgetBorderColorModeDisplayNames = null;
-            _cachedWidgetBorderStyleDisplayNames = null;
-            _cachedWidgetCollapseBehaviorDisplayNames = null;
-            _cachedWidgetCompactContentModeDisplayNames = null;
-            _cachedWidgetCompactWidthModeDisplayNames = null;
-            _cachedWidgetCompactExpansionDirectionDisplayNames = null;
-            _cachedWidgetCapsuleArrangementDisplayNames = null;
-            _cachedWidgetCapsuleBarPlacementDisplayNames = null;
-            _cachedWidgetCapsuleBarDirectionDisplayNames = null;
-            _cachedWidgetCompactAnimationEffectDisplayNames = null;
-            _cachedWidgetCompactHoverResponseDisplayNames = null;
-            _cachedWidgetCompactMediaCornerDisplayNames = null;
-            _cachedLayoutDensityDisplayNames = null;
-            _cachedAnimationPresetDisplayNames = null;
-            _cachedWidgetAnimationEffectDisplayNames = null;
-            _cachedWidgetAnimationSpeedDisplayNames = null;
-            _cachedWidgetAnimationSlideDirectionDisplayNames = null;
-            _cachedWidgetAnimationEasingIntensityDisplayNames = null;
-            _cachedDisplayWidgetChromeModeDisplayNames = null;
-            _cachedInteractiveWidgetChromeModeDisplayNames = null;
-            _cachedWidgetTitleIconModeDisplayNames = null;
-            _cachedWidgetLayerModeDisplayNames = null;
-            _cachedQuickCaptureDefaultViewDisplayNames = null;
-            _cachedQuickCaptureTabStyleDisplayNames = null;
-            _cachedTodoNewTaskPositionDisplayNames = null;
-            _cachedAttachmentStorageModeDisplayNames = null;
-            _cachedTodoDefaultFilterDisplayNames = null;
-            _cachedTodoLayoutModeDisplayNames = null;
-            _cachedTodoTabStyleDisplayNames = null;
-            _cachedTodoReminderOffsetDisplayNames = null;
-            _cachedWeatherTempUnitDisplayNames = null;
-            _cachedWeatherWindUnitDisplayNames = null;
-            _cachedWeatherDefaultViewDisplayNames = null;
-            _cachedWeatherSkinDisplayNames = null;
-            _cachedWeatherRefreshIntervalDisplayNames = null;
-            _cachedManagedDropActionDisplayNames = null;
-            _cachedAutomaticBackupIntervalDisplayNames = null;
-            _cachedAutomaticBackupRetentionDisplayNames = null;
-            OnPropertyChanged(nameof(AvailableThemeDisplayNames));
-            OnPropertyChanged(nameof(AvailableTrayIconStyleDisplayNames));
             OnPropertyChanged(nameof(AvailableLanguageDisplayNames));
-            OnPropertyChanged(nameof(AvailableWidgetCornerPreferenceDisplayNames));
-            OnPropertyChanged(nameof(AvailableWidgetMaterialTypeDisplayNames));
-            OnPropertyChanged(nameof(AvailableWidgetBorderColorModeDisplayNames));
-            OnPropertyChanged(nameof(AvailableWidgetBorderStyleDisplayNames));
-            OnPropertyChanged(nameof(AvailableWidgetCollapseBehaviorDisplayNames));
-            OnPropertyChanged(nameof(AvailableWidgetCompactWidthModeDisplayNames));
-            OnPropertyChanged(nameof(AvailableWidgetCompactExpansionDirectionDisplayNames));
-            OnPropertyChanged(nameof(AvailableWidgetCompactContentModeDisplayNames));
-            OnPropertyChanged(nameof(AvailableWidgetCapsuleArrangementDisplayNames));
-            OnPropertyChanged(nameof(AvailableWidgetCapsuleBarPlacementDisplayNames));
-            OnPropertyChanged(nameof(AvailableWidgetCapsuleBarDirectionDisplayNames));
-            OnPropertyChanged(nameof(AvailableWidgetCompactAnimationEffectDisplayNames));
-            OnPropertyChanged(nameof(AvailableWidgetCompactHoverResponseDisplayNames));
-            OnPropertyChanged(nameof(AvailableWidgetCompactMediaCornerDisplayNames));
-            OnPropertyChanged(nameof(AvailableLayoutDensityDisplayNames));
-            OnPropertyChanged(nameof(AvailableAnimationPresetDisplayNames));
-            OnPropertyChanged(nameof(AvailableWidgetAnimationEffectDisplayNames));
-            OnPropertyChanged(nameof(AvailableWidgetAnimationSpeedDisplayNames));
-            OnPropertyChanged(nameof(AvailableWidgetAnimationSlideDirectionDisplayNames));
-            OnPropertyChanged(nameof(AvailableWidgetAnimationEasingIntensityDisplayNames));
-            OnPropertyChanged(nameof(AvailableDisplayWidgetChromeModeDisplayNames));
-            OnPropertyChanged(nameof(AvailableInteractiveWidgetChromeModeDisplayNames));
-            OnPropertyChanged(nameof(AvailableWidgetTitleIconModeDisplayNames));
-            OnPropertyChanged(nameof(AvailableWidgetLayerModeDisplayNames));
-            OnPropertyChanged(nameof(AvailableQuickCaptureDefaultViewDisplayNames));
-            OnPropertyChanged(nameof(AvailableQuickCaptureTabStyleDisplayNames));
-            OnPropertyChanged(nameof(AvailableTodoNewTaskPositionDisplayNames));
-            OnPropertyChanged(nameof(AvailableAttachmentStorageModeDisplayNames));
-            OnPropertyChanged(nameof(AvailableManagedDropActionDisplayNames));
-            OnPropertyChanged(nameof(AvailableAutomaticBackupIntervalDisplayNames));
-            OnPropertyChanged(nameof(AvailableAutomaticBackupRetentionDisplayNames));
-            OnPropertyChanged(nameof(AvailableTodoDefaultFilterDisplayNames));
-            OnPropertyChanged(nameof(AvailableTodoTabStyleDisplayNames));
-            OnPropertyChanged(nameof(AvailableTodoReminderOffsetDisplayNames));
-            OnPropertyChanged(nameof(AvailableWeatherTemperatureUnitDisplayNames));
-            OnPropertyChanged(nameof(AvailableWeatherWindSpeedUnitDisplayNames));
-            OnPropertyChanged(nameof(AvailableWeatherDefaultViewDisplayNames));
-            OnPropertyChanged(nameof(AvailableWeatherSkinDisplayNames));
-            OnPropertyChanged(nameof(AvailableWeatherRefreshIntervalDisplayNames));
-            RefreshContentEditorLocalizedProperties();
             NotifySelectionOptionsChanged();
         }
 
-        RefreshWidgetForegroundSelectionProperties(refreshLocalizedOptions);
-        RefreshPerformanceSelectionProperties(refreshLocalizedOptions);
-
-        OnPropertyChanged(nameof(IsOpacitySliderEnabled));
-        OnPropertyChanged(nameof(WidgetOpacityVisibility));
-        OnPropertyChanged(nameof(MaterialIntensityVisibility));
-        OnPropertyChanged(nameof(WidgetTransparency));
-        OnPropertyChanged(nameof(IsWidgetBorderStyleEnabled));
-        OnPropertyChanged(nameof(SelectedThemeText));
-        OnPropertyChanged(nameof(SelectedTrayIconStyleText));
         OnPropertyChanged(nameof(SelectedLanguageText));
-        OnPropertyChanged(nameof(SelectedWidgetCornerPreferenceText));
-        OnPropertyChanged(nameof(SelectedWidgetMaterialTypeText));
-        OnPropertyChanged(nameof(Windows10VisualCompatibilityTitle));
-        OnPropertyChanged(nameof(Windows10VisualCompatibilityMessage));
-        OnPropertyChanged(nameof(SelectedWidgetBorderColorModeText));
-        OnPropertyChanged(nameof(SelectedWidgetBorderStyleText));
-        OnPropertyChanged(nameof(SelectedWidgetCollapseBehaviorText));
-        OnPropertyChanged(nameof(SelectedWidgetCompactWidthModeText));
-        OnPropertyChanged(nameof(SelectedWidgetCompactExpansionDirectionText));
-        OnPropertyChanged(nameof(IsSmartWidgetCollapseBehavior));
-        OnPropertyChanged(nameof(IsSmartWidgetCollapseBehaviorSelected));
-        OnPropertyChanged(nameof(CapsuleHoverResponseEntryVisibility));
-        OnPropertyChanged(nameof(CanOpenWidgetCompactHoverResponseDetails));
-        OnPropertyChanged(nameof(CanOpenWidgetCompactAnimationDetails));
-        OnPropertyChanged(nameof(SelectedWidgetCapsuleArrangementText));
-        OnPropertyChanged(nameof(IsWidgetCapsuleBarSelected));
-        OnPropertyChanged(nameof(IsWidgetCapsuleBarEnabled));
-        OnPropertyChanged(nameof(IsWidgetCapsuleBarSpacingEnabled));
-        OnPropertyChanged(nameof(CapsuleArrangementEntryVisibility));
-        OnPropertyChanged(nameof(WidgetCapsuleBarSpacingText));
-        OnPropertyChanged(nameof(SelectedWidgetCapsuleBarPlacementText));
-        OnPropertyChanged(nameof(SelectedWidgetCapsuleBarDirectionText));
-        OnPropertyChanged(nameof(CapsuleArrangementDetailsSummaryText));
-        OnPropertyChanged(nameof(SelectedWidgetCompactContentModeText));
-        OnPropertyChanged(nameof(SelectedWidgetCompactAnimationEffectText));
-        OnPropertyChanged(nameof(IsWidgetCompactAnimationCustom));
-        OnPropertyChanged(nameof(WidgetCompactAnimationCustomVisibility));
-        OnPropertyChanged(nameof(SelectedWidgetCompactHoverResponseText));
-        OnPropertyChanged(nameof(IsWidgetCompactHoverResponseCustom));
-        OnPropertyChanged(nameof(WidgetCompactHoverResponseCustomVisibility));
-        OnPropertyChanged(nameof(SelectedWidgetCompactMediaCornerText));
-        OnPropertyChanged(nameof(SelectedLayoutDensityText));
-        OnPropertyChanged(nameof(SelectedAnimationPresetText));
-        OnPropertyChanged(nameof(SelectedWidgetAnimationEffectText));
-        OnPropertyChanged(nameof(IsDirectionEnabled));
-        OnPropertyChanged(nameof(IsEasingEnabled));
-        OnPropertyChanged(nameof(IsSpeedEnabled));
-        OnPropertyChanged(nameof(SelectedWidgetAnimationSpeedText));
-        OnPropertyChanged(nameof(SelectedWidgetAnimationSlideDirectionText));
-        OnPropertyChanged(nameof(SelectedWidgetAnimationEasingIntensityText));
-        OnPropertyChanged(nameof(SelectedDisplayWidgetChromeModeText));
-        OnPropertyChanged(nameof(SelectedInteractiveWidgetChromeModeText));
-        OnPropertyChanged(nameof(SelectedWidgetTitleIconModeText));
-        OnPropertyChanged(nameof(SelectedWidgetLayerModeText));
         NotifyHoverButtonActionPropertiesChanged();
-        OnPropertyChanged(nameof(HoverButtonActionsSummaryText));
-        OnPropertyChanged(nameof(SelectedQuickCaptureDefaultViewText));
-        OnPropertyChanged(nameof(SelectedQuickCaptureTabStyleText));
-        OnPropertyChanged(nameof(SelectedTodoNewTaskPositionText));
-        OnPropertyChanged(nameof(SelectedTodoDefaultFilterText));
-        OnPropertyChanged(nameof(SelectedTodoTabStyleText));
-        OnPropertyChanged(nameof(SelectedTodoReminderOffsetMinutesText));
-        OnPropertyChanged(nameof(QuickCaptureLayoutSummaryText));
-        OnPropertyChanged(nameof(QuickCaptureTabStyleIndex));
-        RefreshQuickCaptureTabsPresentation();
-        RefreshQuickCaptureContentPresentation();
-        OnPropertyChanged(nameof(TodoLayoutSummaryText));
-        OnPropertyChanged(nameof(TodoWideOptionsVisibility));
-        OnPropertyChanged(nameof(TodoTabStyleIndex));
-        RefreshTodoTabsPresentation();
-        RefreshTodoContentPresentation();
-        OnPropertyChanged(nameof(TodoReminderSummaryText));
-        OnPropertyChanged(nameof(TodoFooterDisplaySummaryText));
-        OnPropertyChanged(nameof(WeatherDisplayOptionsSummaryText));
+        _interactionSettings.UpdateHoverButtonActionsSummary(BuildHoverButtonActionsSummary());
     }
 }

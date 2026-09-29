@@ -1,5 +1,42 @@
 namespace DeskBox.Contracts;
 
+/// <summary>
+/// Canonical widget layer-mode values, owned here so the interaction editor
+/// can build its option list without referencing the settings adapter.
+/// <see cref="Services.SettingsService"/> keeps its historical constants as
+/// aliases of these.
+/// </summary>
+public static class WidgetLayerModes
+{
+    public const string Dynamic = "Dynamic";
+    public const string DesktopPinned = "DesktopPinned";
+    public const string QuickReveal = "QuickReveal";
+}
+
+/// <summary>
+/// Canonical file-open method combo values (the page-level projection of the
+/// persisted <c>DoubleClickToOpen</c> flag), owned here so the interaction
+/// editor can build its option list and map selections without referencing
+/// the settings shell.
+/// </summary>
+public static class FileOpenMethods
+{
+    public const string SingleClick = "SingleClick";
+    public const string DoubleClick = "DoubleClick";
+}
+
+/// <summary>
+/// Canonical show-desktop behavior combo values (the page-level projection
+/// of the persisted <c>KeepWidgetsVisibleOnShowDesktop</c> flag), owned here
+/// so the interaction editor can build its option list and map selections
+/// without referencing the settings shell.
+/// </summary>
+public static class ShowDesktopBehaviors
+{
+    public const string KeepVisible = "KeepVisible";
+    public const string HideWithWindows = "HideWithWindows";
+}
+
 public readonly record struct InteractionSettingsSnapshot(
     bool AutoStart,
     bool AutoCheckForUpdates,
@@ -29,9 +66,43 @@ public readonly record struct InteractionSettingsSnapshot(
 /// shell's appearance-save routine, so their write stores without scheduling
 /// its own save.
 /// </summary>
+/// <summary>
+/// Immutable read snapshot of the interaction presentation fields the
+/// section editor binds its XAML surface to (layer mode, resize snap enable
+/// plus spacing, the two combo projections, and the file-item context-menu
+/// toggle the file-widget overview re-binds through its typed editor
+/// dependency property). Values arrive already normalized, mirroring the
+/// music editor's read-port shape; external refresh paths (settings
+/// broadcasts, default restores) re-read it.
+/// </summary>
+public sealed record InteractionPresentationSettings(
+    string LayerMode,
+    bool SnapEnabled,
+    double SnapSpacing,
+    bool DoubleClickToOpen,
+    bool KeepWidgetsVisibleOnShowDesktop,
+    bool FileItemContextMenuEnabled);
+
+/// <summary>
+/// Immutable presentation snapshot of the global-hotkey card, computed by
+/// the settings shell (which owns the hotkey state machine and its
+/// host-service queries) and pushed onto the interaction editor's binding
+/// surface. The editor never queries the hotkey service itself.
+/// </summary>
+public sealed record GlobalHotkeyPresentationSettings(
+    bool Enabled,
+    string Text,
+    string StatusText,
+    string Description,
+    string WarningText,
+    bool CanShowWarning);
+
 public interface IInteractionSettings
 {
     InteractionSettingsSnapshot ReadAll();
+
+    /// <summary>Reads the normalized interaction presentation snapshot.</summary>
+    InteractionPresentationSettings ReadInteractionPresentation();
 
     // Mirrors the registration-state reflection the settings page performed:
     // unchanged values skip the redundant save.

@@ -1,4 +1,4 @@
-using System.Reflection;
+﻿using System.Reflection;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using DeskBox.Models;
@@ -201,6 +201,13 @@ public sealed class SettingsSliceOwnershipContractTests
     // code should read the slices (Settings.<Slice>.Prop). Deleting a
     // passthrough forces its call sites to migrate or stop compiling, so the
     // name set self-maintains as the facade collapses.
+    // Batch 51 reconciliation: every budget was re-measured against the tree
+    // after the batch 40-50 editor migrations and tightened to the exact
+    // current counts (12 entries shrunk — 268 units of stale slack removed so
+    // any new facade access fails immediately; 4 files hit zero and lost
+    // their entries: QuickCaptureClipboardActivationHelper,
+    // SettingsViewModel.DisplayNames, SettingsViewModel.PreferenceCommands,
+    // SettingsViewModel.WidgetForeground).
     private static readonly IReadOnlyDictionary<string, int> FacadeAccessManifest =
         new Dictionary<string, int>(StringComparer.Ordinal)
     {
@@ -216,7 +223,7 @@ public sealed class SettingsSliceOwnershipContractTests
         ["src/DeskBox/App.DiagnosticsBundle.cs"] = 6,
         ["src/DeskBox/App.ImmediateHiddenWorkingSetTrim.cs"] = 2,
         ["src/DeskBox/App.Tray.cs"] = 3,
-        ["src/DeskBox/App.xaml.cs"] = 31,
+        ["src/DeskBox/App.xaml.cs"] = 28,
         ["src/DeskBox/Controls/DesktopOrganizationPreviewCard.xaml.cs"] = 11,
         ["src/DeskBox/Controls/DesktopOrganizationTaskView.Appearance.cs"] = 1,
         ["src/DeskBox/Controls/DesktopOrganizationTaskView.xaml.cs"] = 1,
@@ -231,7 +238,6 @@ public sealed class SettingsSliceOwnershipContractTests
         ["src/DeskBox/Controls/WidgetContents/TodoWidgetContent.Menus.cs"] = 1,
         ["src/DeskBox/Controls/WidgetContents/TodoWidgetContent.xaml.cs"] = 1,
         ["src/DeskBox/Controls/WidgetShell.xaml.cs"] = 2,
-        ["src/DeskBox/Helpers/QuickCaptureClipboardActivationHelper.cs"] = 1,
         ["src/DeskBox/Services/AutoStartDefaultPolicy.cs"] = 1,
         ["src/DeskBox/Services/DataBackupSettingsPolicy.cs"] = 15,
         ["src/DeskBox/Services/DesktopAutoOrganizationWatcher.cs"] = 13,
@@ -264,7 +270,7 @@ public sealed class SettingsSliceOwnershipContractTests
         ["src/DeskBox/Services/SearchResultActionService.cs"] = 2,
         ["src/DeskBox/Services/SettingsMigrationService.cs"] = 35,
         ["src/DeskBox/Services/SettingsSearchCatalog.cs"] = 20,
-        ["src/DeskBox/Services/SettingsService.cs"] = 605,
+        ["src/DeskBox/Services/SettingsService.cs"] = 594,
         ["src/DeskBox/Services/ThemeService.cs"] = 11,
         ["src/DeskBox/Services/TodoReminderService.cs"] = 8,
         ["src/DeskBox/Services/WeatherService.cs"] = 1,
@@ -277,7 +283,7 @@ public sealed class SettingsSliceOwnershipContractTests
         ["src/DeskBox/Services/WidgetGroupSettings.cs"] = 19,
         ["src/DeskBox/Services/WidgetManager.CapsuleArrangement.cs"] = 45,
         ["src/DeskBox/Services/WidgetManager.FeatureWidgets.cs"] = 50,
-        ["src/DeskBox/Services/WidgetManager.Groups.cs"] = 57,
+        ["src/DeskBox/Services/WidgetManager.Groups.cs"] = 55,
         ["src/DeskBox/Services/WidgetManager.Storage.cs"] = 20,
         ["src/DeskBox/Services/WidgetManager.Surfaces.cs"] = 1,
         ["src/DeskBox/Services/WidgetManager.TrayAnimation.cs"] = 3,
@@ -319,7 +325,13 @@ public sealed class SettingsSliceOwnershipContractTests
         // group into the existing QuickCaptureSettingsCoordinator
         // (FeatureCallbacks 25->0 and lost its entry; WeatherOptions 2->1,
         // only the city-name restore read remains; ContentEditorOptions
-        // 24->10, only the constructor/snapshot reads remain). FeatureOptions
+        // 24->10, only the constructor/snapshot reads remain; batch 47 then
+        // deleted ContentEditorOptions/FeatureTextSize whole when the Todo
+        // section moved to its editor, and both lost their entries; batch 48
+        // deleted WeatherOptions whole when the Weather section moved to its
+        // editor — the city-name restore read went with the editor's
+        // coordinator read port).
+        // FeatureOptions
         // 68->2: both remaining matches are localization-key string literals
         // ("Settings.AttachmentStorageMode.Copy"/".Link"), not facade
         // accesses. Batch 39 moved the storage/diagnostics tail writes into
@@ -329,26 +341,18 @@ public sealed class SettingsSliceOwnershipContractTests
         // guide-overlay sync remains).
         ["src/DeskBox/ViewModels/SettingsViewModel.AppearanceOptions.cs"] = 1,
         ["src/DeskBox/ViewModels/SettingsViewModel.CapsuleOptions.cs"] = 20,
-        ["src/DeskBox/ViewModels/SettingsViewModel.ContentEditorOptions.cs"] = 10,
         ["src/DeskBox/ViewModels/SettingsViewModel.DesktopOrganization.cs"] = 1,
-        ["src/DeskBox/ViewModels/SettingsViewModel.DisplayNames.cs"] = 6,
-        ["src/DeskBox/ViewModels/SettingsViewModel.FeatureOptions.cs"] = 2,
-        ["src/DeskBox/ViewModels/SettingsViewModel.FeatureTextSize.cs"] = 5,
-        ["src/DeskBox/ViewModels/SettingsViewModel.FileStackOptions.cs"] = 22,
+        ["src/DeskBox/ViewModels/SettingsViewModel.FileStackOptions.cs"] = 1,
         // Batch 37 moved the group-navigation default writes (wheel switch,
         // hover switch, default title display mode, default navigation style)
         // into GroupNavigationSettingsCoordinator (GroupNavigation 28->20,
         // leaving only the property/summary/projection reads; the four
         // setters no longer compare or write through the facade).
-        ["src/DeskBox/ViewModels/SettingsViewModel.GroupNavigation.cs"] = 20,
+        ["src/DeskBox/ViewModels/SettingsViewModel.GroupNavigation.cs"] = 15,
         ["src/DeskBox/ViewModels/SettingsViewModel.HotkeyAndStorage.cs"] = 6,
-        ["src/DeskBox/ViewModels/SettingsViewModel.Performance.cs"] = 11,
-        ["src/DeskBox/ViewModels/SettingsViewModel.PreferenceCommands.cs"] = 1,
         ["src/DeskBox/ViewModels/SettingsViewModel.RuntimeDiagnostics.cs"] = 1,
-        ["src/DeskBox/ViewModels/SettingsViewModel.SettingsSync.cs"] = 133,
-        ["src/DeskBox/ViewModels/SettingsViewModel.WeatherOptions.cs"] = 1,
-        ["src/DeskBox/ViewModels/SettingsViewModel.WidgetForeground.cs"] = 4,
-        ["src/DeskBox/ViewModels/SettingsViewModel.cs"] = 94,
+        ["src/DeskBox/ViewModels/SettingsViewModel.SettingsSync.cs"] = 6,
+        ["src/DeskBox/ViewModels/SettingsViewModel.cs"] = 14,
         ["src/DeskBox/ViewModels/TodoWidgetViewModel.DetailAndAttachments.cs"] = 1,
         ["src/DeskBox/ViewModels/TodoWidgetViewModel.FilteringAndAppearance.cs"] = 21,
         ["src/DeskBox/ViewModels/TodoWidgetViewModel.cs"] = 12,
@@ -387,7 +391,7 @@ public sealed class SettingsSliceOwnershipContractTests
         ["src/DeskBox/Views/SettingsWindow.Navigation.cs"] = 3,
         ["src/DeskBox/Views/WidgetWindowBase.Backdrop.cs"] = 10,
         ["src/DeskBox/Views/WidgetWindowBase.Bounds.cs"] = 3,
-        ["src/DeskBox/Views/WidgetWindowBase.Collapse.cs"] = 35,
+        ["src/DeskBox/Views/WidgetWindowBase.Collapse.cs"] = 28,
     };
 
     private static readonly Regex FacadePassthroughAccess = new(

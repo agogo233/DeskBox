@@ -1,4 +1,4 @@
-using DeskBox.Helpers;
+﻿using DeskBox.Helpers;
 using DeskBox.Platform;
 using DeskBox.Services;
 using DeskBox.ViewModels;
@@ -36,14 +36,17 @@ public sealed partial class AppearanceSettingsSection : UserControl
 
     private void AccentPresetButton_Click(object sender, RoutedEventArgs e)
     {
-        if (DataContext is not SettingsViewModel viewModel ||
+        // The section's DataContext is the appearance editor; the custom
+        // accent write stays on the settings shell (theme service state), so
+        // the preset pick surfaces as an editor event the shell handles.
+        if (DataContext is not DeskBox.Features.Appearance.AppearanceSettingsViewModel editor ||
             sender is not Button { Tag: string hex } ||
             !AccentColorHelper.TryParseHex(hex, out var color))
         {
             return;
         }
 
-        viewModel.SetCustomAccentColor(color);
+        editor.NotifyAccentPresetPicked(AccentColorHelper.ToHex(color));
     }
 
     // The toggle mirrors the system-wide "show shadows under windows" effect,

@@ -23,7 +23,7 @@ public sealed class GroupNavigationSettingsCoordinatorTests : IDisposable
     {
         var settings = new SettingsService(_root);
         var coordinator = new GroupNavigationSettingsCoordinator(settings);
-        var editor = new GroupNavigationSettingsViewModel(coordinator);
+        var editor = new GroupNavigationSettingsViewModel(coordinator, _ => _);
         int notified = 0;
         settings.SettingsChanged += () => notified++;
 

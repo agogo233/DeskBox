@@ -1963,6 +1963,8 @@
     "Settings.Search.Hotkey.PresetsTitle": "শর্টকাট",
     "Settings.Search.Hotkey.Status.GlobalHotkeyConflict": "এই শর্টকাটটি DeskBox-এর প্রধান শর্টকাট দ্বারা ব্যবহৃত হচ্ছে।",
     "Settings.GlobalHotkey.Status.SearchHotkeyConflict": "এই শর্টকাটটি অনুসন্ধান শর্টকাট দ্বারা ব্যবহৃত হচ্ছে।",
+    "Settings.GlobalHotkey.ElevatedNotice.Description": "যে উইন্ডোতে আপনি কাজ করছেন সেটি অ্যাডমিনিস্ট্রেটর হিসেবে চললে (যেমন টাস্ক ম্যানেজার), নিরাপত্তার কারণে Windows সাময়িকভাবে গ্লোবাল হটকি ব্লক করে দেয়, তখন সেগুলো দিয়ে DeskBox ডাকা যায় না। এটি Windows সিস্টেমের সীমাবদ্ধতা, DeskBox-এর ত্রুটি নয়।",
+    "Settings.GlobalHotkey.ElevatedNotice.Title": "হটকি কেন কখনো সাড়া দেয় না?",
     "Settings.Search.Hotkey.ChangeTooltip": "ক্লিক করুন, তারপর নতুন কী সমন্বয় টিপুন",
     "Settings.Search.Hotkey.ResetTooltip": "ডিফল্ট হটকি পুনরুদ্ধার করুন",
     "Settings.Search.Hotkey.Recording": "একটি কী সমন্বয় টিপুন...",

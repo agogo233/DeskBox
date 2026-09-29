@@ -1963,6 +1963,8 @@
     "Settings.Search.Hotkey.PresetsTitle": "الاختصار",
     "Settings.Search.Hotkey.Status.GlobalHotkeyConflict": "يستخدم الاختصار الرئيسي لـ DeskBox هذا الاختصار بالفعل.",
     "Settings.GlobalHotkey.Status.SearchHotkeyConflict": "يستخدم اختصار البحث هذا الاختصار بالفعل.",
+    "Settings.GlobalHotkey.ElevatedNotice.Description": "إذا كانت النافذة التي تعمل عليها تعمل بصلاحيات المسؤول (مثل إدارة المهام)، فسيحظر Windows مفاتيح الاختصار العامة مؤقتًا لأسباب أمنية، ولن تتمكن من استدعاء DeskBox بها. هذا قيد في نظام Windows وليس عطلًا في DeskBox.",
+    "Settings.GlobalHotkey.ElevatedNotice.Title": "لماذا لا تستجيب مفاتيح الاختصار أحيانًا؟",
     "Settings.Search.Hotkey.ChangeTooltip": "انقر، ثم اضغط على مجموعة المفاتيح الجديدة",
     "Settings.Search.Hotkey.ResetTooltip": "استعادة مفتاح التشغيل السريع الافتراضي",
     "Settings.Search.Hotkey.Recording": "اضغط على مجموعة المفاتيح...",

@@ -60,22 +60,22 @@ public sealed class SettingsCopyAndHierarchyTests
         Assert.DoesNotContain("Settings.Capsule.Enabled.Title", capsuleXaml, StringComparison.Ordinal);
         Assert.DoesNotContain("WidgetCapsuleModeEnabled", capsuleXaml, StringComparison.Ordinal);
         Assert.Contains(
-            "controls:SettingsComboBox.Value=\"{Binding SelectedWidgetCollapseBehavior, Mode=TwoWay}\"",
+            "controls:SettingsComboBox.Value=\"{Binding CollapseBehavior, Mode=TwoWay}\"",
             capsuleXaml,
             StringComparison.Ordinal);
         Assert.Contains("Tag=\"WidgetGroups\"", appearanceXaml, StringComparison.Ordinal);
         Assert.DoesNotContain("IsWidgetGroupsEnabled", appearanceXaml, StringComparison.Ordinal);
         Assert.DoesNotContain("IsWidgetGroupsEnabled", windowXaml, StringComparison.Ordinal);
-        Assert.Contains(
-            "ItemsSource=\"{Binding AvailableWidgetGroupNavigationStyleOptions}\"",
+        Assert.DoesNotContain(
+            "ItemsSource=\"{Binding AvailableGroupNavigationStyleOptions}\"",
             appearanceXaml,
             StringComparison.Ordinal);
-        Assert.Contains(
-            "controls:SettingsComboBox.Value=\"{Binding SelectedWidgetGroupDefaultNavigationStyle, Mode=TwoWay}\"",
+        Assert.DoesNotContain(
+            "controls:SettingsComboBox.Value=\"{Binding GroupNavigationStyle, Mode=TwoWay}\"",
             appearanceXaml,
             StringComparison.Ordinal);
         Assert.Contains("x:Key=\"SettingValueTextStyle\"", overviewResources, StringComparison.Ordinal);
-        Assert.Contains("ExistingWidgetGroupItems", windowXaml, StringComparison.Ordinal);
+        Assert.Contains("ItemsSource=\"{Binding ExistingGroups}\"", windowXaml, StringComparison.Ordinal);
         Assert.DoesNotContain("Settings.WidgetGroups.Existing.Name.Title", windowXaml, StringComparison.Ordinal);
         Assert.DoesNotContain("WidgetGroupNameTextBox_LostFocus", windowXaml, StringComparison.Ordinal);
         Assert.Contains(
@@ -128,23 +128,23 @@ public sealed class SettingsCopyAndHierarchyTests
             root,
             "src/DeskBox/Views/SettingsWindow.xaml.cs"));
 
-        Assert.Contains("SelectedAccentColorSource", appearanceXaml, StringComparison.Ordinal);
+        Assert.Contains("AccentColorSource", appearanceXaml, StringComparison.Ordinal);
         Assert.DoesNotContain("IsOn=\"{Binding UseSystemAccentColor", appearanceXaml, StringComparison.Ordinal);
 
-        Assert.Contains("SelectedFileOpenMethod", windowXaml, StringComparison.Ordinal);
-        Assert.Contains("SelectedShowDesktopBehavior", windowXaml, StringComparison.Ordinal);
-        Assert.Contains("SelectedWeatherLocationMode", windowXaml, StringComparison.Ordinal);
+        Assert.Contains("{Binding FileOpenMethod, Mode=TwoWay}", windowXaml, StringComparison.Ordinal);
+        Assert.Contains("{Binding ShowDesktopBehavior, Mode=TwoWay}", windowXaml, StringComparison.Ordinal);
+        Assert.Contains("SelectedLocationMode", windowXaml, StringComparison.Ordinal);
         Assert.DoesNotContain("IsOn=\"{Binding DoubleClickToOpen", windowXaml, StringComparison.Ordinal);
         Assert.DoesNotContain("IsOn=\"{Binding KeepWidgetsVisibleOnShowDesktop", windowXaml, StringComparison.Ordinal);
         Assert.DoesNotContain("IsOn=\"{Binding WeatherAutoLocation", windowXaml, StringComparison.Ordinal);
 
         // File stacking is redesigned around an explicit master switch plus
         // an automatic-grouping sub-switch, so the plain dropdown is gone.
-        Assert.Contains("IsOn=\"{x:Bind ViewModel.FileStacksEnabled, Mode=TwoWay}\"", fileWidgetXaml, StringComparison.Ordinal);
+        Assert.Contains("IsOn=\"{x:Bind FileStack.StacksEnabled, Mode=TwoWay}\"", fileWidgetXaml, StringComparison.Ordinal);
         Assert.Contains("Settings.FileStacks.Mode.Title", windowXaml, StringComparison.Ordinal);
         Assert.Contains("Settings.FileStacks.Mode.Description", windowXaml, StringComparison.Ordinal);
         Assert.Contains(
-            "IsOn=\"{Binding FileStacksEnabled, Mode=TwoWay}\"",
+            "IsOn=\"{Binding StacksEnabled, Mode=TwoWay}\"",
             windowXaml,
             StringComparison.Ordinal);
         Assert.Contains(
@@ -155,13 +155,13 @@ public sealed class SettingsCopyAndHierarchyTests
             "public bool WidgetCapsuleModeEnabled",
             appSettings,
             StringComparison.Ordinal);
-        Assert.Contains("IsOn=\"{Binding FileStackAutoStacking, Mode=TwoWay}\"", windowXaml, StringComparison.Ordinal);
+        Assert.Contains("IsOn=\"{Binding AutoStacking, Mode=TwoWay}\"", windowXaml, StringComparison.Ordinal);
         Assert.Contains(
-            "SelectedFileWidgetFolderOpenBehavior",
+            "{x:Bind FeatureWidgets.FolderOpenBehavior, Mode=TwoWay}",
             fileWidgetXaml,
             StringComparison.Ordinal);
         Assert.Contains(
-            "IsOn=\"{x:Bind ViewModel.FileItemSystemContextMenuEnabled, Mode=TwoWay}\"",
+            "IsOn=\"{x:Bind Interaction.FileItemContextMenuEnabled, Mode=TwoWay}\"",
             fileWidgetXaml,
             StringComparison.Ordinal);
         Assert.Contains(
@@ -169,7 +169,7 @@ public sealed class SettingsCopyAndHierarchyTests
             fileWidgetSettings,
             StringComparison.Ordinal);
 
-        Assert.Contains("HoverButtonActionsSummaryText", windowXaml, StringComparison.Ordinal);
+        Assert.Contains("{Binding HoverButtonActionsSummary}", windowXaml, StringComparison.Ordinal);
         Assert.Contains("Click=\"HoverButtonActionsDropDown_Click\"", windowXaml, StringComparison.Ordinal);
         Assert.Equal(
             1,
@@ -273,15 +273,15 @@ public sealed class SettingsCopyAndHierarchyTests
             "src/DeskBox/Views/SettingsSections/AppearanceSettingsSection.xaml"));
 
         Assert.Contains(
-            "Text=\"{Binding SelectedWidgetTitleIconModeText}\"",
+            "Text=\"{Binding TitleIconModeText}\"",
             appearanceXaml,
             StringComparison.Ordinal);
         Assert.Contains(
-            "ItemsSource=\"{Binding AvailableWidgetTitleIconModeOptions}\"",
+            "ItemsSource=\"{Binding AvailableTitleIconModeOptions}\"",
             appearanceXaml,
             StringComparison.Ordinal);
         Assert.Contains(
-            "controls:SettingsComboBox.Value=\"{Binding SelectedWidgetTitleIconMode, Mode=TwoWay}\"",
+            "controls:SettingsComboBox.Value=\"{Binding TitleIconMode, Mode=TwoWay}\"",
             appearanceXaml,
             StringComparison.Ordinal);
     }
@@ -406,7 +406,7 @@ public sealed class SettingsCopyAndHierarchyTests
         Assert.Contains("DesktopOrganization.Settings.StartAction", fileWidgetXaml, StringComparison.Ordinal);
         Assert.True(
             fileWidgetXaml.IndexOf("Tag=\"FileStackSettings\"", StringComparison.Ordinal) <
-            fileWidgetXaml.IndexOf("SelectedFileWidgetFolderOpenBehavior", StringComparison.Ordinal));
+            fileWidgetXaml.IndexOf("FeatureWidgets.FolderOpenBehavior", StringComparison.Ordinal));
         Assert.Contains(
             "MinHeight=\"{StaticResource SettingsRowMinHeight}\"",
             fileWidgetXaml,
@@ -509,12 +509,12 @@ public sealed class SettingsCopyAndHierarchyTests
             "x:Name=\"GeneralSection\"");
 
         Assert.Contains("Click=\"WeatherDisplayOptionsDropDown_Click\"", weather, StringComparison.Ordinal);
-        Assert.Contains("Content=\"{Binding WeatherDisplayOptionsSummaryText}\"", weather, StringComparison.Ordinal);
+        Assert.Contains("Content=\"{Binding DisplayOptionsSummaryText}\"", weather, StringComparison.Ordinal);
         Assert.Equal(1, CountOccurrences(weather, "Settings.Weather.Group.Display.Title"));
         Assert.DoesNotContain("IsOn=\"{Binding WeatherShowForecast", weather, StringComparison.Ordinal);
         Assert.DoesNotContain("IsOn=\"{Binding WeatherShowPressure", weather, StringComparison.Ordinal);
         Assert.Contains("SettingsMultiSelectMenu.Show(", navigation, StringComparison.Ordinal);
-        Assert.Contains("ViewModel.AvailableWeatherDisplayOptions", navigation, StringComparison.Ordinal);
+        Assert.Contains("weatherSettings.AvailableDisplayOptions", navigation, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -641,8 +641,8 @@ public sealed class SettingsCopyAndHierarchyTests
             "x:Name=\"TodoSettingsSection\"",
             "x:Name=\"MusicSettingsSection\"");
 
-        Assert.Contains("IsOn=\"{Binding QuickCaptureEnabled, Mode=TwoWay}\"", quickCapture, StringComparison.Ordinal);
-        Assert.Contains("IsOn=\"{Binding TodoEnabled, Mode=TwoWay}\"", todo, StringComparison.Ordinal);
+        Assert.Contains("IsOn=\"{Binding Enabled, Mode=TwoWay}\"", quickCapture, StringComparison.Ordinal);
+        Assert.Contains("IsOn=\"{Binding Enabled, Mode=TwoWay}\"", todo, StringComparison.Ordinal);
         Assert.Equal(5, CountOccurrences(quickCapture, "Loaded=\"FeatureSettingsExpander_Loaded\""));
         Assert.Equal(5, CountOccurrences(todo, "Loaded=\"FeatureSettingsExpander_Loaded\""));
 
@@ -664,13 +664,15 @@ public sealed class SettingsCopyAndHierarchyTests
         Assert.Contains("Click=\"QuickCaptureTabsDropDown_Click\"", quickCapture, StringComparison.Ordinal);
         Assert.Contains("Click=\"TodoTabsDropDown_Click\"", todo, StringComparison.Ordinal);
         Assert.Contains("Click=\"TodoFooterDisplayDropDown_Click\"", todo, StringComparison.Ordinal);
-        Assert.Contains("ItemsSource=\"{Binding VisibleQuickCaptureDefaultViewOptions}\"", quickCapture, StringComparison.Ordinal);
-        Assert.Contains("ItemsSource=\"{Binding VisibleTodoDefaultFilterOptions}\"", todo, StringComparison.Ordinal);
+        Assert.Contains("ItemsSource=\"{Binding VisibleDefaultViewOptions}\"", quickCapture, StringComparison.Ordinal);
+        Assert.Contains("ItemsSource=\"{Binding VisibleDefaultFilterOptions}\"", todo, StringComparison.Ordinal);
 
-        Assert.DoesNotContain("IsOn=\"{Binding QuickCaptureShowRecordsTab", quickCapture, StringComparison.Ordinal);
-        Assert.DoesNotContain("IsOn=\"{Binding TodoShowAllTab", todo, StringComparison.Ordinal);
+        Assert.DoesNotContain("IsOn=\"{Binding ShowRecordsTab", quickCapture, StringComparison.Ordinal);
+        Assert.DoesNotContain("{Binding TodoShowAllTab", todo, StringComparison.Ordinal);
+        Assert.DoesNotContain("{Binding TodoShowTabBar", todo, StringComparison.Ordinal);
+        Assert.DoesNotContain("{Binding SelectedTodo", todo, StringComparison.Ordinal);
         Assert.Contains(
-            "controls:SettingsComboBox.Value=\"{Binding QuickCaptureEditorFormat, Mode=TwoWay}\"",
+            "controls:SettingsComboBox.Value=\"{Binding EditorFormat, Mode=TwoWay}\"",
             quickCapture,
             StringComparison.Ordinal);
         Assert.DoesNotContain("QuickCaptureDefaultFormat", quickCapture, StringComparison.Ordinal);

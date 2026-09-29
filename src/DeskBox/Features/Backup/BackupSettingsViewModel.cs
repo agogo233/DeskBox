@@ -15,12 +15,14 @@ public sealed record BackupPageMessage(BackupPageMessageKind Kind, string? Error
 }
 
 /// <summary>Owns one visible cloud settings visit and its endpoint-scoped reads.</summary>
-public sealed class BackupSettingsViewModel : ObservableObject, IDisposable
+public sealed partial class BackupSettingsViewModel : ObservableObject, IDisposable
 {
     private readonly IBackupSettings _settings;
     private readonly Func<Action, bool> _tryEnqueue;
     private readonly Action<Exception> _reportError;
     private readonly Func<TimeSpan, CancellationToken, Task> _delay;
+    private readonly Func<string, string> _localize;
+    private readonly Func<string, object[], string> _format;
     private CancellationTokenSource? _visit;
     private CancellationTokenSource? _endpointCancellation;
     private CancellationTokenSource? _commandCancellation;
@@ -37,14 +39,25 @@ public sealed class BackupSettingsViewModel : ObservableObject, IDisposable
 
     public BackupSettingsViewModel(IBackupSettings settings, Func<Action, bool> tryEnqueue,
         Action<Exception> reportError,
-        Func<TimeSpan, CancellationToken, Task>? delay = null)
+        Func<TimeSpan, CancellationToken, Task>? delay = null,
+        Func<string, string>? localize = null,
+        Func<string, object[], string>? format = null)
     {
         _settings = settings;
         _tryEnqueue = tryEnqueue;
         _reportError = reportError;
         _delay = delay ?? ((duration, token) => Task.Delay(duration, token));
+        _localize = localize ?? (key => key);
+        _format = format ?? ((key, args) => key);
         _state = settings.Read();
+        // The section binding surface (batch 49) projects the initial read;
+        // the visit state machine below stays as batch 4 built it.
+        InitializeSurface();
     }
+
+    private string Localize(string key) => _localize(key);
+
+    private string Format(string key, params object[] args) => _format(key, args);
 
     public BackupSettingsSnapshot State { get => _state; private set => SetProperty(ref _state, value); }
     public BackupPageMessage Message { get => _message; private set => SetProperty(ref _message, value); }

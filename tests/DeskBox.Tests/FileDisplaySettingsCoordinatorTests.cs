@@ -27,12 +27,12 @@ public sealed class FileDisplaySettingsCoordinatorTests : IDisposable
         int notified = 0;
         settings.SettingsChanged += () => notified++;
 
-        editor.SetShowFileExtensions(true);
-        editor.SetHideShortcutExtensionWhenShowingFileExtensions(false);
-        editor.SetHideShortcutArrowOverlay(false);
-        editor.SetShowImageFilesAsIcons(true);
-        editor.SetShowListItemDetails(true);
-        editor.SetShowFileItemPathTooltips(false);
+        editor.ShowFileExtensions = true;
+        editor.HideShortcutExtensionWhenShowingFileExtensions = false;
+        editor.HideShortcutArrowOverlay = false;
+        editor.ShowImageFilesAsIcons = true;
+        editor.ShowListItemDetails = true;
+        editor.ShowFileItemPathTooltips = false;
 
         Assert.True(settings.Settings.ShowFileExtensions);
         Assert.False(settings.Settings.HideShortcutExtensionWhenShowingFileExtensions);
@@ -44,8 +44,8 @@ public sealed class FileDisplaySettingsCoordinatorTests : IDisposable
 
         // Unchanged writes must not notify or save again; the icon-cache and
         // reprojection consumers only react to real SettingsChanged passes.
-        editor.SetShowFileExtensions(true);
-        editor.SetShowImageFilesAsIcons(true);
+        editor.ShowFileExtensions = true;
+        editor.ShowImageFilesAsIcons = true;
         Assert.Equal(6, notified);
     }
 

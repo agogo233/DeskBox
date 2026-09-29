@@ -3,6 +3,7 @@ using System.Collections.ObjectModel;
 using System.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using DeskBox.Contracts;
 using DeskBox.Helpers;
 using DeskBox.Models;
 using DeskBox.Services;
@@ -29,57 +30,63 @@ public partial class SettingsViewModel
             settings.GlobalHotkeyKey);
     }
 
+    /// <summary>
+    /// Recomputes the whole global-hotkey card presentation (enable state,
+    /// activation text, registration status, localized description/warning
+    /// and the reserved-gesture warning gate) and pushes it onto the
+    /// interaction editor's binding surface. The hotkey state machine stays
+    /// on this shell; the editor never queries the hotkey service.
+    /// </summary>
     public void RefreshGlobalHotkeyState()
     {
-        var settings = _settingsService.Settings;
-        _globalHotkeyEnabled = settings.GlobalHotkeyEnabled;
-        GlobalHotkeyText = GlobalHotkeyService.FormatActivation(
-            GetCurrentGlobalHotkeyActivation(),
-            _localizationService);
-        RefreshGlobalHotkeyStatus();
-        OnPropertyChanged(nameof(GlobalHotkeyEnabled));
-        OnPropertyChanged(nameof(CanShowGlobalHotkeyWarning));
-        OnPropertyChanged(nameof(GlobalHotkeyDescription));
-        OnPropertyChanged(nameof(GlobalHotkeyWarningText));
-        OnPropertyChanged(nameof(GlobalHotkeyText));
-        OnPropertyChanged(nameof(GlobalHotkeyStatusText));
-        OnPropertyChanged(nameof(GlobalHotkeyStatusKind));
-    }
+        bool enabled = _settingsService.Settings.GlobalHotkeyEnabled;
+        GlobalHotkeyActivation activation = GetCurrentGlobalHotkeyActivation();
+        string text = GlobalHotkeyService.FormatActivation(activation, _localizationService);
 
-    public void RefreshGlobalHotkeyStatus()
-    {
-        if (!GlobalHotkeyEnabled)
+        string statusText;
+        if (!enabled)
         {
-            GlobalHotkeyStatusKind = "Muted";
-            GlobalHotkeyStatusText = _localizationService.T("Settings.GlobalHotkey.Status.Disabled");
-            return;
+            statusText = _localizationService.T("Settings.GlobalHotkey.Status.Disabled");
         }
-
-        if (App.Current?.GlobalHotkeyService is not { } hotkeyService)
+        else if (App.Current?.GlobalHotkeyService is not { } hotkeyService)
         {
-            GlobalHotkeyStatusKind = "Warning";
-            GlobalHotkeyStatusText = _localizationService.T("Settings.GlobalHotkey.Status.Unavailable");
-            return;
+            statusText = _localizationService.T("Settings.GlobalHotkey.Status.Unavailable");
         }
-
-        if (hotkeyService.IsRegistered)
+        else if (hotkeyService.IsRegistered)
         {
-            GlobalHotkeyStatusKind = GlobalHotkeyService.IsRiskyActivation(hotkeyService.CurrentActivation) ? "Warning" : "Normal";
-            GlobalHotkeyStatusText = _localizationService.Format(
+            // The risky-activation flag only tinted the legacy status kind,
+            // which had no visual consumer; the status text is identical.
+            statusText = _localizationService.Format(
                 "Settings.GlobalHotkey.Status.Active",
                 hotkeyService.CurrentGestureText);
-            return;
+        }
+        else
+        {
+            statusText = string.IsNullOrWhiteSpace(hotkeyService.LastError)
+                ? _localizationService.T("Settings.GlobalHotkey.Status.Unregistered")
+                : hotkeyService.LastError;
         }
 
-        GlobalHotkeyStatusKind = "Warning";
-        GlobalHotkeyStatusText = string.IsNullOrWhiteSpace(hotkeyService.LastError)
-            ? _localizationService.T("Settings.GlobalHotkey.Status.Unregistered")
-            : hotkeyService.LastError;
-    }
+        string warningText = activation.Kind == HotkeyActivationKind.WindowsTap
+            ? _localizationService.T("Settings.GlobalHotkey.WindowsTapWarning")
+            : activation.Kind == HotkeyActivationKind.Chord &&
+              activation.Gesture.Modifiers == HotkeyModifierKeys.Alt &&
+              activation.Gesture.VirtualKey == (int)Windows.System.VirtualKey.Space
+                ? _localizationService.T("Settings.GlobalHotkey.AltSpaceWarning")
+                : _localizationService.T("Settings.GlobalHotkey.ReservedWarning");
 
-    public void RefreshQuickAccessState()
-    {
-        ManagedStorageQuickAccessPinState = ExplorerQuickAccessHelper.GetQuickAccessPinState(ManagedStorageRootPath, out _);
+        bool canShowWarning = enabled &&
+            (activation.Kind == HotkeyActivationKind.WindowsTap ||
+             (activation.Kind == HotkeyActivationKind.Chord &&
+              GlobalHotkeyService.IsReservedSystemGesture(activation.Gesture)));
+
+        _interactionSettings.UpdateGlobalHotkeyPresentation(new GlobalHotkeyPresentationSettings(
+            enabled,
+            text,
+            statusText,
+            _localizationService.T("Settings.GlobalHotkey.Description"),
+            warningText,
+            canShowWarning));
     }
 
     public async Task RefreshQuickAccessStateAsync(bool showBusy = false, CancellationToken cancellationToken = default)

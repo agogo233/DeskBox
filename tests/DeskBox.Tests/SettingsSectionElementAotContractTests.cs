@@ -110,8 +110,9 @@ public sealed class SettingsSectionElementAotContractTests
     [Fact]
     public void CloudBackupSnapshotItem_HasGeneratedBindableMetadata()
     {
+        // Batch 49 moved the item type to the backup editor family.
         string source = ReadRepositoryFile(
-            "src/DeskBox/ViewModels/SettingsViewModel.CloudBackupOptions.cs");
+            "src/DeskBox/Features/Backup/CloudBackupRemoteSnapshotItem.cs");
 
         // Title/Details bind through compiled x:Bind now; the generated
         // metadata is retained as a fallback contract for the item type.

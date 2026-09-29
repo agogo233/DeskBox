@@ -30,7 +30,7 @@ public sealed class GlobalHotkeySafetyContractTests
         Assert.Contains("x:Name=\"GlobalHotkeyCustomRow\"", xaml, StringComparison.Ordinal);
         Assert.Contains("x:Name=\"DesktopDoubleClickToggle\"", xaml, StringComparison.Ordinal);
         Assert.Contains("x:Name=\"GlobalHotkeyReservedWarning\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("CanShowGlobalHotkeyWarning", xaml, StringComparison.Ordinal);
+        Assert.Contains("CanShowHotkeyWarning", xaml, StringComparison.Ordinal);
         Assert.Contains("WmReservedHotkeyCapture", settingsWindow, StringComparison.Ordinal);
         Assert.Contains("_hotkeyRecordingHook.TryStart", hotkeyCode, StringComparison.Ordinal);
         Assert.Contains("_hotkeyRecordingHook.Stop", hotkeyCode, StringComparison.Ordinal);
