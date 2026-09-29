@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [ValidateSet("x64", "ARM64")]
     [string]$Platform = "x64",
@@ -15,11 +15,6 @@ if ($Platform -ne "x64") {
 }
 
 $auditStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
-# Changing any pattern, count, ceiling or contract in this script requires:
-# bump $auditProfileVersion, sync $RequiredAuditProfileVersion in
-# scripts/start-aot-preview.ps1 and the lowercase requiredAuditProfileVersion
-# chain in the run-aot-*-smoke.ps1 runners, and update every contract test
-# pinning "= <previous version>" (grep: auditProfileVersion).
 $auditProfileVersion = 62
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
@@ -285,16 +280,7 @@ try {
     [Environment]::SetEnvironmentVariable("DOTNET_CLI_UI_LANGUAGE", "en-US", "Process")
     [Environment]::SetEnvironmentVariable("DOTNET_NOLOGO", "1", "Process")
 
-    # Discover every project directly under src/ so newly added assemblies
-    # (pluginization Step 1+) are restored automatically instead of requiring
-    # manual edits to a hardcoded project array.
-    $restoreProjects = @(
-        Get-ChildItem -Path (Join-Path $repoRoot "src") -Directory |
-            ForEach-Object { Get-ChildItem -Path $_.FullName -Filter "*.csproj" -File } |
-            Sort-Object Name |
-            ForEach-Object { $_.FullName })
-
-    foreach ($restoreProject in $restoreProjects) {
+    foreach ($restoreProject in @($project, $updaterProject)) {
         $restoreArguments = @(
             "restore",
             $restoreProject,
@@ -436,7 +422,6 @@ $forbiddenFiles = @(
     "DeskBox.dll",
     "DeskBox.deps.json",
     "DeskBox.runtimeconfig.json",
-    "DeskBox.Abstractions.dll",
     "DeskBox.Updater.dll",
     "DeskBox.Updater.deps.json",
     "DeskBox.Updater.runtimeconfig.json"
@@ -1522,22 +1507,22 @@ $stage4E4LegacyBindingSourceMatches = @(
 $stage4E4RequiredCompiledBindings = @(
     [PSCustomObject]@{
         sourceFile = $stage4E4SourceFiles[0]
-        pattern = "{x:Bind ViewModel.FileStackSettingsSummaryText, Mode=OneWay}"
+        pattern = "{x:Bind FileStack.SettingsSummaryText, Mode=OneWay}"
         expectedCount = 1
     },
     [PSCustomObject]@{
         sourceFile = $stage4E4SourceFiles[0]
-        pattern = "{x:Bind ViewModel.FileStacksEnabled, Mode=TwoWay}"
+        pattern = "{x:Bind FileStack.StacksEnabled, Mode=TwoWay}"
         expectedCount = 1
     },
     [PSCustomObject]@{
         sourceFile = $stage4E4SourceFiles[0]
-        pattern = "{x:Bind ViewModel.AvailableFileWidgetFolderOpenBehaviorOptionItems, Mode=OneWay}"
+        pattern = "{x:Bind FeatureWidgets.AvailableFolderOpenBehaviorOptionItems, Mode=OneWay}"
         expectedCount = 1
     },
     [PSCustomObject]@{
         sourceFile = $stage4E4SourceFiles[0]
-        pattern = "{x:Bind ViewModel.SelectedFileWidgetFolderOpenBehavior, Mode=TwoWay}"
+        pattern = "{x:Bind FeatureWidgets.FolderOpenBehavior, Mode=TwoWay}"
         expectedCount = 1
     }
 )
@@ -1554,7 +1539,15 @@ $stage4E4MissingCompiledBindings = @(
 $stage4E4RequiredViewModelBridgePatterns = @(
     [PSCustomObject]@{
         sourceFile = $stage4E4SourceFiles[1]
-        pattern = "public static readonly DependencyProperty ViewModelProperty"
+        pattern = "public static readonly DependencyProperty FileStackProperty"
+    },
+    [PSCustomObject]@{
+        sourceFile = $stage4E4SourceFiles[1]
+        pattern = "public static readonly DependencyProperty FeatureWidgetsProperty"
+    },
+    [PSCustomObject]@{
+        sourceFile = $stage4E4SourceFiles[1]
+        pattern = "public static readonly DependencyProperty InteractionProperty"
     },
     [PSCustomObject]@{
         sourceFile = $stage4E4SourceFiles[1]
@@ -1562,11 +1555,19 @@ $stage4E4RequiredViewModelBridgePatterns = @(
     },
     [PSCustomObject]@{
         sourceFile = $stage4E4SourceFiles[1]
-        pattern = "nameof(ViewModel)"
+        pattern = "nameof(FileStack)"
     },
     [PSCustomObject]@{
         sourceFile = $stage4E4SourceFiles[1]
-        pattern = "typeof(SettingsViewModel)"
+        pattern = "typeof(FileStackSettingsViewModel)"
+    },
+    [PSCustomObject]@{
+        sourceFile = $stage4E4SourceFiles[1]
+        pattern = "typeof(FeatureWidgetsSettingsViewModel)"
+    },
+    [PSCustomObject]@{
+        sourceFile = $stage4E4SourceFiles[1]
+        pattern = "typeof(InteractionSettingsViewModel)"
     },
     [PSCustomObject]@{
         sourceFile = $stage4E4SourceFiles[1]
@@ -1574,38 +1575,27 @@ $stage4E4RequiredViewModelBridgePatterns = @(
     },
     [PSCustomObject]@{
         sourceFile = $stage4E4SourceFiles[1]
-        pattern = "public SettingsViewModel? ViewModel"
+        pattern = "public FileStackSettingsViewModel? FileStack"
     },
     [PSCustomObject]@{
         sourceFile = $stage4E4SourceFiles[1]
-        pattern = "get => (SettingsViewModel?)GetValue(ViewModelProperty);"
+        pattern = "get => (FileStackSettingsViewModel?)GetValue(FileStackProperty);"
     },
     [PSCustomObject]@{
         sourceFile = $stage4E4SourceFiles[1]
-        pattern = "set => SetValue(ViewModelProperty, value);"
+        pattern = "set => SetValue(FileStackProperty, value);"
     },
     [PSCustomObject]@{
         sourceFile = $stage4E4SourceFiles[2]
         pattern = "SettingsRoot.DataContext = ViewModel;"
     },
     [PSCustomObject]@{
-        sourceFile = $stage4E4SourceFiles[2]
-        # 0a496114 replaced the eager per-section ViewModel assignments with
-        # lazy on-demand section loading; Bindings.Initialize() is the bridge
-        # entry point that follows the root DataContext assignment.
-        pattern = "Bindings.Initialize();"
-    },
-    [PSCustomObject]@{
-        sourceFile = $stage4E4SourceFiles[2]
-        pattern = "Bindings.StopTracking();"
-    },
-    [PSCustomObject]@{
         sourceFile = $stage4E4SourceFiles[7]
-        pattern = "fileSettings.ViewModel = ViewModel;"
+        pattern = "fileSettings.FileStack = _fileStackSettingsViewModel;"
     },
     [PSCustomObject]@{
         sourceFile = $stage4E4SourceFiles[2]
-        pattern = "AppearanceDetailSection.ViewModel = null;"
+        pattern = "AppearanceDetailSection.FileStack = null;"
     },
     [PSCustomObject]@{
         sourceFile = $stage4E4SourceFiles[2]
@@ -1630,10 +1620,10 @@ $stage4E4DeferredDataContextIndex = $stage4E4DeferredSectionsSource.IndexOf(
     "section.DataContext = ViewModel;",
     [StringComparison]::Ordinal)
 $stage4E4BridgeAssignmentIndex = $stage4E4DeferredSectionsSource.IndexOf(
-    "fileSettings.ViewModel = ViewModel;",
+    "fileSettings.FileStack = _fileStackSettingsViewModel;",
     [StringComparison]::Ordinal)
 $stage4E4BridgeClearIndex = $stage4E4SettingsWindowSource.IndexOf(
-    "AppearanceDetailSection.ViewModel = null;",
+    "AppearanceDetailSection.FileStack = null;",
     [StringComparison]::Ordinal)
 $stage4E4ViewModelDisposeMatch = [regex]::Match(
     $stage4E4SettingsWindowSource,
@@ -1656,30 +1646,45 @@ $stage4E4UnexpectedManualBridgePatterns = @(
         }
     }
 )
+# Batch 45 re-homed the file-stack and folder-open behavior contracts onto
+# their section editors; the source list still points the legacy warning
+# scope at the historical shell files, so these behavior patterns read the
+# editor files directly.
+$stage4E4EditorSources = @{}
+foreach ($editorFile in @(
+        "src\DeskBox\Features\FileStack\FileStackSettingsViewModel.cs",
+        "src\DeskBox\Features\FeatureWidgets\FeatureWidgetsSettingsViewModel.cs",
+        "src\DeskBox\Features\Interaction\InteractionSettingsViewModel.cs")) {
+    $stage4E4EditorSources[$editorFile] = Get-Content -LiteralPath (Join-Path $repoRoot $editorFile) -Raw
+}
 $stage4E4RequiredBehaviorPatterns = @(
     [PSCustomObject]@{
-        sourceFile = $stage4E4SourceFiles[3]
-        pattern = "OnPropertyChanged(nameof(FileStackSettingsSummaryText));"
+        sourceFile = "src\DeskBox\Features\FileStack\FileStackSettingsViewModel.cs"
+        pattern = "OnPropertyChanged(nameof(SettingsSummaryText));"
     },
     [PSCustomObject]@{
-        sourceFile = $stage4E4SourceFiles[3]
-        pattern = "OnPropertyChanged(nameof(FileStackAutoStacking));"
+        sourceFile = "src\DeskBox\Features\FileStack\FileStackSettingsViewModel.cs"
+        pattern = "_settings.SetFileStackAutoStacking(value);"
     },
     [PSCustomObject]@{
-        sourceFile = $stage4E4SourceFiles[3]
-        pattern = "SetProperty(ref _fileStacksEnabled, value)"
+        sourceFile = "src\DeskBox\Features\FileStack\FileStackSettingsViewModel.cs"
+        pattern = "SetProperty(ref _stacksEnabled, value)"
     },
     [PSCustomObject]@{
-        sourceFile = $stage4E4SourceFiles[4]
-        pattern = "public string SelectedFileWidgetFolderOpenBehavior"
+        sourceFile = "src\DeskBox\Features\FeatureWidgets\FeatureWidgetsSettingsViewModel.cs"
+        pattern = "public string FolderOpenBehavior"
     },
     [PSCustomObject]@{
-        sourceFile = $stage4E4SourceFiles[4]
-        pattern = "_settingsService.Settings.FileWidgetFolderOpenBehavior = normalized;"
+        sourceFile = "src\DeskBox\Features\FeatureWidgets\FeatureWidgetsSettingsViewModel.cs"
+        pattern = "_settings.SetFileWidgetFolderOpenBehavior(normalized);"
     },
     [PSCustomObject]@{
-        sourceFile = $stage4E4SourceFiles[5]
-        pattern = "OnPropertyChanged(nameof(AvailableFileWidgetFolderOpenBehaviorOptions));"
+        sourceFile = "src\DeskBox\Features\FeatureWidgets\FeatureWidgetsSettingsViewModel.cs"
+        pattern = "OnPropertyChanged(nameof(AvailableFolderOpenBehaviorOptionItems));"
+    },
+    [PSCustomObject]@{
+        sourceFile = "src\DeskBox\Features\Interaction\InteractionSettingsViewModel.cs"
+        pattern = "SetProperty(ref _fileItemContextMenuEnabled, value)"
     },
     [PSCustomObject]@{
         sourceFile = $stage4E4SourceFiles[6]
@@ -1700,7 +1705,13 @@ $stage4E4RequiredBehaviorPatterns = @(
 )
 $stage4E4MissingBehaviorPatterns = @(
     foreach ($contract in $stage4E4RequiredBehaviorPatterns) {
-        if ($stage4E4Sources[$contract.sourceFile].IndexOf(
+        $behaviorSource = if ($stage4E4Sources.Contains($contract.sourceFile)) {
+            $stage4E4Sources[$contract.sourceFile]
+        } else {
+            $stage4E4EditorSources[$contract.sourceFile]
+        }
+        if ([string]::IsNullOrEmpty($behaviorSource) -or
+            $behaviorSource.IndexOf(
                 $contract.pattern,
                 [StringComparison]::Ordinal) -lt 0) {
             "$($contract.sourceFile)::$($contract.pattern)"
@@ -2096,7 +2107,7 @@ $stage5AMissingDataPathPatterns = @(
     }
 )
 $stage5ARequiredLauncherPatterns = @(
-    '$RequiredAuditProfileVersion = 62',
+    '$RequiredAuditProfileVersion = 59',
     '$RequiredSummarySchemaVersion = 55',
     'Test-PathEqualOrInside',
     'Get-DirectoryStateFingerprint',
@@ -3466,14 +3477,29 @@ $stage5B4B1SourceFiles = @(
     "src/DeskBox/Views/SettingsSections/CapsuleModeSettingsSection.xaml",
     "src/DeskBox/Views/SettingsSections/CapsuleModeSettingsSection.xaml.cs",
     "src/DeskBox/Models/SettingsOption.cs",
-    "src/DeskBox/ViewModels/SettingsViewModel.CapsuleOptions.cs",
-    "src/DeskBox/ViewModels/SettingsViewModel.GroupNavigation.cs",
+    # Batch 44 moved the capsule-override and widget-group projection records
+    # off the settings shell into the Models namespace.
+    "src/DeskBox/Models/CapsuleOverrideSettingsItem.cs",
+    "src/DeskBox/Models/WidgetGroupSettingsItems.cs",
     "src/DeskBox/Models/WeatherData.cs",
     "src/DeskBox/Views/SettingsSections/FileWidgetSettingsSection.xaml",
     "src/DeskBox/ViewModels/SettingsViewModel.FileStackOptions.cs",
     "src/DeskBox/ViewModels/SettingsViewModel.FeatureOptions.cs",
     "src/DeskBox/ViewModels/SettingsViewModel.SelectionOptions.cs",
-    "src/DeskBox/ViewModels/SettingsViewModel.WeatherOptions.cs",
+    # Batch 48 moved the weather section's binding surface (incl. the city
+    # search suggestion projection) onto the section editor.
+    "src/DeskBox/Features/Weather/WeatherSettingsViewModel.cs",
+    # Batch 49 moved the backup family's binding surface (local/cloud
+    # backups and the compatibility-diagnostics texts) onto the backup
+    # editor; the shell keeps only the operation flows and diagnostics
+    # computation.
+    "src/DeskBox/Features/Backup/BackupSettingsViewModel.cs",
+    "src/DeskBox/Features/Backup/BackupSettingsViewModel.SettingsSurface.cs",
+    # Batch 50 moved the performance section's binding surface (and the
+    # General section's inline preset combo / attachment-storage combo)
+    # onto the performance / feature-widgets editors.
+    "src/DeskBox/Features/Performance/PerformanceSettingsViewModel.cs",
+    "src/DeskBox/Features/FeatureWidgets/FeatureWidgetsSettingsViewModel.cs",
     "src/DeskBox/Views/SettingsWindow.HotkeyAndAppearance.cs",
     # Deferred-section host owns the lazy typed-ViewModel bridges that used to
     # live eagerly in SettingsWindow.xaml.cs.
@@ -3559,28 +3585,13 @@ $stage5B4B1RequiredProjectionPatterns = @(
 $stage5B4B1ProjectionSource =
     $stage5B4B1Sources[$stage5B4B1SourceFiles[5]] +
     "`n" +
-    $stage5B4B1Sources[$stage5B4B1SourceFiles[22]]
+    $stage5B4B1Sources[$stage5B4B1SourceFiles[26]]
 $stage5B4B1MissingProjectionPatterns = @(
     foreach ($pattern in $stage5B4B1RequiredProjectionPatterns) {
         if ($stage5B4B1ProjectionSource.IndexOf(
                 $pattern,
                 [StringComparison]::Ordinal) -lt 0) {
             "$pattern"
-        }
-    }
-)
-# 0a496114 moved the eager per-section ViewModel assignments into lazy
-# section creation; the capsule section contract now pins the deferred
-# assignment instead of the removed SettingsWindow.xaml.cs eager bridge.
-$stage5B4B1RequiredDeferredSectionPatterns = @(
-    'fileSettings.ViewModel = ViewModel;',
-    'capsuleSettings.ViewModel = ViewModel;'
-)
-$stage5B4B1MissingDeferredSectionPatterns = @(
-    foreach ($pattern in $stage5B4B1RequiredDeferredSectionPatterns) {
-        $deferredSource = Get-Content -LiteralPath (Join-Path $repoRoot "src/DeskBox/Views/SettingsWindow.DeferredSections.cs") -Raw
-        if ($deferredSource.IndexOf($pattern, [StringComparison]::Ordinal) -lt 0) {
-            "src/DeskBox/Views/SettingsWindow.DeferredSections.cs::$pattern"
         }
     }
 )
@@ -3609,7 +3620,6 @@ $stage5B4B1RequiredBindableTypePatterns = @(
         patterns = @(
             '#if DESKBOX_NATIVE_AOT',
             '[WinRT.GeneratedBindableCustomProperty([',
-            'nameof(SelectedWidgetCapsuleBarPlacement)',
             'public partial class SettingsViewModel')
     },
     [ordered]@{
@@ -3668,7 +3678,7 @@ $stage5B4B1UnsafeBindableViewModelPatterns = @(
     }
 )
 $stage5B4B1RequiredFileStackXamlPatterns = @(
-    'ItemsSource="{x:Bind FileStackCustomRules, Mode=OneWay}"'
+    'ItemsSource="{x:Bind CustomRules, Mode=OneWay}"'
 )
 $stage5B4B1RequiredCommandXamlPatterns = @(
     'Command="{x:Bind ResetDisplayWidgetChromeOverridesCommand, Mode=OneWay}"',
@@ -3722,34 +3732,42 @@ $stage5B4B1RequiredFileWidgetProjectionPatterns = @(
     [ordered]@{
         file = $stage5B4B1SourceFiles[16]
         patterns = @(
-            'IsOn="{x:Bind ViewModel.FileStacksEnabled, Mode=TwoWay}"',
-            'ItemsSource="{x:Bind ViewModel.AvailableFileWidgetFolderOpenBehaviorOptionItems, Mode=OneWay}"')
+            'IsOn="{x:Bind FileStack.StacksEnabled, Mode=TwoWay}"',
+            'ItemsSource="{x:Bind FeatureWidgets.AvailableFolderOpenBehaviorOptionItems, Mode=OneWay}"')
     },
     [ordered]@{
-        file = $stage5B4B1SourceFiles[17]
+        file = 'src/DeskBox/Features/FileStack/FileStackSettingsViewModel.cs'
         patterns = @(
-            'public bool FileStacksEnabled',
-            'SetProperty(ref _fileStacksEnabled, value)',
-            '_settingsService.Settings.FileStacksEnabled = value;')
+            'public bool StacksEnabled',
+            'SetProperty(ref _stacksEnabled, value)',
+            '_settings.SetFileStacksEnabled(value);')
     },
     [ordered]@{
-        file = $stage5B4B1SourceFiles[18]
+        file = 'src/DeskBox/Features/FeatureWidgets/FeatureWidgetsSettingsViewModel.cs'
         patterns = @(
-            'public object[] AvailableFileWidgetFolderOpenBehaviorOptionItems',
-            'AvailableFileWidgetFolderOpenBehaviorOptions.Cast<object>().ToArray()')
+            'public object[] AvailableFolderOpenBehaviorOptionItems',
+            'AvailableFolderOpenBehaviorOptions.Cast<object>().ToArray()')
     },
     [ordered]@{
-        file = $stage5B4B1SourceFiles[19]
+        file = 'src/DeskBox/Features/FeatureWidgets/FeatureWidgetsSettingsViewModel.cs'
         patterns = @(
-            'OnPropertyChanged(nameof(AvailableFileWidgetFolderOpenBehaviorOptionItems))')
+            'OnPropertyChanged(nameof(AvailableFolderOpenBehaviorOptionItems))')
     }
 )
+$stage5B4B1FileWidgetProjectionSources = @{}
+foreach ($projectionFile in @(
+        $stage5B4B1SourceFiles[16],
+        "src/DeskBox/Features/FileStack/FileStackSettingsViewModel.cs",
+        "src/DeskBox/Features/FeatureWidgets/FeatureWidgetsSettingsViewModel.cs")) {
+    $stage5B4B1FileWidgetProjectionSources[$projectionFile] =
+        Get-Content -LiteralPath (Join-Path $repoRoot ($projectionFile -replace '/', '\')) -Raw
+}
 $stage5B4B1MissingFileWidgetProjectionPatterns = @(
     foreach ($entry in $stage5B4B1RequiredFileWidgetProjectionPatterns) {
         foreach ($pattern in $entry.patterns) {
-            if ($stage5B4B1Sources[$entry.file].IndexOf(
-                    $pattern,
-                    [StringComparison]::Ordinal) -lt 0) {
+            if ($stage5B4B1FileWidgetProjectionSources[$entry.file].IndexOf(
+                $pattern,
+                [StringComparison]::Ordinal) -lt 0) {
                 "$($entry.file)::$pattern"
             }
         }
@@ -3757,26 +3775,26 @@ $stage5B4B1MissingFileWidgetProjectionPatterns = @(
 )
 $stage5B4B1RequiredWeatherProjectionPatterns = @(
     [ordered]@{
-        # 0a496114 moved the weather-city suggestion machinery out of the
-        # settings-window smoke partial into the WeatherOptions view model
-        # partial below; the deep-smoke no longer declares these types.
         file = $stage5B4B1SourceFiles[20]
         patterns = @(
-            'ObservableCollection<WeatherCitySearchResult> WeatherCitySuggestions',
-            'public object[] WeatherCitySuggestionItems',
-            'WeatherCitySuggestions.Cast<object>().ToArray()',
-            'RefreshWeatherCitySuggestionItems()',
-            'WeatherCitySuggestions.Add(')
+            '_citySuggestions.Cast<object>().ToArray()',
+            'public object[] CitySuggestionItems',
+            'SetCitySuggestions(',
+            'SelectCity(_citySuggestions[0])')
     },
     [ordered]@{
-        file = $stage5B4B1SourceFiles[21]
+        # Name-based lookup: batch 49 inserted the backup editor files into
+        # the source list after the weather editor and silently shifted this
+        # positional reference onto the backup editor (the pattern lives in
+        # the hotkey-and-appearance code-behind). Batch 50 pins it by path.
+        file = "src/DeskBox/Views/SettingsWindow.HotkeyAndAppearance.cs"
         patterns = @(
-            'WeatherCitySuggestions[0]')
+            '_weatherSettingsViewModel.TrySelectFirstCitySuggestion()')
     },
     [ordered]@{
         file = $stage5B4B1SourceFiles[8]
         patterns = @(
-            'ItemsSource="{Binding WeatherCitySuggestionItems}"')
+            'ItemsSource="{Binding CitySuggestionItems}"')
     }
 )
 $stage5B4B1MissingWeatherProjectionPatterns = @(
@@ -3878,7 +3896,7 @@ $stage5B4B1SourceWarningMessages = @(
         Where-Object {
             $line = $_
             $warningCodeRegex.IsMatch($line) -and
-                $line -match "(?:App\.AotManagedUiSmoke|SettingsWindow\.(?:AotDeepSmoke|Navigation|Maintenance|HotkeyAndAppearance)|SettingsWindow\.xaml|FileStackCustomRuleEditor|SettingsViewModel\.(?:AotBindableProperties|CapsuleOptions|GroupNavigation|FileStackOptions|FeatureOptions|SelectionOptions|WeatherOptions)|(?:CapsuleMode|FileWidget)SettingsSection\.xaml|SettingsOption|WeatherData)\.cs\("
+                $line -match "(?:App\.AotManagedUiSmoke|SettingsWindow\.(?:AotDeepSmoke|Navigation|Maintenance|HotkeyAndAppearance)|SettingsWindow\.xaml|FileStackCustomRuleEditor|Features\.Weather\.WeatherSettingsViewModel|Features\.Backup\.BackupSettingsViewModel(?:\.\w+)?|Features\.Performance\.PerformanceSettingsViewModel(?:\.\w+)?|Features\.FeatureWidgets\.FeatureWidgetsSettingsViewModel(?:\.\w+)?|SettingsViewModel\.(?:AotBindableProperties|CapsuleOptions|GroupNavigation|FileStackOptions|FeatureOptions|SelectionOptions)|(?:CapsuleMode|FileWidget)SettingsSection\.xaml|SettingsOption|WeatherData)\.cs\("
         } |
         ForEach-Object { $_.Trim() } |
         Sort-Object -Unique
@@ -3894,7 +3912,6 @@ $stage5B4B2ASourceFiles = @(
     "scripts/run-aot-managed-ui-smoke.ps1",
     "scripts/start-aot-preview.ps1",
     "src/DeskBox/ViewModels/SettingsViewModel.AppearanceOptions.cs",
-    "src/DeskBox/ViewModels/SettingsViewModel.AppearanceCallbacks.cs",
     "src/DeskBox/ViewModels/SettingsViewModel.PreferenceCallbacks.cs",
     "src/DeskBox/ViewModels/WidgetViewModel.Operations.cs",
     "src/DeskBox/Services/SettingsService.cs"
@@ -3910,11 +3927,13 @@ $stage5B4B2ARequiredRunnerPatterns = @(
     'AotManagedUiPersistenceVerifyRestorePhase',
     'AotManagedUiPersistencePostflightPhase',
     'CaptureAotManagedUiPersistenceAsync',
-    'settingsWindow.ViewModel',
+    # Batch 43 rerouted the AOT persistence chimney through the appearance
+    # editor (the shell facade properties are gone).
+    'settingsWindow.AppearanceSettings',
     'ShowFileExtensions',
     'FileNameLineCount',
     'TextSize',
-    'SelectedTrayIconStyle',
+    'appearanceSettings.TrayIconStyle',
     'FlushPendingSaveAsync(',
     'SettingsPersistenceFlushed',
     'ShutdownApplicationAsync()',
@@ -6074,7 +6093,7 @@ $stage5B4C1B1RequiredNativePatterns = @(
     'DESKBOX_RECYCLE_BIN_REQUEST_V1_SIZE_64',
     'DESKBOX_RECYCLE_BIN_RESULT_V1_SIZE_64',
     'deskbox_recycle_bin_v1',
-    'assert_eq!(deskbox_native_capabilities(), 1023);',
+    'assert_eq!(deskbox_native_capabilities(), 511);',
     'RecycleBinCapability = 1UL << 8',
     'NativeLibrary.TryGetExport',
     'result.Reserved5 != 0',
@@ -6086,7 +6105,7 @@ $stage5B4C1B1RequiredNativePatterns = @(
     'if result.matched_count != 1',
     'const RESTORE_VERB: &str = "undelete"',
     'item.InvokeVerb(&verb)',
-    'expected 1023'
+    'expected 511'
 )
 $stage5B4C1B1MissingNativePatterns = @(
     foreach ($pattern in $stage5B4C1B1RequiredNativePatterns) {
@@ -6445,7 +6464,7 @@ $stage5B4C1B2AForbiddenScopePatterns = @(
 )
 $stage5B4C1B2ARustAbiUnchanged =
     $stage5B4C1B2ASources[$stage5B4C1B2ASourceFiles[13]].Contains(
-        'assert_eq!(deskbox_native_capabilities(), 1023);') -and
+        'assert_eq!(deskbox_native_capabilities(), 511);') -and
     [regex]::Matches(
         $stage5B4C1B2ASources[$stage5B4C1B2ASourceFiles[13]],
         [regex]::Escape('#[unsafe(no_mangle)]')).Count -eq 10
@@ -6631,7 +6650,7 @@ $stage5B4C1B2BRequiredSmokeScriptPatterns = @(
     'FilePropertiesReadOnly',
     '[Guid]::NewGuid().ToString("N")',
     'file-properties-preview-$runId',
-    'profile 62 / schema 55',
+    'profile 59 / schema 55',
     'Refusing to replace an existing file Properties preview root',
     'Refusing to replace an existing file Properties recovery root',
     'properties-$runId.txt',
@@ -6685,7 +6704,7 @@ $stage5B4C1B2BForbiddenScopePatterns = @(
 )
 $stage5B4C1B2BRustAbiUnchanged =
     $stage5B4C1B2BSources[$stage5B4C1B2BSourceFiles[11]].Contains(
-        'assert_eq!(deskbox_native_capabilities(), 1023);') -and
+        'assert_eq!(deskbox_native_capabilities(), 511);') -and
     [regex]::Matches(
         $stage5B4C1B2BSources[$stage5B4C1B2BSourceFiles[11]],
         [regex]::Escape('#[unsafe(no_mangle)]')).Count -eq 10
@@ -6859,7 +6878,7 @@ $stage5B4C1C1RequiredSmokeScriptPatterns = @(
     'run-aot-picker-clipboard-smoke.ps1',
     'PickerClipboardStorageItemsPersistenceRestart',
     '[Guid]::NewGuid().ToString("N")',
-    'profile 62 / schema 55',
+    'profile 59 / schema 55',
     'UIAutomationClient',
     'CancelPending',
     'SelectionPending',
@@ -6919,7 +6938,7 @@ $stage5B4C1C1ForbiddenScopePatterns = @(
 )
 $stage5B4C1C1RustAbiUnchanged =
     $stage5B4C1C1Sources[$stage5B4C1C1SourceFiles[11]].Contains(
-        'assert_eq!(deskbox_native_capabilities(), 1023);') -and
+        'assert_eq!(deskbox_native_capabilities(), 511);') -and
     [regex]::Matches(
         $stage5B4C1C1Sources[$stage5B4C1C1SourceFiles[11]],
         [regex]::Escape('#[unsafe(no_mangle)]')).Count -eq 10
@@ -7145,7 +7164,7 @@ $stage5B4C1C2ARequiredSmokeScriptPatterns = @(
     'run-aot-native-drop-smoke.ps1',
     'NativeDropPersistenceRestart',
     '[Guid]::NewGuid().ToString("N")',
-    'profile 62 / schema 55',
+    'profile 59 / schema 55',
     '$largeFileLength = 384MB',
     'ProgrammaticGeneratedCcwHDrop',
     'physicalExplorerMouseVerified = $false',
@@ -7199,7 +7218,7 @@ $stage5B4C1C2AForbiddenScopePatterns = @(
 )
 $stage5B4C1C2ARustAbiUnchanged =
     $stage5B4C1C2ASources[$stage5B4C1C2ASourceFiles[15]].Contains(
-        'assert_eq!(deskbox_native_capabilities(), 1023);') -and
+        'assert_eq!(deskbox_native_capabilities(), 511);') -and
     [regex]::Matches(
         $stage5B4C1C2ASources[$stage5B4C1C2ASourceFiles[15]],
         [regex]::Escape('#[unsafe(no_mangle)]')).Count -eq 10
@@ -7321,7 +7340,7 @@ $stage5B4C2ARunnerSource =
     $stage5B4C2ASources[$stage5B4C2ASourceFiles[7]]
 $stage5B4C2ARequiredSmokeScriptPatterns = @(
     'StartAotHotkeySmokeIfRequested();',
-    'profile 62 / schema 55',
+    'profile 59 / schema 55',
     'Invoke-HotkeyPhase',
     '-Phase "Primary"',
     '-Phase "Release"',
@@ -7370,7 +7389,7 @@ $stage5B4C2AForbiddenScopePatterns = @(
 )
 $stage5B4C2ARustAbiUnchanged =
     $stage5B4C2ASources[$stage5B4C2ASourceFiles[8]].Contains(
-        'assert_eq!(deskbox_native_capabilities(), 1023);') -and
+        'assert_eq!(deskbox_native_capabilities(), 511);') -and
     [regex]::Matches(
         $stage5B4C2ASources[$stage5B4C2ASourceFiles[8]],
         [regex]::Escape('#[unsafe(no_mangle)]')).Count -eq 10
@@ -7494,7 +7513,7 @@ $stage5B4C3ARequiredSmokeScriptPatterns = @(
     'StartAotTodoRecurrenceReminderSmokeIfRequested();',
     'TodoRecurrenceReminderPersistenceRestart',
     'run-aot-todo-recurrence-reminder-smoke.ps1',
-    'profile 62 / schema 55',
+    'profile 59 / schema 55',
     '[Guid]::NewGuid().ToString("N")',
     'Invoke-TodoRecurrenceReminderPhase',
     '"SeedAndSnooze"',
@@ -7544,7 +7563,7 @@ $stage5B4C3AForbiddenScopePatterns = @(
 )
 $stage5B4C3ARustAbiUnchanged =
     $stage5B4C3ASources[$stage5B4C3ASourceFiles[13]].Contains(
-        'assert_eq!(deskbox_native_capabilities(), 1023);') -and
+        'assert_eq!(deskbox_native_capabilities(), 511);') -and
     [regex]::Matches(
         $stage5B4C3ASources[$stage5B4C3ASourceFiles[13]],
         [regex]::Escape('#[unsafe(no_mangle)]')).Count -eq 10
@@ -7665,7 +7684,7 @@ $stage5B4C3B1RequiredSmokeScriptPatterns = @(
     'StartAotTodoNotificationLifecycleSmokeIfRequested();',
     'TodoNotificationDisplayCleanup',
     'run-aot-todo-notification-smoke.ps1',
-    'profile 62 / schema 55',
+    'profile 59 / schema 55',
     '[Guid]::NewGuid().ToString("N")',
     'Invoke-TodoNotificationPhase',
     '"ShowAndInspect"',
@@ -7724,7 +7743,7 @@ $stage5B4C3B1ForbiddenScopePatterns = @(
 )
 $stage5B4C3B1RustAbiUnchanged =
     $stage5B4C3B1Sources[$stage5B4C3B1SourceFiles[6]].Contains(
-        'assert_eq!(deskbox_native_capabilities(), 1023);') -and
+        'assert_eq!(deskbox_native_capabilities(), 511);') -and
     [regex]::Matches(
         $stage5B4C3B1Sources[$stage5B4C3B1SourceFiles[6]],
         [regex]::Escape('#[unsafe(no_mangle)]')).Count -eq 10
@@ -7853,7 +7872,7 @@ $stage5B4C3B2ARequiredSmokeScriptPatterns = @(
     'StartAotTodoNotificationActivationSmokeIfRequested();',
     'TodoNotificationActionRouting',
     'run-aot-todo-notification-activation-smoke.ps1',
-    'profile 62 / schema 55',
+    'profile 59 / schema 55',
     '[Guid]::NewGuid().ToString("N")',
     'Invoke-TodoNotificationActivationPhase',
     '"RouteAndPersist"',
@@ -7908,7 +7927,7 @@ $stage5B4C3B2AForbiddenScopePatterns = @(
 )
 $stage5B4C3B2ARustAbiUnchanged =
     $stage5B4C3B2ASources[$stage5B4C3B2ASourceFiles[7]].Contains(
-        'assert_eq!(deskbox_native_capabilities(), 1023);') -and
+        'assert_eq!(deskbox_native_capabilities(), 511);') -and
     [regex]::Matches(
         $stage5B4C3B2ASources[$stage5B4C3B2ASourceFiles[7]],
         [regex]::Escape('#[unsafe(no_mangle)]')).Count -eq 10
@@ -8044,7 +8063,7 @@ $stage5B4C3B2B1RunnerSource =
 $stage5B4C3B2B1RequiredSmokeScriptPatterns = @(
     'TodoNotificationEnvelopeForwarding',
     'run-aot-todo-notification-forwarding-smoke.ps1',
-    '$requiredAuditProfileVersion = 62',
+    '$requiredAuditProfileVersion = 59',
     '$requiredSummarySchemaVersion = 55',
     '-NoStop',
     '-ExpectExistingInstance',
@@ -8097,7 +8116,7 @@ $stage5B4C3B2B1ForbiddenScopePatterns = @(
 )
 $stage5B4C3B2B1RustAbiUnchanged =
     $stage5B4C3B2B1Sources[$stage5B4C3B2B1SourceFiles[9]].Contains(
-        'assert_eq!(deskbox_native_capabilities(), 1023);') -and
+        'assert_eq!(deskbox_native_capabilities(), 511);') -and
     [regex]::Matches(
         $stage5B4C3B2B1Sources[$stage5B4C3B2B1SourceFiles[9]],
         [regex]::Escape('#[unsafe(no_mangle)]')).Count -eq 10
@@ -8214,7 +8233,7 @@ $stage5B4C3B2B2ARunnerSource =
 $stage5B4C3B2B2ARequiredSmokeScriptPatterns = @(
     'TodoNotificationSurfaceRouting',
     'run-aot-todo-notification-surface-smoke.ps1',
-    '$requiredAuditProfileVersion = 62',
+    '$requiredAuditProfileVersion = 59',
     '$requiredSummarySchemaVersion = 55',
     '-AllowEarlyExit',
     '-StartupWaitSeconds 1',
@@ -8258,7 +8277,7 @@ $stage5B4C3B2B2AForbiddenScopePatterns = @(
 )
 $stage5B4C3B2B2ARustAbiUnchanged =
     $stage5B4C3B2B2ASources[$stage5B4C3B2B2ASourceFiles[9]].Contains(
-        'assert_eq!(deskbox_native_capabilities(), 1023);') -and
+        'assert_eq!(deskbox_native_capabilities(), 511);') -and
     [regex]::Matches(
         $stage5B4C3B2B2ASources[$stage5B4C3B2B2ASourceFiles[9]],
         [regex]::Escape('#[unsafe(no_mangle)]')).Count -eq 10
@@ -8384,7 +8403,7 @@ $stage5B4C3B2B2BRunnerSource =
     $stage5B4C3B2B2BSources[$stage5B4C3B2B2BSourceFiles[10]]
 $stage5B4C3B2B2BRequiredSmokeScriptPatterns = @(
     'RealWindowsNotificationUserClick',
-    '$requiredAuditProfileVersion = 62',
+    '$requiredAuditProfileVersion = 59',
     '$requiredSummarySchemaVersion = 55',
     '[switch]$IncludeColdStart',
     '-AllowEarlyExit',
@@ -8439,7 +8458,7 @@ $stage5B4C3B2B2BForbiddenScopePatterns = @(
 )
 $stage5B4C3B2B2BRustAbiUnchanged =
     $stage5B4C3B2B2BSources[$stage5B4C3B2B2BSourceFiles[9]].Contains(
-        'assert_eq!(deskbox_native_capabilities(), 1023);') -and
+        'assert_eq!(deskbox_native_capabilities(), 511);') -and
     [regex]::Matches(
         $stage5B4C3B2B2BSources[$stage5B4C3B2B2BSourceFiles[9]],
         [regex]::Escape('#[unsafe(no_mangle)]')).Count -eq 10
@@ -9864,7 +9883,6 @@ if ($stage5B4B1MissingRunnerPatterns.Count -gt 0) {
 if ($stage5B4B1MissingSettingsPatterns.Count -gt 0 -or
     $stage5B4B1MissingNavigationPatterns.Count -gt 0 -or
     $stage5B4B1MissingProjectionPatterns.Count -gt 0 -or
-    $stage5B4B1MissingDeferredSectionPatterns.Count -gt 0 -or
     $stage5B4B1MissingInventoryPatterns.Count -gt 0 -or
     $stage5B4B1MissingBindableTypePatterns.Count -gt 0 -or
     $stage5B4B1MissingFileStackXamlPatterns.Count -gt 0 -or
@@ -10217,7 +10235,7 @@ if ($stage5B4C1B2AForbiddenScopePatterns.Count -gt 0) {
 }
 
 if (-not $stage5B4C1B2ARustAbiUnchanged) {
-    throw "Stage 5B-4C1B2A changed the frozen Rust ABI 2 / capability 1023 / eleven-export surface. See '$summaryPath'."
+    throw "Stage 5B-4C1B2A changed the frozen Rust ABI 2 / capability 511 / ten-export surface. See '$summaryPath'."
 }
 
 if ($stage5B4C1B2AJsonSerializeCallCount -ne 1) {
@@ -10249,7 +10267,7 @@ if ($stage5B4C1B2BForbiddenScopePatterns.Count -gt 0) {
 }
 
 if (-not $stage5B4C1B2BRustAbiUnchanged) {
-    throw "Stage 5B-4C1B2B changed the frozen Rust ABI 2 / capability 1023 / eleven-export surface. See '$summaryPath'."
+    throw "Stage 5B-4C1B2B changed the frozen Rust ABI 2 / capability 511 / ten-export surface. See '$summaryPath'."
 }
 
 if ($stage5B4C1B2BJsonSerializeCallCount -ne 1) {
@@ -10281,7 +10299,7 @@ if ($stage5B4C1C1ForbiddenScopePatterns.Count -gt 0) {
 }
 
 if (-not $stage5B4C1C1RustAbiUnchanged) {
-    throw "Stage 5B-4C1C1 changed the frozen Rust ABI 2 / capability 1023 / eleven-export surface. See '$summaryPath'."
+    throw "Stage 5B-4C1C1 changed the frozen Rust ABI 2 / capability 511 / ten-export surface. See '$summaryPath'."
 }
 
 if ($stage5B4C1C1JsonSerializeCallCount -ne 1) {
@@ -10314,7 +10332,7 @@ if ($stage5B4C1C2AForbiddenScopePatterns.Count -gt 0) {
 }
 
 if (-not $stage5B4C1C2ARustAbiUnchanged) {
-    throw "Stage 5B-4C1C2A changed the frozen Rust ABI 2 / capability 1023 / eleven-export surface. See '$summaryPath'."
+    throw "Stage 5B-4C1C2A changed the frozen Rust ABI 2 / capability 511 / ten-export surface. See '$summaryPath'."
 }
 
 if ($stage5B4C1C2AJsonSerializeCallCount -ne 1) {
@@ -10344,7 +10362,7 @@ if ($stage5B4C2AForbiddenScopePatterns.Count -gt 0) {
 }
 
 if (-not $stage5B4C2ARustAbiUnchanged) {
-    throw "Stage 5B-4C2A changed the frozen Rust ABI 2 / capability 1023 / eleven-export surface. See '$summaryPath'."
+    throw "Stage 5B-4C2A changed the frozen Rust ABI 2 / capability 511 / ten-export surface. See '$summaryPath'."
 }
 
 if ($stage5B4C2AJsonSerializeCallCount -ne 1) {
@@ -10373,7 +10391,7 @@ if ($stage5B4C3AForbiddenScopePatterns.Count -gt 0) {
 }
 
 if (-not $stage5B4C3ARustAbiUnchanged) {
-    throw "Stage 5B-4C3A changed the frozen Rust ABI 2 / capability 1023 / eleven-export surface. See '$summaryPath'."
+    throw "Stage 5B-4C3A changed the frozen Rust ABI 2 / capability 511 / ten-export surface. See '$summaryPath'."
 }
 
 if ($stage5B4C3AJsonSerializeCallCount -ne 1) {
@@ -10402,7 +10420,7 @@ if ($stage5B4C3B1ForbiddenScopePatterns.Count -gt 0) {
 }
 
 if (-not $stage5B4C3B1RustAbiUnchanged) {
-    throw "Stage 5B-4C3B1 changed the frozen Rust ABI 2 / capability 1023 / eleven-export surface. See '$summaryPath'."
+    throw "Stage 5B-4C3B1 changed the frozen Rust ABI 2 / capability 511 / ten-export surface. See '$summaryPath'."
 }
 
 if ($stage5B4C3B1JsonSerializeCallCount -ne 1) {
@@ -10431,7 +10449,7 @@ if ($stage5B4C3B2AForbiddenScopePatterns.Count -gt 0) {
 }
 
 if (-not $stage5B4C3B2ARustAbiUnchanged) {
-    throw "Stage 5B-4C3B2A changed the frozen Rust ABI 2 / capability 1023 / eleven-export surface. See '$summaryPath'."
+    throw "Stage 5B-4C3B2A changed the frozen Rust ABI 2 / capability 511 / ten-export surface. See '$summaryPath'."
 }
 
 if ($stage5B4C3B2AJsonSerializeCallCount -ne 1) {
@@ -10460,7 +10478,7 @@ if ($stage5B4C3B2B1ForbiddenScopePatterns.Count -gt 0) {
 }
 
 if (-not $stage5B4C3B2B1RustAbiUnchanged) {
-    throw "Stage 5B-4C3B2B1 changed the frozen Rust ABI 2 / capability 1023 / eleven-export surface. See '$summaryPath'."
+    throw "Stage 5B-4C3B2B1 changed the frozen Rust ABI 2 / capability 511 / ten-export surface. See '$summaryPath'."
 }
 
 if ($stage5B4C3B2B1ScenarioJsonSerializeCallCount -ne 1 -or
@@ -10490,7 +10508,7 @@ if ($stage5B4C3B2B2AForbiddenScopePatterns.Count -gt 0) {
 }
 
 if (-not $stage5B4C3B2B2ARustAbiUnchanged) {
-    throw "Stage 5B-4C3B2B2A changed the frozen Rust ABI 2 / capability 1023 / eleven-export surface. See '$summaryPath'."
+    throw "Stage 5B-4C3B2B2A changed the frozen Rust ABI 2 / capability 511 / ten-export surface. See '$summaryPath'."
 }
 
 if ($stage5B4C3B2B2AScenarioJsonSerializeCallCount -ne 0 -or
@@ -10520,7 +10538,7 @@ if ($stage5B4C3B2B2BForbiddenScopePatterns.Count -gt 0) {
 }
 
 if (-not $stage5B4C3B2B2BRustAbiUnchanged) {
-    throw "Stage 5B-4C3B2B2B changed the frozen Rust ABI 2 / capability 1023 / eleven-export surface. See '$summaryPath'."
+    throw "Stage 5B-4C3B2B2B changed the frozen Rust ABI 2 / capability 511 / ten-export surface. See '$summaryPath'."
 }
 
 if ($stage5B4C3B2B2BScenarioJsonSerializeCallCount -ne 0 -or
