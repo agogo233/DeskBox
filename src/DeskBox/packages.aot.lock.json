@@ -215,7 +215,8 @@
         "contentHash": "bYdnhuD0XxcVTrxc8RyBjXo+AXYWJPnda3clhGz2Kakleyun1PyrzYV8RezT7ZYmR9OBSOgvpFQcvHo/K8Y90w=="
       },
       "Microsoft.Windows.AI.MachineLearning": {
-        "type": "Transitive",
+        "type": "Direct",
+        "requested": "[2.1.74, )",
         "resolved": "2.1.74",
         "contentHash": "/Z1yAQ0J53eD1RrOl5anTDS0UQOgneERY//hLljwGcWeUX9ynCvOl5qUxAsfWvwsZZGcvV4WKjAvnAtA6N5i+w==",
         "dependencies": {
@@ -358,7 +359,8 @@
         "contentHash": "bYdnhuD0XxcVTrxc8RyBjXo+AXYWJPnda3clhGz2Kakleyun1PyrzYV8RezT7ZYmR9OBSOgvpFQcvHo/K8Y90w=="
       },
       "Microsoft.Windows.AI.MachineLearning": {
-        "type": "Transitive",
+        "type": "Direct",
+        "requested": "[2.1.74, )",
         "resolved": "2.1.74",
         "contentHash": "/Z1yAQ0J53eD1RrOl5anTDS0UQOgneERY//hLljwGcWeUX9ynCvOl5qUxAsfWvwsZZGcvV4WKjAvnAtA6N5i+w==",
         "dependencies": {
@@ -401,7 +403,8 @@
         "contentHash": "bYdnhuD0XxcVTrxc8RyBjXo+AXYWJPnda3clhGz2Kakleyun1PyrzYV8RezT7ZYmR9OBSOgvpFQcvHo/K8Y90w=="
       },
       "Microsoft.Windows.AI.MachineLearning": {
-        "type": "Transitive",
+        "type": "Direct",
+        "requested": "[2.1.74, )",
         "resolved": "2.1.74",
         "contentHash": "/Z1yAQ0J53eD1RrOl5anTDS0UQOgneERY//hLljwGcWeUX9ynCvOl5qUxAsfWvwsZZGcvV4WKjAvnAtA6N5i+w==",
         "dependencies": {

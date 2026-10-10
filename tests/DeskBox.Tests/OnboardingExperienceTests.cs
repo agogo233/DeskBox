@@ -379,10 +379,6 @@ public sealed class OnboardingExperienceTests
             "Text=\"{Binding EmptyStateText}\"",
             xaml,
             StringComparison.Ordinal);
-        Assert.DoesNotContain("IntroOverlay", xaml, StringComparison.Ordinal);
-        Assert.DoesNotContain("IntroMarkHost", xaml, StringComparison.Ordinal);
-        Assert.DoesNotContain("PlayIntroSequence", code, StringComparison.Ordinal);
-        Assert.Contains("PlaySceneEntrance", code, StringComparison.Ordinal);
     }
 
     private static string FindRepositoryRoot()

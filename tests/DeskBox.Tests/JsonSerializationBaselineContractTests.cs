@@ -42,7 +42,7 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
             ["src/DeskBox/Services/GlanceWidgetStore.cs"] = 7,
             ["src/DeskBox/Services/LocalizationService.cs"] = 1,
             ["src/DeskBox/Services/MusicSettingsStore.cs"] = 3,
-            ["src/DeskBox/Services/ManagedStorageMigrationService.cs"] = 2
+            ["src/DeskBox/Services/ManagedStorageMigrationService.cs"] = 2,
             ["src/DeskBox/Services/NativeNotificationActivationEnvelopeStore.cs"] = 2,
             ["src/DeskBox/Services/QuickCaptureStore.cs"] = 2,
             ["src/DeskBox/Services/SearchHistoryService.cs"] = 2,
@@ -55,7 +55,7 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
             ["src/DeskBox/Services/WeatherService.cs"] = 5,
             ["src/DeskBox/Services/WidgetFileStackSettings.cs"] = 7,
             ["src/DeskBox/Services/WidgetLayoutStore.cs"] = 2,
-            ["src/DeskBox/Services/WidgetStyleBackupProjection.cs"] = 1
+            ["src/DeskBox/Services/WidgetStyleBackupProjection.cs"] = 1,
             // 3: the title-icon asset store's recent-emoji state file
             // (load deserialize, add deserialize, atomic save serialize).
             ["src/DeskBox/Services/WidgetTitleIconAssetStore.cs"] = 3
