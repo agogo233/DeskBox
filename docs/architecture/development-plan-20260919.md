@@ -147,7 +147,7 @@ CRDT/实时推送/字段级合并/通用偏好同步/布局拓扑同步/collecti
 1. `dotnet test -p:Platform=x64` 全绿（当前基线 3841）；
 2. Debug 构建 0 错误 + canonical 路径重启实例；
 3. 碰序列化/边界时同步更新 ratchet 双层（基线计数 + AotStage 字面量）；
-4. 碰 `DESKBOX_NATIVE_AOT` 相关文件 → `scripts/publish-aot-x64.cmd` 编译验证 + **还原 packages.lock.json**；
+4. 碰 `DESKBOX_NATIVE_AOT` 相关文件 → `scripts/publish-aot-audit.ps1` 编译验证 + **还原 packages.lock.json**；
 5. 提交零署名 trailer（hook+CI 已执法）；
 6. 新协议/边界 → 契约测试先行（立法后搬家）。
 

@@ -16,54 +16,58 @@ public readonly record struct FileItemDragPackageResult(
 /// </summary>
 public static class FileItemDragPackage
 {
-    internal const DataPackageOperation PreferredOperation =
-        DataPackageOperation.Move;
-
+    // The transport permission advertised through DragStartingEventArgs
+    // .AllowedOperations, for internal and external drags alike. Copy|Move
+    // lets Explorer complete the drop natively (same-volume move, cross-
+    // volume copy) while third-party receivers can still fall back to a copy.
+    // The completion firewall in FileDragSourceGuardDataObject keeps a Move
+    // reply from ever reaching the Shell source object, and DeskBox itself
+    // never deletes a source based on the reported drop result.
     internal const DataPackageOperation SupportedOperations =
-        DataPackageOperation.Copy |
-        DataPackageOperation.Move |
-        DataPackageOperation.Link;
+        DataPackageOperation.Copy | DataPackageOperation.Move;
 
-    internal const DataPackageOperation ManagedShortcutSupportedOperations =
-        DataPackageOperation.Move |
-        DataPackageOperation.Link;
+    // The user's drag-out preference becomes the OLE preferred drop effect:
+    // receivers honoring it take it as the default, receivers ignoring it
+    // fall back to their own rules. FollowWindows maps to None so the
+    // target applies its native volume/modifier defaults unchanged. The
+    // preference only reaches Windows 11 targets; Windows 10 decides solely
+    // from the advertised effect set (see ResolveDragOutAllowedOperations).
+    internal static DataPackageOperation ResolveDragOutPreferredOperation(
+        string? action) => action switch
+    {
+        SettingsService.ManagedDragOutActionMove => DataPackageOperation.Move,
+        SettingsService.ManagedDragOutActionCopy => DataPackageOperation.Copy,
+        _ => DataPackageOperation.None
+    };
 
-    internal static DataPackageOperation ResolveSupportedOperations(
-        bool isManagedShortcutDrag) =>
-        isManagedShortcutDrag
-            ? ManagedShortcutSupportedOperations
-            : SupportedOperations;
+    // Windows 10's Explorer shows its copy/move picker on EVERY drop whose
+    // brokered drag advertises more than one effect: the drop arrives
+    // without mouse-button state and the shell cannot confirm a unique
+    // default, so it asks. The preferred effect never reaches it — only a
+    // single-effect offer matching the target's default resolves silently
+    // (the shipped 1.5.5 Win10 shape). The user's setting therefore
+    // collapses the advertised set to one bit on Win10 (FollowWindows has
+    // no observable meaning there and resolves to Move); Windows 11 keeps
+    // the full Copy|Move mask. The OS flag is injectable so tests pin both
+    // branches on any host. Trade-off on Win10: Move/FollowWindows drops
+    // are rejected by copy-only receivers (VS Code, Chromium, WinForms).
+    internal static DataPackageOperation ResolveDragOutAllowedOperations(
+        string? action,
+        bool? isWindows11OrLater = null)
+    {
+        if (isWindows11OrLater ??
+            Services.WindowsCompatibilityService.IsWindows11OrLater)
+        {
+            return SupportedOperations;
+        }
 
-    /// <summary>
-    /// ListViewBase item drags never forward DragStartingEventArgs.AllowedOperations
-    /// to the underlying drag operation, so the operation mask advertised to
-    /// external OLE drop targets is exactly RequestedOperation (None yields an
-    /// undroppable drag). A lone Move makes every Copy-only target
-    /// (Chromium/Electron drop zones, WM_DROPFILES games, WinForms) reject the
-    /// drop. The full mask is therefore requested whenever the payload is a
-    /// native Shell data object that hides the resulting multi-bit preferred
-    /// drop effect from Explorer; the target then applies the standard
-    /// same-volume-move / cross-volume-copy defaults. Managed shortcuts keep
-    /// Move so dragging them back to the desktop restores instead of copies,
-    /// and the StorageItems fallback keeps Move because its preferred effect
-    /// cannot be hidden.
-    /// Windows 10 stays on the single Move value: the hiding layer cannot
-    /// reach Win10 Explorer (the multi-bit preference leaks and every plain
-    /// drop prompts for an operation), so the wide mask is Win11-only until
-    /// a self-driven DoDragDrop becomes viable (see the drag contract doc,
-    /// 8.1.1b experiment log). The OS gate is injectable so tests can pin
-    /// both branches regardless of the host they run on.
-    /// </summary>
-    internal static DataPackageOperation ResolveRequestedOperation(
-        bool isManagedShortcutDrag,
-        bool hidesPreferredDropEffect,
-        bool? isWindows11OrLater = null) =>
-        !isManagedShortcutDrag &&
-            hidesPreferredDropEffect &&
-            (isWindows11OrLater ??
-                Services.WindowsCompatibilityService.IsWindows11OrLater)
-            ? SupportedOperations
-            : PreferredOperation;
+        return string.Equals(
+                action,
+                SettingsService.ManagedDragOutActionCopy,
+                StringComparison.Ordinal)
+            ? DataPackageOperation.Copy
+            : DataPackageOperation.Move;
+    }
 
     public static IReadOnlyList<WidgetItem> ResolveDraggedItems(
         IReadOnlyList<WidgetItem> eventItems,
@@ -91,8 +95,7 @@ public static class FileItemDragPackage
         string sourceWidgetId,
         Func<IEnumerable<string>, IReadOnlyList<IStorageItem>> getStorageItems,
         Func<IReadOnlyList<string>, string> getTitle,
-        out FileItemDragPackageResult result,
-        bool isManagedShortcutDrag = false)
+        out FileItemDragPackageResult result)
     {
         result = default;
         if (draggedItems.Count == 0)
@@ -116,15 +119,13 @@ public static class FileItemDragPackage
         // and Explorer owns the desktop drop position. It also sidesteps the
         // WinRT StorageFile broker, which can reject .lnk files (including
         // ones whose filesystem attributes look normal) and which this UI-STA
-        // event would otherwise have to wait on synchronously. Regular files
-        // additionally hide the preferred drop effect so the full operation
-        // mask can be requested (see ResolveRequestedOperation).
-        bool hidePreferredDropEffect = !isManagedShortcutDrag;
+        // event would otherwise have to wait on synchronously. The guard
+        // wrapper consumes completion receipts so a receiver's Move or Paste
+        // Succeeded reply can never ask the Shell object to clean its source.
         bool usesNativeShellDataObject =
             NativeShellFileDragProvider.TryAttach(
                 dataPackage,
-                sourcePaths,
-                hidePreferredDropEffect);
+                sourcePaths);
         IReadOnlyList<IStorageItem> storageItems = [];
         if (!usesNativeShellDataObject)
         {
@@ -150,18 +151,17 @@ public static class FileItemDragPackage
                 return false;
             }
 
-            dataPackage.SetStorageItems(storageItems, readOnly: false);
+            dataPackage.SetStorageItems(storageItems, readOnly: true);
         }
 
-        // For ListViewBase item drags RequestedOperation is the external
-        // allowed-operation mask. Multiple flags are only safe when the
-        // resulting preferred drop effect is hidden from Explorer; otherwise
-        // Windows 10 asks the user to choose an operation for every ordinary
-        // left-button drop.
-        dataPackage.RequestedOperation = ResolveRequestedOperation(
-            isManagedShortcutDrag,
-            hidesPreferredDropEffect:
-                usesNativeShellDataObject && hidePreferredDropEffect);
+        // No preferred operation: Shell file sources advertise none, so a
+        // receiver resolves its own default instead of inheriting one from us.
+        // For Explorer that means the native volume rules (same-volume move,
+        // cross-volume copy, modifiers); for third parties it means whatever
+        // the receiver considers natural for a file payload. The allowed set
+        // lives on DragStartingEventArgs.AllowedOperations and is written by
+        // the caller — the two must never be merged into one value again.
+        dataPackage.RequestedOperation = DataPackageOperation.None;
 
         dataPackage.Properties[DeskBoxDragData.SourceWidgetIdProperty] =
             sourceWidgetId;

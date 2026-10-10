@@ -1,4 +1,4 @@
-namespace DeskBox.Tests;
+﻿namespace DeskBox.Tests;
 
 public sealed class AotStage4E1ContractTests
 {
@@ -78,8 +78,7 @@ public sealed class AotStage4E1ContractTests
         string appXaml = ReadRepositoryFile("src/DeskBox/App.xaml");
         string contentWindow = ReadRepositoryFile("src/DeskBox/Views/ContentWidgetWindow.xaml");
 
-        Assert.Contains("Value=\"{Binding SegmentHeight}\"", appXaml, StringComparison.Ordinal);
-        Assert.Contains("Value=\"{Binding SegmentTextSize}\"", appXaml, StringComparison.Ordinal);
+        Assert.Equal(0, CountOccurrences(appXaml, "{Binding "));
         Assert.Contains("OverlayTitle=\"{Binding DisplayName}\"", contentWindow, StringComparison.Ordinal);
     }
 
@@ -101,7 +100,7 @@ public sealed class AotStage4E1ContractTests
     {
         string audit = ReadRepositoryFile("scripts/publish-aot-audit.ps1");
 
-        Assert.Contains("$stage4E1MaximumWmc1510Count = 870", audit, StringComparison.Ordinal);
+Assert.Contains("$stage4E1MaximumWmc1510Count = 870", audit, StringComparison.Ordinal);
         Assert.Contains("Stage 4E-1 WMC1510 count regressed above its ceiling", audit, StringComparison.Ordinal);
     }
 

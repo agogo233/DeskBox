@@ -90,6 +90,7 @@ internal sealed class WidgetDetachPlacementPreviewWindow : IDisposable
         root.Children.Add(_badgeBorder);
         _window = new Window
         {
+            Title = "DeskBox Detach Preview",
             Content = root
         };
 

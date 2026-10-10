@@ -1,4 +1,5 @@
 
+using DeskBox.Contracts;
 using DeskBox.Platform;
 namespace DeskBox.Helpers;
 
@@ -25,41 +26,78 @@ public static class WeatherCodeMapper
     }
 
     /// <summary>
-    /// Returns an emoji for the given WMO weather code.
+    /// Returns the bundled weather icon URI for the given WMO code and icon
+    /// style. Bundled SVGs render identically on Windows 10 and 11.
+    /// <c>DeskBox</c> icons live at Assets/WeatherIcons/*.svg;
+    /// the bundled Meteocons styles (Flat / Fill / Line) live under
+    /// Assets/WeatherIcons/{style}/ with their upstream file names; the
+    /// Fluent style (Microsoft Fluent Emoji Color, MIT) lives under
+    /// Assets/WeatherIcons/fluent/ using the DeskBox file names. The style
+    /// match is case-insensitive, and anything that is not a known bundled
+    /// style (Emoji or an unknown value) falls back to the DeskBox artwork
+    /// so callers stay crash-safe. This render-side fallback contract
+    /// intentionally differs from the settings layer's unknown→Flat
+    /// persistence default: the icon combo always writes canonical values,
+    /// so an unknown value here means stale or hand-edited state, where the
+    /// guaranteed-bundled root set is the safe pick.
     /// </summary>
-    public static string GetEmoji(int code, bool isDay = true)
+    public static Uri GetIconUri(int code, bool isDay = true, string? style = null)
+    {
+        bool meteocons = style is not null &&
+            (string.Equals(style, WeatherOptionKinds.IconStyleFlat, StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(style, WeatherOptionKinds.IconStyleLine, StringComparison.OrdinalIgnoreCase));
+        bool fluent = style is not null &&
+            string.Equals(style, WeatherOptionKinds.IconStyleFluent, StringComparison.OrdinalIgnoreCase);
+        string name = meteocons
+            ? GetMeteoconsIconName(code, isDay)
+            : GetDeskBoxIconName(code, isDay);
+        string subdir = meteocons
+            ? style!.ToLowerInvariant() + "/"
+            : fluent ? "fluent/" : string.Empty;
+        return new Uri($"ms-appx:///Assets/WeatherIcons/{subdir}{name}.svg");
+    }
+
+    /// <summary>File names of the bundled Meteocons styles (flat/fill/line).</summary>
+    private static string GetMeteoconsIconName(int code, bool isDay)
     {
         return code switch
         {
-            0 => isDay ? "\u2600\uFE0F" : "\U0001F319",     // ☀️ Clear sky day / 🌙 night
-            1 => isDay ? "\u2600\uFE0F" : "\U0001F319",     // Mainly clear
-            2 => isDay ? "\u26C5" : "\U0001F319",           // ⛅ Partly cloudy / 🌙
-            3 => "\U0001F325\uFE0F",                          // 🌥️ Overcast
-            45 => "\u2601\uFE0F",                              // ☁️ Fog (avoids boxed 🌫️ rendering)
-            48 => "\u2601\uFE0F",                              // ☁️ Depositing rime fog
-            51 => "\U0001F326\uFE0F",                         // 🌦️ Light drizzle
-            53 => "\U0001F326\uFE0F",                         // 🌦️ Moderate drizzle
-            55 => "\U0001F326\uFE0F",                         // 🌦️ Dense drizzle
-            56 => "\U0001F326\uFE0F",                         // 🌦️ Light freezing drizzle
-            57 => "\U0001F326\uFE0F",                         // 🌦️ Dense freezing drizzle
-            61 => "\U0001F327\uFE0F",                         // 🌧️ Slight rain
-            63 => "\U0001F327\uFE0F",                         // 🌧️ Moderate rain
-            65 => "\U0001F327\uFE0F",                         // 🌧️ Heavy rain
-            66 => "\U0001F327\uFE0F",                         // 🌧️ Light freezing rain
-            67 => "\U0001F327\uFE0F",                         // 🌧️ Heavy freezing rain
-            71 => "\U0001F328\uFE0F",                         // 🌨️ Slight snow fall
-            73 => "\U0001F328\uFE0F",                         // 🌨️ Moderate snow fall
-            75 => "\U0001F328\uFE0F",                         // 🌨️ Heavy snow fall
-            77 => "\U0001F328\uFE0F",                         // 🌨️ Snow grains
-            80 => "\U0001F326\uFE0F",                         // 🌦️ Slight rain showers
-            81 => "\U0001F327\uFE0F",                         // 🌧️ Moderate rain showers
-            82 => "\U0001F327\uFE0F",                         // 🌧️ Violent rain showers
-            85 => "\U0001F328\uFE0F",                         // 🌨️ Slight snow showers
-            86 => "\U0001F328\uFE0F",                         // 🌨️ Heavy snow showers
-            95 => "\U0001F329\uFE0F",                         // 🌩️ Thunderstorm
-            96 => "\u26C8\uFE0F",                             // ⛈️ Thunderstorm with slight hail
-            99 => "\u26C8\uFE0F",                             // ⛈️ Thunderstorm with heavy hail
-            _ => "\u2600\uFE0F"                               // ☀️ Unknown → sun
+            0 or 1 => isDay ? "clear-day" : "clear-night",
+            2 => isDay ? "partly-cloudy-day" : "partly-cloudy-night",
+            3 => "overcast",
+            45 or 48 => isDay ? "fog-day" : "fog-night",
+            >= 51 and <= 57 => "drizzle",
+            66 or 67 => "sleet",
+            >= 61 and <= 65 => "rain",
+            >= 71 and <= 77 => "snow",
+            80 => isDay ? "partly-cloudy-day-rain" : "partly-cloudy-night-rain",
+            81 or 82 => "rain",
+            85 or 86 => isDay ? "partly-cloudy-day-snow" : "partly-cloudy-night-snow",
+            95 => "thunderstorms",
+            96 or 99 => "thunderstorms-hail",
+            _ => isDay ? "clear-day" : "clear-night"
+        };
+    }
+
+    /// <summary>File names of the in-repo hand-drawn DeskBox set.</summary>
+    private static string GetDeskBoxIconName(int code, bool isDay)
+    {
+        return code switch
+        {
+            0 or 1 => isDay ? "clear-day" : "clear-night",
+            2 => isDay ? "partly-cloudy-day" : "partly-cloudy-night",
+            3 => "overcast",
+            45 or 48 => "fog",
+            >= 51 and <= 57 => "drizzle",
+            66 or 67 => "sleet",
+            >= 61 and <= 65 => "rain",
+            >= 71 and <= 77 => "snow",
+            80 => "rain-showers",
+            81 or 82 => "rain",
+            85 or 86 => "snow",
+            95 => "thunderstorms",
+            96 or 99 => "thunderstorms-hail",
+            _ => isDay ? "clear-day" : "clear-night"
         };
     }
 

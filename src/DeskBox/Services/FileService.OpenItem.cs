@@ -5,6 +5,20 @@ using System.Diagnostics;
 
 namespace DeskBox.Services;
 
+/// <summary>How <see cref="FileService.OpenItemAsync"/> dispatches an item.</summary>
+internal enum OpenItemDispatchMode
+{
+    /// <summary>The explorer-first explicit-"open" pipeline every item used before #459.</summary>
+    ShellDispatch,
+
+    /// <summary>
+    /// Local launch with the Shell default verb — the desktop double-click
+    /// dispatch — used for folder shortcuts so third-party file managers
+    /// registered as the Folder default handler take over (#459).
+    /// </summary>
+    LocalDefaultVerb
+}
+
 public sealed partial class FileService
 {
     private static readonly BoundedStaOperationRunner s_openItemRunner =
@@ -31,7 +45,7 @@ public sealed partial class FileService
             "FileService.OpenItemAsync",
             $"kind={kind}");
 
-        Stopwatch queueStopwatch = Stopwatch.StartNew();
+        Stopwatch runStopwatch = Stopwatch.StartNew();
         StaOperationResult<OpenItemResult> operation = await s_openItemRunner.RunAsync(
             () => OpenItemCore(
                 itemPath,
@@ -43,7 +57,8 @@ public sealed partial class FileService
             cancellationToken).ConfigureAwait(false);
         trace?.Mark(
             "admission",
-            $"started={operation.Started} queueWaitMs={queueStopwatch.Elapsed.TotalMilliseconds:F1}");
+            $"started={operation.Started} queueWaitMs={operation.QueueWait.TotalMilliseconds:F1} " +
+            $"runTotalMs={runStopwatch.Elapsed.TotalMilliseconds:F1}");
         if (!operation.Started)
         {
             trace?.Mark("result", "result=Busy");
@@ -156,15 +171,44 @@ public sealed partial class FileService
                 return OpenItemResult.RequiresOpenWithPicker;
             }
 
-            using (PerformanceLogger.Measure(
-                       "FileService.OpenItem.ShellDispatch",
-                       $"kind={kind}"))
+            // The probe only ran for real .lnk paths, so a shortcut flag
+            // without a .lnk keeps the legacy pipeline untouched.
+            OpenItemDispatchMode dispatchMode = SelectOpenDispatchMode(
+                isShortcut && shellLink,
+                shortcutProbe.Kind,
+                shortcutProbe.TargetIsDirectory);
+            if (dispatchMode == OpenItemDispatchMode.LocalDefaultVerb)
             {
-                result = Win32Helper.OpenFile(ownerHwnd, pathToOpen)
-                    ? OpenItemResult.OpenedOrHandled
-                    : OpenItemResult.Failed;
+                // Desktop double-click semantics: a NULL verb resolves the
+                // Folder default handler (possibly a third-party file
+                // manager). Explorer-hosted environment inheritance is
+                // pointless for a file manager window, so launch locally.
+                using (PerformanceLogger.Measure(
+                           "FileService.OpenItem.FolderShortcutDefaultVerb",
+                           $"kind={kind}"))
+                {
+                    result = Win32Helper.OpenWithDefaultVerbLocally(
+                            pathToOpen,
+                            Win32Helper.ResolveShellLaunchDirectory(pathToOpen))
+                        ? OpenItemResult.OpenedOrHandled
+                        : OpenItemResult.Failed;
+                }
+
+                trace?.Mark("folder-shortcut-default-verb", $"result={result}");
             }
-            trace?.Mark("shell-dispatch-end", $"result={result}");
+            else
+            {
+                using (PerformanceLogger.Measure(
+                           "FileService.OpenItem.ShellDispatch",
+                           $"kind={kind}"))
+                {
+                    result = Win32Helper.OpenFile(ownerHwnd, pathToOpen)
+                        ? OpenItemResult.OpenedOrHandled
+                        : OpenItemResult.Failed;
+                }
+
+                trace?.Mark("shell-dispatch-end", $"result={result}");
+            }
         }
         catch (Exception ex)
         {
@@ -182,6 +226,26 @@ public sealed partial class FileService
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// Chooses how an item is dispatched. A shortcut whose target is a local
+    /// directory must use the Shell's default verb — the desktop double-click
+    /// dispatch — because third-party file managers register as the Folder
+    /// default handler and an explicit "open" verb bypasses their takeover
+    /// (#459). Every other kind, including plain folders, keeps the
+    /// explorer-first pipeline.
+    /// </summary>
+    internal static OpenItemDispatchMode SelectOpenDispatchMode(
+        bool isShortcut,
+        ShortcutTargetKind targetKind,
+        bool targetIsDirectory)
+    {
+        return isShortcut &&
+               targetKind == ShortcutTargetKind.LocalFileSystem &&
+               targetIsDirectory
+            ? OpenItemDispatchMode.LocalDefaultVerb
+            : OpenItemDispatchMode.ShellDispatch;
     }
 
 }

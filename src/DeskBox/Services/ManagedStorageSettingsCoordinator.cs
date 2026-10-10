@@ -4,20 +4,10 @@ using DeskBox.Models;
 namespace DeskBox.Services;
 
 /// <summary>
-/// Sole settings-page writer for the managed-storage section: the default
-/// managed storage root path and the managed drop action
-/// (<see cref="FileWidgetSettingsSlice"/>). The root-path write is the commit
-/// step that follows the host's existing storage migration chain — the
-/// WidgetManager moves widget content between roots with its own rollback,
-/// residue cleanup and stored-path writes inside that chain; this coordinator
-/// owns only the settings page's persisted write. Every write keeps the
-/// original command semantics: normalize the raw value through the shared
-/// SettingsService normalizers (blank or unusable paths fall back to the
-/// default root; unknown drop actions fall back to Move), skip unchanged
-/// writes, store, and schedule one debounced save with the regular
-/// SettingsChanged broadcast. The settings window filters no-op path changes
-/// before invoking the flow, so that write is unconditional, matching the
-/// pre-migration command.
+/// Settings writer for managed-storage preferences. Existing-data migrations
+/// commit the root and widget mappings through the verified migration transaction;
+/// the settings window only re-projects that committed value. SetDefaultRootPath
+/// remains available for preference-only callers and initial configuration.
 /// </summary>
 public sealed class ManagedStorageSettingsCoordinator : IManagedStorageSettings
 {
@@ -36,6 +26,9 @@ public sealed class ManagedStorageSettingsCoordinator : IManagedStorageSettings
         FileWidgetSettingsSlice fileWidget = _settings.Settings.FileWidget;
         return new ManagedStoragePresentationSettings(
             NormalizeDropAction(fileWidget.ManagedDropAction),
+            NormalizeDragOutAction(fileWidget.ManagedDragOutAction),
+            fileWidget.DragOutModifierTipEnabled,
+            fileWidget.DragOutResultHintEnabled,
             SettingsService.NormalizeManagedStorageRootPath(
                 fileWidget.DefaultManagedStorageRootPath));
     }
@@ -70,11 +63,67 @@ public sealed class ManagedStorageSettingsCoordinator : IManagedStorageSettings
         return true;
     }
 
+    public bool SetManagedDragOutAction(string? action)
+    {
+        ThrowIfStopped();
+        string normalized = NormalizeDragOutAction(action);
+        FileWidgetSettingsSlice fileWidget = _settings.Settings.FileWidget;
+        if (string.Equals(
+                fileWidget.ManagedDragOutAction,
+                normalized,
+                StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        fileWidget.ManagedDragOutAction = normalized;
+        _settings.SaveDebounced();
+        return true;
+    }
+
+    public bool SetDragOutModifierTipEnabled(bool enabled)
+    {
+        ThrowIfStopped();
+        FileWidgetSettingsSlice fileWidget = _settings.Settings.FileWidget;
+        if (fileWidget.DragOutModifierTipEnabled == enabled)
+        {
+            return false;
+        }
+
+        fileWidget.DragOutModifierTipEnabled = enabled;
+        _settings.SaveDebounced();
+        return true;
+    }
+
+    public bool SetDragOutResultHintEnabled(bool enabled)
+    {
+        ThrowIfStopped();
+        FileWidgetSettingsSlice fileWidget = _settings.Settings.FileWidget;
+        if (fileWidget.DragOutResultHintEnabled == enabled)
+        {
+            return false;
+        }
+
+        fileWidget.DragOutResultHintEnabled = enabled;
+        _settings.SaveDebounced();
+        return true;
+    }
+
     private static string NormalizeDropAction(string? action) => action switch
     {
         ManagedDropActions.Copy => ManagedDropActions.Copy,
         ManagedDropActions.FollowWindows => ManagedDropActions.FollowWindows,
         _ => ManagedDropActions.Move
+    };
+
+    // Drag-out falls back to FollowWindows, not Move: advertising no
+    // preferred effect keeps the receiver's native default and never hands
+    // a third-party target the token that lets it remove the source.
+    private static string NormalizeDragOutAction(string? action) => action switch
+    {
+        ManagedDropActions.Copy => ManagedDropActions.Copy,
+        ManagedDropActions.Move => ManagedDropActions.Move,
+        _ => ManagedDropActions.FollowWindows
     };
 
     private void ThrowIfStopped() => ObjectDisposedException.ThrowIf(_stopped, this);

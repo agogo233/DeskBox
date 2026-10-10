@@ -8,6 +8,7 @@ namespace DeskBox.Features.Weather;
 [WinRT.GeneratedBindableCustomProperty([
     nameof(AvailableDataSourceOptions),
     nameof(AvailableDefaultViewOptions),
+    nameof(AvailableIconStyleOptions),
     nameof(AvailableLocationModeOptions),
     nameof(AvailableRefreshIntervalOptions),
     nameof(AvailableSkinOptions),
@@ -16,19 +17,26 @@ namespace DeskBox.Features.Weather;
     nameof(CitySearchPlaceholder),
     nameof(CitySearchText),
     nameof(CitySuggestionItems),
-    nameof(DisplayOptionsSummaryText),
     nameof(LocationStatusText),
     nameof(NoCityResultsText),
     nameof(SelectedDataSource),
     nameof(SelectedDefaultView),
+    nameof(SelectedIconStyle),
     nameof(SelectedLocationMode),
     nameof(SelectedRefreshInterval),
     nameof(SelectedSkin),
     nameof(SelectedTemperatureUnit),
     nameof(SelectedWindSpeedUnit),
     nameof(ShowCitySearch),
+    nameof(ShowForecast),
+    nameof(ShowHumidity),
     nameof(ShowLocationStatus),
-    nameof(ShowNoCityResults)
+    nameof(ShowNoCityResults),
+    nameof(ShowPrecipitation),
+    nameof(ShowPressure),
+    nameof(ShowSunrise),
+    nameof(ShowUvIndex),
+    nameof(ShowWind)
 ], [])]
 public sealed partial class WeatherSettingsViewModel
 {

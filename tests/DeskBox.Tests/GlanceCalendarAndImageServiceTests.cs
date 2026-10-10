@@ -16,8 +16,8 @@ public sealed class GlanceCalendarAndImageServiceTests : IDisposable
         Guid.NewGuid().ToString("N"));
 
     [Theory]
-    [InlineData(360, 247, 1, 874)]
-    [InlineData(360, 247, 2, 1747)]
+    [InlineData(360, 247, 1, GlanceImageDecodeSizeCalculator.MinimumDecodePixelWidth)]
+    [InlineData(360, 247, 2, 1092)]
     [InlineData(100, 100, 1, GlanceImageDecodeSizeCalculator.MinimumDecodePixelWidth)]
     [InlineData(2000, 1400, 2, GlanceImageDecodeSizeCalculator.MaximumDecodePixelWidth)]
     public void ImageDecodeSize_UsesBoundedPhysicalSupersampling(

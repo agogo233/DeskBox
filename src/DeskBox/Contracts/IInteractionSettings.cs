@@ -53,7 +53,7 @@ public readonly record struct InteractionSettingsSnapshot(
 
 /// <summary>
 /// Settings-page writes for the interaction section: autostart reflection,
-/// update auto-check, open-method and file-item context menu, resize snap
+/// update auto-check, silent startup, open-method and file-item context menu, resize snap
 /// (enabled plus spacing), show-desktop visibility, widget layer mode, hover
 /// buttons (enabled plus the selected action set), and the idle/hidden
 /// working-set trims. The settings shell keeps the XAML/AOT binding surface,
@@ -108,6 +108,7 @@ public interface IInteractionSettings
     // unchanged values skip the redundant save.
     void SetAutoStart(bool value);
     void SetAutoCheckForUpdates(bool value);
+    void SetSilentStartup(bool value);
 
     void SetDoubleClickToOpen(bool value);
     void SetFileItemSystemContextMenuEnabled(bool value);

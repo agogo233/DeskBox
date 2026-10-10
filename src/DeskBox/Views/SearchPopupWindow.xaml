@@ -5,6 +5,7 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:controls="using:DeskBox.Controls"
     xmlns:models="using:DeskBox.Models"
+    xmlns:svc="using:DeskBox.Services"
     xmlns:toolkit="using:CommunityToolkit.WinUI.Controls"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
@@ -372,8 +373,9 @@
                     Width="32" Height="32" Padding="0"
                     HorizontalAlignment="Center" VerticalAlignment="Center"
                     Background="Transparent" BorderThickness="0"
-                    Click="ClosePopupButton_Click">
-                <FontIcon Glyph="&#xE70D;" FontSize="12"/>
+                    Click="ClosePopupButton_Click"
+                    svc:Localized.ToolTipKey="Common.Close">
+                <FontIcon Glyph="&#xE8BB;" FontSize="12"/>
             </Button>
 
             <ProgressBar x:Name="SearchProgressBar" Height="2"
@@ -590,6 +592,11 @@
                 <TextBlock x:Name="NoResultsSubtitle" FontSize="12"
                            Foreground="{ThemeResource TextFillColorTertiaryBrush}"
                            HorizontalAlignment="Center" Margin="0,4,0,0"/>
+                <TextBlock x:Name="NoResultsEverythingHint" FontSize="12"
+                           Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                           TextWrapping="Wrap" MaxWidth="320" TextAlignment="Center"
+                           HorizontalAlignment="Center" Margin="0,12,0,0"
+                           Visibility="Collapsed"/>
             </StackPanel>
 
             <!-- Loading indicator -->

@@ -57,6 +57,8 @@ public sealed partial class WeatherSettingsViewModel : ObservableObject
         WeatherOptionKinds.SkinRich
     ];
 
+    private static readonly string[] IconStyleValues = WeatherOptionKinds.IconStyleValues;
+
     private static readonly string[] DataSourceValues =
     [
         WeatherOptionKinds.DataSourceMsn,
@@ -77,6 +79,7 @@ public sealed partial class WeatherSettingsViewModel : ObservableObject
     private string _selectedWindSpeedUnit = WeatherOptionKinds.WindSpeedUnitKmh;
     private string _selectedDefaultView = WeatherOptionKinds.DefaultViewToday;
     private string _selectedSkin = WeatherOptionKinds.SkinRich;
+    private string _selectedIconStyle = WeatherOptionKinds.DefaultIconStyle;
     private string _selectedDataSource = WeatherOptionKinds.DataSourceMsn;
     private int _selectedRefreshInterval = WeatherOptionKinds.DefaultRefreshIntervalMinutes;
     private bool _showForecast = true;
@@ -91,6 +94,7 @@ public sealed partial class WeatherSettingsViewModel : ObservableObject
     private string[]? _cachedWindSpeedUnitNames;
     private string[]? _cachedDefaultViewNames;
     private string[]? _cachedSkinNames;
+    private string[]? _cachedIconStyleNames;
     private string[]? _cachedDataSourceNames;
     private string[]? _cachedRefreshIntervalNames;
 
@@ -134,8 +138,15 @@ public sealed partial class WeatherSettingsViewModel : ObservableObject
             }
 
             bool enabled = normalized == WeatherOptionKinds.LocationModeAuto;
-            RunWrite(() => _settings.SetWeatherAutoLocation(enabled));
-            AutoLocationUserChanged?.Invoke(enabled);
+            // Fire only after the write actually persisted: the coordinator
+            // port returns false for the unchanged-write skip, so the shell's
+            // location lookup only runs for real persisted flips (audit P3).
+            bool persisted = false;
+            RunWrite(() => persisted = _settings.SetWeatherAutoLocation(enabled));
+            if (persisted)
+            {
+                AutoLocationUserChanged?.Invoke(enabled);
+            }
         }
     }
 
@@ -299,6 +310,35 @@ public sealed partial class WeatherSettingsViewModel : ObservableObject
         {
             _cachedSkinNames ??= SkinValues.Select(GetSkinDisplayName).ToArray();
             return WrapOptions(BuildOptions(SkinValues, _cachedSkinNames));
+        }
+    }
+
+    public string SelectedIconStyle
+    {
+        get => _selectedIconStyle;
+        set
+        {
+            string normalized = WeatherOptionKinds.NormalizeIconStyle(value);
+            if (!SetProperty(ref _selectedIconStyle, normalized))
+            {
+                return;
+            }
+
+            if (_isSyncingPresentation)
+            {
+                return;
+            }
+
+            RunWrite(() => _settings.SetWeatherIconStyle(normalized));
+        }
+    }
+
+    public IReadOnlyList<SettingsOption> AvailableIconStyleOptions
+    {
+        get
+        {
+            _cachedIconStyleNames ??= IconStyleValues.Select(GetIconStyleDisplayName).ToArray();
+            return WrapOptions(BuildOptions(IconStyleValues, _cachedIconStyleNames));
         }
     }
 
@@ -487,62 +527,11 @@ public sealed partial class WeatherSettingsViewModel : ObservableObject
         OnPropertyChanged(nameof(CitySearchText));
     }
 
-    // ─── Display options flyout ───
-
-    /// <summary>The options offered by the display-options flyout.</summary>
-    public string[] AvailableDisplayOptions => WeatherOptionKinds.DisplayOptionKeys;
-
-    public string DisplayOptionsSummaryText
-    {
-        get
-        {
-            string[] selected = WeatherOptionKinds.DisplayOptionKeys
-                .Where(IsDisplayOptionSelected)
-                .Select(GetDisplayOptionName)
-                .ToArray();
-            return selected.Length == 0
-                ? _localize("Settings.Toggle.Off")
-                : string.Join(" · ", selected);
-        }
-    }
-
-    public string GetDisplayOptionName(string option) => option switch
-    {
-        "Forecast" => _localize("Settings.Weather.ShowForecast.Title"),
-        "Sunrise" => _localize("Settings.Weather.ShowSunrise.Title"),
-        "UvIndex" => _localize("Settings.Weather.ShowUvIndex.Title"),
-        "Precipitation" => _localize("Settings.Weather.ShowPrecipitation.Title"),
-        "Humidity" => _localize("Settings.Weather.ShowHumidity.Title"),
-        "Wind" => _localize("Settings.Weather.ShowWind.Title"),
-        "Pressure" => _localize("Settings.Weather.ShowPressure.Title"),
-        _ => string.Empty
-    };
-
-    public bool IsDisplayOptionSelected(string option) => option switch
-    {
-        "Forecast" => _showForecast,
-        "Sunrise" => _showSunrise,
-        "UvIndex" => _showUvIndex,
-        "Precipitation" => _showPrecipitation,
-        "Humidity" => _showHumidity,
-        "Wind" => _showWind,
-        "Pressure" => _showPressure,
-        _ => false
-    };
-
-    public void ToggleDisplayOption(string option)
-    {
-        switch (option)
-        {
-            case "Forecast": ShowForecast = !ShowForecast; break;
-            case "Sunrise": ShowSunrise = !ShowSunrise; break;
-            case "UvIndex": ShowUvIndex = !ShowUvIndex; break;
-            case "Precipitation": ShowPrecipitation = !ShowPrecipitation; break;
-            case "Humidity": ShowHumidity = !ShowHumidity; break;
-            case "Wind": ShowWind = !ShowWind; break;
-            case "Pressure": ShowPressure = !ShowPressure; break;
-        }
-    }
+    // ─── Display options ───
+    // The seven display switches render as settings sub-cards bound straight
+    // to the properties below; the retired flyout menu builders that used to
+    // project them (summary text, name lookup, selection probe and toggle
+    // dispatcher) were removed with the flyout.
 
     public bool ShowForecast
     {
@@ -593,7 +582,6 @@ public sealed partial class WeatherSettingsViewModel : ObservableObject
             return;
         }
 
-        OnPropertyChanged(nameof(DisplayOptionsSummaryText));
         if (_isSyncingPresentation)
         {
             return;
@@ -630,6 +618,7 @@ public sealed partial class WeatherSettingsViewModel : ObservableObject
             SelectedWindSpeedUnit = snapshot.WindSpeedUnit;
             SelectedDefaultView = snapshot.DefaultView;
             SelectedSkin = snapshot.Skin;
+            SelectedIconStyle = snapshot.IconStyle;
             SelectedDataSource = snapshot.DataSource;
             SelectedRefreshInterval = snapshot.RefreshIntervalMinutes;
             ShowForecast = snapshot.ShowForecast;
@@ -648,13 +637,12 @@ public sealed partial class WeatherSettingsViewModel : ObservableObject
 
         OnPropertyChanged(nameof(CitySearchText));
         OnPropertyChanged(nameof(ShowLocationStatus));
-        OnPropertyChanged(nameof(DisplayOptionsSummaryText));
     }
 
     /// <summary>
     /// Drops the localized option-name caches after a language change so
-    /// the option tables, the summary, the placeholder and the no-results
-    /// text re-project in the new language.
+    /// the option tables, the placeholder and the no-results text
+    /// re-project in the new language.
     /// </summary>
     public void RefreshLocalization()
     {
@@ -663,6 +651,7 @@ public sealed partial class WeatherSettingsViewModel : ObservableObject
         _cachedWindSpeedUnitNames = null;
         _cachedDefaultViewNames = null;
         _cachedSkinNames = null;
+        _cachedIconStyleNames = null;
         _cachedDataSourceNames = null;
         _cachedRefreshIntervalNames = null;
         OnPropertyChanged(nameof(AvailableLocationModeOptions));
@@ -670,6 +659,7 @@ public sealed partial class WeatherSettingsViewModel : ObservableObject
         OnPropertyChanged(nameof(AvailableWindSpeedUnitOptions));
         OnPropertyChanged(nameof(AvailableDefaultViewOptions));
         OnPropertyChanged(nameof(AvailableSkinOptions));
+        OnPropertyChanged(nameof(AvailableIconStyleOptions));
         OnPropertyChanged(nameof(AvailableDataSourceOptions));
         OnPropertyChanged(nameof(AvailableRefreshIntervalOptions));
         // Re-notify the current selections: replacing the localized option
@@ -679,9 +669,9 @@ public sealed partial class WeatherSettingsViewModel : ObservableObject
         OnPropertyChanged(nameof(SelectedWindSpeedUnit));
         OnPropertyChanged(nameof(SelectedDefaultView));
         OnPropertyChanged(nameof(SelectedSkin));
+        OnPropertyChanged(nameof(SelectedIconStyle));
         OnPropertyChanged(nameof(SelectedDataSource));
         OnPropertyChanged(nameof(SelectedRefreshInterval));
-        OnPropertyChanged(nameof(DisplayOptionsSummaryText));
         OnPropertyChanged(nameof(CitySearchPlaceholder));
         OnPropertyChanged(nameof(NoCityResultsText));
     }
@@ -710,6 +700,14 @@ public sealed partial class WeatherSettingsViewModel : ObservableObject
     {
         WeatherOptionKinds.SkinRich => _localize("Weather.Skin.Rich"),
         _ => _localize("Weather.Skin.Standard")
+    };
+
+    private string GetIconStyleDisplayName(string style) => style switch
+    {
+        WeatherOptionKinds.IconStyleDeskBox => _localize("Weather.IconStyle.DeskBox"),
+        WeatherOptionKinds.IconStyleLine => _localize("Weather.IconStyle.Line"),
+        WeatherOptionKinds.IconStyleFluent => _localize("Weather.IconStyle.Fluent"),
+        _ => _localize("Weather.IconStyle.Flat")
     };
 
     private string GetDataSourceDisplayName(string source) => source switch

@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using Microsoft.UI.Xaml;
 using WinRT;
 
@@ -16,13 +17,19 @@ public sealed partial class SettingsWindow
         return root.Name == name ? root : root.FindName(name) as FrameworkElement;
     }
 
-    // FindName returns an untyped IInspectable; CsWinRT picks the RCW class by
-    // looking the runtime class name up through reflection. Under Native AOT a
-    // WinUI control the app never constructs in C# (PasswordBox) has no
-    // reflection metadata, so the lookup falls back to a base class and a plain
-    // cast throws InvalidCastException. Re-wrapping the same native object with
-    // the statically known type goes through the projection's typed factory
-    // instead, which does not depend on that lookup.
+    // FindName returns an untyped IInspectable; CsWinRT resolves the RCW
+    // class for it by looking the runtime class name up through reflection
+    // (WinRT.Runtime's FindTypeByName). Under Native AOT a projected control
+    // with no kept reflection metadata resolves through the trim fallback
+    // (typeNameToBaseTypeNameMapping) to a base class, and ComWrappers caches
+    // that wrapper per native identity — so neither this re-wrap
+    // (MarshalInspectable<T>.FromAbi lands on the same cached RCW and casts)
+    // nor any other later cast can recover the exact type; they throw
+    // InvalidCastException. Correctness therefore depends on the exact type
+    // being reflection-visible before the first wrap: types the XAML compiler
+    // or the app's own IL reference directly (Button, ListView, ...) already
+    // are; a control only ever touched through this generic path is not and
+    // must be rooted explicitly — see FindCloudBackupPasswordBox (P1-1).
     private T? FindCreatedSectionElement<T>(string tag, string name) where T : class
     {
         FrameworkElement? element = FindCreatedSectionElement(tag, name);
@@ -47,26 +54,26 @@ public sealed partial class SettingsWindow
         FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.StackPanel>("WidgetGroups", "WidgetGroupsSection")!;
     private global::DeskBox.Views.SettingsSections.CapsuleModeSettingsSection CapsuleModeSection =>
         FindCreatedSectionElement<global::DeskBox.Views.SettingsSections.CapsuleModeSettingsSection>("CapsuleMode", "CapsuleModeSection")!;
-    private global::Microsoft.UI.Xaml.Controls.StackPanel CapsuleBehaviorSettingsSection =>
-        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.StackPanel>("CapsuleBehaviorSettings", "CapsuleBehaviorSettingsSection")!;
-    private global::Microsoft.UI.Xaml.Controls.StackPanel CapsuleArrangementSettingsSection =>
-        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.StackPanel>("CapsuleArrangementSettings", "CapsuleArrangementSettingsSection")!;
-    private global::Microsoft.UI.Xaml.Controls.StackPanel CapsuleAnimationSettingsSection =>
-        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.StackPanel>("CapsuleAnimationSettings", "CapsuleAnimationSettingsSection")!;
     private global::Microsoft.UI.Xaml.Controls.StackPanel CapsuleOverridesSettingsSection =>
         FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.StackPanel>("CapsuleOverridesSettings", "CapsuleOverridesSettingsSection")!;
     private global::DeskBox.Views.SettingsSections.FileWidgetSettingsSection AppearanceDetailSection =>
         FindCreatedSectionElement<global::DeskBox.Views.SettingsSections.FileWidgetSettingsSection>("AppearanceDetail", "AppearanceDetailSection")!;
     private global::DeskBox.Views.SettingsSections.DesktopOrganizationSettingsSection DesktopOrganizationSettingsSection =>
         FindCreatedSectionElement<global::DeskBox.Views.SettingsSections.DesktopOrganizationSettingsSection>("DesktopOrganizationSettings", "DesktopOrganizationSettingsSection")!;
+    private global::DeskBox.Views.SettingsSections.DisplaySettingsSection DisplaysSection =>
+        FindCreatedSectionElement<global::DeskBox.Views.SettingsSections.DisplaySettingsSection>("Displays", "DisplaysSection")!;
     private global::Microsoft.UI.Xaml.Controls.StackPanel FileDisplaySettingsSection =>
         FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.StackPanel>("FileDisplaySettings", "FileDisplaySettingsSection")!;
     private global::Microsoft.UI.Xaml.Controls.StackPanel FileStorageSettingsSection =>
         FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.StackPanel>("FileStorageSettings", "FileStorageSettingsSection")!;
-    private global::Microsoft.UI.Xaml.Controls.Border ManagedStoragePathWarningBorder =>
-        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.Border>("FileStorageSettings", "ManagedStoragePathWarningBorder")!;
+    private global::Microsoft.UI.Xaml.Controls.InfoBar ManagedStoragePathWarningBorder =>
+        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.InfoBar>("FileStorageSettings", "ManagedStoragePathWarningBorder")!;
     private global::Microsoft.UI.Xaml.Controls.TextBlock ManagedStoragePathWarningText =>
         FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.TextBlock>("FileStorageSettings", "ManagedStoragePathWarningText")!;
+    private global::Microsoft.UI.Xaml.Controls.TextBlock DragOutWin10Note =>
+        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.TextBlock>("FileStorageSettings", "DragOutWin10Note")!;
+    private global::Microsoft.UI.Xaml.Controls.ToggleSwitch DragOutModifierTipToggle =>
+        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.ToggleSwitch>("FileStorageSettings", "DragOutModifierTipToggle")!;
     private global::Microsoft.UI.Xaml.Controls.StackPanel PathActionsPanel =>
         FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.StackPanel>("FileStorageSettings", "PathActionsPanel")!;
     private global::Microsoft.UI.Xaml.Controls.Button OpenPathButton =>
@@ -87,20 +94,6 @@ public sealed partial class SettingsWindow
         FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.StackPanel>("Interaction", "InteractionSection")!;
     private global::Microsoft.UI.Xaml.Controls.StackPanel InteractionWindowSettingsSection =>
         FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.StackPanel>("InteractionWindowSettings", "InteractionWindowSettingsSection")!;
-    private global::Microsoft.UI.Xaml.Controls.StackPanel GlobalHotkeyPresetButtonsPanel =>
-        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.StackPanel>("InteractionWindowSettings", "GlobalHotkeyPresetButtonsPanel")!;
-    private global::Microsoft.UI.Xaml.Controls.Primitives.ToggleButton GlobalHotkeyPresetF7Button =>
-        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.Primitives.ToggleButton>("InteractionWindowSettings", "GlobalHotkeyPresetF7Button")!;
-    private global::Microsoft.UI.Xaml.Controls.Primitives.ToggleButton GlobalHotkeyPresetDoubleControlButton =>
-        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.Primitives.ToggleButton>("InteractionWindowSettings", "GlobalHotkeyPresetDoubleControlButton")!;
-    private global::Microsoft.UI.Xaml.Controls.Primitives.ToggleButton GlobalHotkeyPresetAltSpaceButton =>
-        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.Primitives.ToggleButton>("InteractionWindowSettings", "GlobalHotkeyPresetAltSpaceButton")!;
-    private global::Microsoft.UI.Xaml.Controls.Primitives.ToggleButton GlobalHotkeyPresetWinSpaceButton =>
-        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.Primitives.ToggleButton>("InteractionWindowSettings", "GlobalHotkeyPresetWinSpaceButton")!;
-    private global::Microsoft.UI.Xaml.Controls.Primitives.ToggleButton GlobalHotkeyPresetWindowsTapButton =>
-        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.Primitives.ToggleButton>("InteractionWindowSettings", "GlobalHotkeyPresetWindowsTapButton")!;
-    private global::Microsoft.UI.Xaml.Controls.Primitives.ToggleButton GlobalHotkeyPresetCopilotKeyButton =>
-        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.Primitives.ToggleButton>("InteractionWindowSettings", "GlobalHotkeyPresetCopilotKeyButton")!;
     private global::Microsoft.UI.Xaml.Controls.Grid GlobalHotkeyCustomRow =>
         FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.Grid>("InteractionWindowSettings", "GlobalHotkeyCustomRow")!;
     private global::Microsoft.UI.Xaml.Controls.Grid GlobalHotkeyActionsPanel =>
@@ -189,6 +182,8 @@ public sealed partial class SettingsWindow
         FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.Button>("About", "AboutWebsiteButton")!;
     private global::Microsoft.UI.Xaml.Controls.Button OneClickUpdateButton =>
         FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.Button>("About", "OneClickUpdateButton")!;
+    private global::Microsoft.UI.Xaml.Controls.StackPanel UpdateCheckActionsPanel =>
+        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.StackPanel>("About", "UpdateCheckActionsPanel")!;
     private global::Microsoft.UI.Xaml.Controls.Button ViewReleaseNotesButton =>
         FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.Button>("About", "ViewReleaseNotesButton")!;
     private global::Microsoft.UI.Xaml.Controls.StackPanel UpdateActionsPanel =>
@@ -197,6 +192,25 @@ public sealed partial class SettingsWindow
         FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.Button>("About", "OpenManualUpdateDownloadButton")!;
     private global::Microsoft.UI.Xaml.Controls.Button StoreSupportButton =>
         FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.Button>("About", "StoreSupportButton")!;
-    private global::Microsoft.UI.Xaml.Controls.PasswordBox CloudBackupPasswordBox =>
-        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.PasswordBox>("CloudBackupSettings", "CloudBackupPasswordBox")!;
+    // P1-1 (incident 2026-09-30 §4): the cloud-backup PasswordBox is the one
+    // deferred-section control the XAML compiler never references — it has no
+    // x:Bind and no managed handler, so SettingsWindow.g.cs / XamlTypeInfo
+    // contain no typed reference to it, and it is never constructed in C#.
+    // Under Native AOT that left the projected type trimmed out of reflection,
+    // so every typed lookup wrapped the native control as a base class and the
+    // getter threw InvalidCastException ("Specified cast is not valid") on
+    // 测试连接/保存密码 — retail only, because JIT builds resolve the name
+    // through full reflection. DynamicDependency roots the projected type so
+    // WinRT.Runtime's FindTypeByName resolves it and the FIRST (and identity-
+    // cached) wrapper is exact; the typed path never reaches the cast.
+    [DynamicDependency(
+        DynamicallyAccessedMemberTypes.All,
+        typeof(global::Microsoft.UI.Xaml.Controls.PasswordBox))]
+    private global::Microsoft.UI.Xaml.Controls.PasswordBox? FindCloudBackupPasswordBox() =>
+        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.PasswordBox>("CloudBackupSettings", "CloudBackupPasswordBox");
+
+    // Nullable by contract: the section is created on demand (DeferredSections),
+    // so a consumer can run before creation or against a torn-down window.
+    // Callers must null-guard; a visible section's lookup is typed-correct.
+    private global::Microsoft.UI.Xaml.Controls.PasswordBox? CloudBackupPasswordBox => FindCloudBackupPasswordBox();
 }

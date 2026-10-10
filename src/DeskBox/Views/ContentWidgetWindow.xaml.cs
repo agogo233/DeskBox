@@ -354,8 +354,7 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
             EnableMarquee: true,
             Progress: isAttention ? 1 : null,
             IsAttention: isAttention,
-            EmojiIcon: Helpers.WeatherCodeMapper.GetEmoji(
-                weather.ViewModel.CurrentWeatherCode, isDay),
+            IconImage: weather.ViewModel.CurrentIcon,
             BackgroundColorStart: colorStart,
             BackgroundColorEnd: colorEnd,
             // Avoid the former 50 ms UI-thread particle timer (20 Canvas writes
@@ -669,12 +668,26 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
             dividerColor);
         ContentWidgetShell.TitleIconAccentColor = iconForeground;
         ContentWidgetShell.TitleIconMode = SettingsService.Settings.WidgetTitleIconMode;
+        ApplyCustomTitleIcon();
+        ApplyCustomWidgetBackground();
+        WidgetTextShadow.SetEnabled(
+            SettingsService.Settings.WidgetShell.WidgetTextShadowEnabled);
     }
 
     protected override void OnRootElementLoaded()
     {
         RootGrid.Focus(FocusState.Programmatic);
         QueueNativeFileDropTargetRegistration();
+    }
+
+    protected override void OnCustomWidgetBackgroundChanged(bool active)
+    {
+        // User-set background wins over the Glance surface's own background
+        // image (per-widget customization rule).
+        if (CurrentContent?.View is DeskBox.Controls.WidgetContents.GlanceWidgetContent glance)
+        {
+            glance.SetShellCustomBackgroundActive(active);
+        }
     }
 
     // ── IDesktopWidgetWindow implementation ────────────────────

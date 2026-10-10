@@ -72,6 +72,54 @@ public sealed class BackupSettingsViewModelTests
     }
 
     [Fact]
+    public async Task DeactivateKeepsVisitScopeAliveUntilInFlightListSettles()
+    {
+        var late = new TaskCompletionSource<IReadOnlyList<BackupRemoteSnapshot>>(TaskCreationOptions.RunContinuationsAsynchronously);
+        int listCalls = 0;
+        var fake = new FakeSettings(A)
+        {
+            Credential = (_, _) => Task.FromResult(true),
+            List = (_, _) => ++listCalls == 1 ? late.Task :
+                Task.FromResult<IReadOnlyList<BackupRemoteSnapshot>>([new("fresh.zip", 2, null)])
+        };
+        using var editor = Create(fake);
+        editor.Activate();
+        Task<IReadOnlyList<BackupRemoteSnapshot>?> old = editor.RefreshSnapshotsAsync();
+        CancellationToken oldToken = fake.LastListToken;
+        editor.Deactivate();
+        Assert.True(oldToken.IsCancellationRequested);
+        // While the hidden visit's read is still in flight its canceled scope
+        // must stay alive: WaitHandle is the token member that throws
+        // ObjectDisposedException once the source has been disposed, so this
+        // pins the retire-then-drain ordering instead of dispose-in-place.
+        _ = oldToken.WaitHandle;
+
+        editor.Activate();
+        Task<IReadOnlyList<BackupRemoteSnapshot>?> fresh = editor.RefreshSnapshotsAsync();
+        Assert.Equal("fresh.zip", Assert.Single((await fresh)!).Name);
+        late.SetResult([new("stale.zip", 3, null)]);
+        Assert.Null(await old);
+        Assert.Equal("fresh.zip", Assert.Single(editor.RemoteSnapshots).Name);
+
+        // Once the retired read settles, the drain continuation releases the
+        // scope; poll briefly for the deferred disposal instead of assuming
+        // the continuation beat this assertion.
+        for (int attempt = 0; attempt < 100; attempt++)
+        {
+            try
+            {
+                _ = oldToken.WaitHandle;
+                await Task.Delay(10);
+            }
+            catch (ObjectDisposedException)
+            {
+                return;
+            }
+        }
+        Assert.Fail("The retired visit scope was not disposed after its in-flight read settled.");
+    }
+
+    [Fact]
     public async Task ProbeFailureCanRetry_AndOldProbeCannotClearNewStatus()
     {
         var oldProbe = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);

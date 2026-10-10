@@ -20,6 +20,36 @@ namespace DeskBox.Platform;
 /// </remarks>
 public static partial class Win32Helper
 {
+    // ── shell: fullscreen-app detection (display topology gate, spec 5.6) ──
+
+    public const int QueryUserNotificationStateBusy = 2;
+    public const int QueryUserNotificationStateRunningD3dFullScreen = 3;
+    public const int QueryUserNotificationStatePresentationMode = 4;
+
+    [DllImport("shell32.dll", SetLastError = false)]
+    private static extern int SHQueryUserNotificationState(out int state);
+
+    /// <summary>
+    /// True while a fullscreen-exclusive app (game) or presentation mode owns
+    /// the screen. Used to park topology restores (resolution flips from
+    /// fullscreen games must not reshuffle widgets, spec S13).
+    /// </summary>
+    public static bool IsFullscreenAppActive()
+    {
+        try
+        {
+            return SHQueryUserNotificationState(out int state) == 0 &&
+                   state is QueryUserNotificationStateBusy or
+                       QueryUserNotificationStateRunningD3dFullScreen or
+                       QueryUserNotificationStatePresentationMode;
+        }
+        catch (Exception ex) when (
+            ex is DllNotFoundException or EntryPointNotFoundException)
+        {
+            return false;
+        }
+    }
+
     private const uint FileShareRead = 0x00000001;
     private const uint FileShareWrite = 0x00000002;
     private const uint FileShareDelete = 0x00000004;
@@ -35,25 +65,6 @@ public static partial class Win32Helper
 
     [DllImport("winmm.dll", EntryPoint = "timeEndPeriod")]
     private static extern uint TimeEndPeriod(uint periodMilliseconds);
-
-    [LibraryImport("gdi32.dll", SetLastError = true)]
-    public static partial IntPtr CreateRoundRectRgn(
-        int left,
-        int top,
-        int right,
-        int bottom,
-        int ellipseWidth,
-        int ellipseHeight);
-
-    [LibraryImport("gdi32.dll", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    public static partial bool DeleteObject(IntPtr objectHandle);
-
-    [LibraryImport("user32.dll", SetLastError = true)]
-    public static partial int SetWindowRgn(
-        IntPtr hWnd,
-        IntPtr region,
-        [MarshalAs(UnmanagedType.Bool)] bool redraw);
 
     /// <summary>
     /// Requests the DirectComposition compositor clock to run at its active
@@ -293,18 +304,12 @@ public static partial class Win32Helper
     [LibraryImport("user32.dll")]
     public static partial IntPtr GetParent(IntPtr hWnd);
 
-    [LibraryImport("user32.dll", SetLastError = true)]
-    public static partial IntPtr SetParent(IntPtr hWndChild, IntPtr hWndNewParent);
-
     [LibraryImport("user32.dll")]
     public static partial IntPtr GetAncestor(IntPtr hWnd, uint gaFlags);
 
     [LibraryImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static partial bool IsWindow(IntPtr hWnd);
-
-    [LibraryImport("user32.dll", EntryPoint = "FindWindowW", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
-    public static partial IntPtr FindWindow(string? lpClassName, string? lpWindowName);
 
     [LibraryImport("user32.dll", EntryPoint = "FindWindowExW", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
     public static partial IntPtr FindWindowEx(IntPtr hWndParent, IntPtr hWndChildAfter, string? lpszClass, string? lpszWindow);
@@ -606,79 +611,19 @@ public static partial class Win32Helper
     public static ushort GetRegisteredClipboardFormat(string format) =>
         (ushort)RegisterClipboardFormatW(format);
 
-    /// <summary>
-    /// True while the current thread is servicing a COM call that originated
-    /// in another process (CoGetCallerTID: S_OK = same-process caller,
-    /// S_FALSE = different-process caller). Not a security boundary: the OS
-    /// documents that the returned information can be spoofed and must never
-    /// drive security decisions — this is fit for UX-level filtering and
-    /// diagnostics only. Behavior when no COM call is in flight is pinned by
-    /// CoGetCallerTidProbeTests.
-    /// </summary>
-    public static bool IsComCallerOutOfProcess() =>
-        CoGetCallerTID(out _) == S_FALSE;
-
-    private const int S_FALSE = 1;
-
     [LibraryImport("user32.dll", EntryPoint = "RegisterClipboardFormatW",
         StringMarshalling = StringMarshalling.Utf16)]
     private static partial uint RegisterClipboardFormatW(string format);
 
-    [LibraryImport("ole32.dll")]
-    private static partial int CoGetCallerTID(out uint threadId);
-
-    /// <summary>
-    /// Runs the OLE drag loop on the calling STA thread. Synchronous: it does
-    /// not return until the user drops, cancels, or the drop source ends the
-    /// operation. The returned HRESULT is DRAGDROP_S_DROP/DRAGDROP_S_CANCEL
-    /// on normal endings (both non-negative), and finalEffect carries the
-    /// target's chosen effect.
-    /// </summary>
-    public static unsafe int RunOleDragDrop(
-        nint dataObject,
-        nint dropSource,
-        uint allowedEffects,
-        out uint finalEffect) =>
-        DoDragDrop(dataObject, dropSource, allowedEffects, out finalEffect);
-
     /// <summary>
     /// Initializes COM with OLE support on the current thread (drag-and-drop
     /// requires the OLE apartment, not plain CoInitialize). Returns the
-    /// HRESULT; S_FALSE means already initialized (still balanced by
-    /// OleUninitialize).
+    /// HRESULT; S_FALSE means already initialized.
     /// </summary>
     public static int InitializeOleOnCurrentThread() => OleInitialize(0);
 
-    /// <summary>
-    /// Releases the OLE apartment established by
-    /// <see cref="InitializeOleOnCurrentThread"/> on the current thread.
-    /// </summary>
-    public static void UninitializeOleOnCurrentThread() => OleUninitialize();
-
     [LibraryImport("ole32.dll")]
     private static partial int OleInitialize(nint reserved);
-
-    [LibraryImport("ole32.dll")]
-    private static partial void OleUninitialize();
-
-    /// <summary>
-    /// Releases the mouse capture held by any window on the calling thread.
-    /// Used before starting a native drag loop: a cancelled WinUI drag
-    /// gesture keeps the XAML input island's capture, which starves
-    /// DoDragDrop's own capture and freezes the system-wide drag lock.
-    /// </summary>
-    public static bool TryReleaseMouseCapture() => ReleaseCapture();
-
-    [LibraryImport("user32.dll")]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static partial bool ReleaseCapture();
-
-    [LibraryImport("ole32.dll", EntryPoint = "DoDragDrop")]
-    private static partial int DoDragDrop(
-        nint pDataObj,
-        nint pDropSource,
-        uint dwOKEffects,
-        out uint pdwEffect);
 
     /// <summary>
     /// Allocates movable global memory and copies <paramref name="data"/> into
@@ -716,62 +661,6 @@ public static partial class Win32Helper
     }
 
     /// <summary>
-    /// Frees global memory whose ownership did not transfer to a data object
-    /// (IDataObject::SetData rejected the medium).
-    /// </summary>
-    public static void FreeGlobalMemory(nint globalMemory)
-    {
-        if (globalMemory != 0)
-        {
-            GlobalFree(globalMemory);
-        }
-    }
-
-    /// <summary>
-    /// Reads a NUL-terminated UTF-16 string from global memory, bounded by
-    /// the allocation size so a malformed payload cannot run off the block.
-    /// </summary>
-    public static unsafe bool TryReadGlobalMemoryText(
-        nint globalMemory,
-        out string text)
-    {
-        text = string.Empty;
-        if (globalMemory == 0)
-        {
-            return false;
-        }
-
-        char* locked = (char*)GlobalLock(globalMemory);
-        if (locked == null)
-        {
-            return false;
-        }
-
-        try
-        {
-            nuint bytes = GlobalSize(globalMemory);
-            int maxChars = (int)Math.Min(bytes / 2, 8192);
-            int length = 0;
-            while (length < maxChars && locked[length] != '\0')
-            {
-                length++;
-            }
-
-            if (length == 0)
-            {
-                return false;
-            }
-
-            text = new string(locked, 0, length);
-            return true;
-        }
-        finally
-        {
-            _ = GlobalUnlock(globalMemory);
-        }
-    }
-
-    /// <summary>
     /// Releases a STGMEDIUM obtained from IDataObject::GetData; ownership of
     /// the contained medium transfers back to OLE.
     /// </summary>
@@ -783,9 +672,6 @@ public static partial class Win32Helper
             ReleaseStgMedium(pointer);
         }
     }
-
-    [LibraryImport("kernel32.dll", SetLastError = true)]
-    private static partial nuint GlobalSize(nint memory);
 
     [LibraryImport("ole32.dll")]
     private static unsafe partial void ReleaseStgMedium(void* medium);
@@ -899,20 +785,6 @@ public static partial class Win32Helper
         };
     }
 
-    public static bool HasMouseButtonActivity()
-    {
-        return HasAsyncKeyActivity(0x01) ||
-               HasAsyncKeyActivity(0x02) ||
-               HasAsyncKeyActivity(0x04) ||
-               HasAsyncKeyActivity(0x05) ||
-               HasAsyncKeyActivity(0x06);
-    }
-
-    private static bool HasAsyncKeyActivity(int virtualKey)
-    {
-        return IsKeyDown(virtualKey);
-    }
-
     /// <summary>
     /// Returns true if any mouse button was pressed since this thread last
     /// queried that button. Uses the low bit of GetAsyncKeyState, which resets
@@ -991,6 +863,14 @@ public static partial class Win32Helper
 
     public const int SM_CXSIZEFRAME = 32;
     public const int SM_CYSIZEFRAME = 33;
+
+    // Virtual desktop bounding box (physical pixels) for the panorama
+    // background mapping.
+    public const int SM_XVIRTUALSCREEN = 76;
+    public const int SM_YVIRTUALSCREEN = 77;
+    public const int SM_CXVIRTUALSCREEN = 78;
+    public const int SM_CYVIRTUALSCREEN = 79;
+    public const int SM_REMOTESESSION = 0x1000;
 
     [LibraryImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
@@ -1108,15 +988,13 @@ public static partial class Win32Helper
     [return: MarshalAs(UnmanagedType.Bool)]
     public static partial bool UnregisterPowerSettingNotification(IntPtr handle);
 
-    // System-wide visual effects (HKCU-scoped per-user parameters).
+    // System-wide visual effects (HKCU-scoped per-user parameters). Read-only:
+    // writes go through the OS settings surfaces — under an MSIX package the
+    // copy-on-write HKCU virtualization would swallow SPIF_UPDATEINIFILE's
+    // profile write and silently revert after the next sign-in.
     private const uint SpiGetDropShadow = 0x1024;
-    private const uint SpiSetDropShadow = 0x1025;
-    private const uint SpifUpdateIniFile = 0x0001;
-    private const uint SpifSendChange = 0x0002;
 
-    // pvParam is polymorphic: GET actions want a pointer to the receiving
-    // buffer; simple BOOL SET actions want the new value passed BY VALUE in
-    // the pvParam slot — a marshalled pointer is always nonzero, i.e. TRUE.
+    // The GET actions pass a pointer to the receiving buffer in pvParam.
     [LibraryImport("user32.dll", SetLastError = true, EntryPoint = "SystemParametersInfoW")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static partial bool SystemParametersInfo(
@@ -1151,32 +1029,28 @@ public static partial class Win32Helper
     }
 
     /// <summary>
-    /// Writes the system-wide "show shadows under windows" effect the same way
-    /// the Performance Options dialog does: persist to the profile and broadcast
-    /// WM_SETTINGCHANGE. Affects every window with a non-client frame, not just
-    /// this app — callers must confirm with the user before invoking.
+    /// Reads Windows' "Transparency effects" personalization switch — the
+    /// setting Mica/Acrylic materials degrade without. The registry value is
+    /// the source of truth across every supported build; a missing value
+    /// means the OS default (on).
     /// </summary>
-    public static bool TrySetWindowDropShadowEnabled(bool enabled, out int errorCode)
+    public static bool TryGetSystemTransparencyEffectsEnabled(out bool enabled)
     {
-        errorCode = 0;
-        var value = (IntPtr)(enabled ? 1 : 0);
+        enabled = true;
         try
         {
-            if (SystemParametersInfo(
-                    SpiSetDropShadow,
-                    0,
-                    value,
-                    SpifUpdateIniFile | SpifSendChange))
+            using Microsoft.Win32.RegistryKey? personalize =
+                Microsoft.Win32.Registry.CurrentUser.OpenSubKey(
+                    @"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize");
+            if (personalize?.GetValue("EnableTransparency") is int value)
             {
-                return true;
+                enabled = value != 0;
             }
 
-            errorCode = Marshal.GetLastWin32Error();
-            return false;
+            return true;
         }
-        catch (Exception ex)
+        catch
         {
-            errorCode = ex.HResult;
             return false;
         }
     }
@@ -1843,6 +1717,9 @@ public static partial class Win32Helper
     public static partial int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int pvAttribute, int cbAttribute);
 
     [LibraryImport("dwmapi.dll")]
+    public static partial int DwmGetWindowAttribute(IntPtr hwnd, int attr, out int pvAttribute, int cbAttribute);
+
+    [LibraryImport("dwmapi.dll")]
     public static partial int DwmFlush();
 
     /// <summary>
@@ -1864,14 +1741,41 @@ public static partial class Win32Helper
     }
 
     /// <summary>
+    /// Reports whether DWM is currently withholding the window from the
+    /// desktop (DWM_CLOAKED_APP or DWM_CLOAKED_SHELL — the shell cloaks
+    /// windows that live on a virtual desktop other than the active one).
+    /// An owned dialog is born on its owner's desktop and inherits the
+    /// cloak, so an interactive picker bound to a cloaked owner never
+    /// composes. A failed query reports not cloaked, preserving the
+    /// pre-check behavior on systems without the attribute.
+    /// </summary>
+    public static bool IsWindowCloaked(IntPtr hwnd)
+    {
+        try
+        {
+            return DwmGetWindowAttribute(
+                hwnd,
+                DWMWA_CLOAKED,
+                out int cloaked,
+                sizeof(int)) == 0 && cloaked != 0;
+        }
+        catch (Exception ex) when (
+            ex is DllNotFoundException or EntryPointNotFoundException or BadImageFormatException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
     /// Version-safe DWM attribute entry point.  Attributes 33, 34 and 38 are
     /// Windows 11 additions; silently skip them on the Win10 compatibility
     /// floor instead of relying on an ignored HRESULT at every call site.
     /// </summary>
     public static int TrySetDwmWindowAttribute(IntPtr hwnd, int attr, ref int value)
     {
-        if ((attr is DWMWA_BORDER_COLOR or DWMWA_WINDOW_CORNER_PREFERENCE or DWMWA_SYSTEMBACKDROP_TYPE) &&
-            !Services.WindowsCompatibilityService.SupportsWin11DwmAttributes)
+        if (ShouldSkipDwmWindowAttribute(
+                attr,
+                Services.WindowsCompatibilityService.SupportsWin11DwmAttributes))
         {
             return 0;
         }
@@ -1886,8 +1790,22 @@ public static partial class Win32Helper
         }
     }
 
+    /// <summary>
+    /// The Win10 floor guard of <see cref="TrySetDwmWindowAttribute"/> as a
+    /// pure function: attributes 33/34/38 are Windows 11 additions and are
+    /// dropped (return 0, no P/Invoke) when the OS cannot render them. This
+    /// branch is the only thing keeping those attributes from reaching
+    /// DwmSetWindowAttribute on Windows 10.
+    /// </summary>
+    internal static bool ShouldSkipDwmWindowAttribute(
+        int attr,
+        bool supportsWin11DwmAttributes) =>
+        !supportsWin11DwmAttributes &&
+        attr is DWMWA_BORDER_COLOR or DWMWA_WINDOW_CORNER_PREFERENCE or DWMWA_SYSTEMBACKDROP_TYPE;
+
     public const int DWMWA_TRANSITIONS_FORCEDISABLED = 3;
     public const int DWMWA_CLOAK = 13;
+    public const int DWMWA_CLOAKED = 14;
     public const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
     public const int DWMWA_BORDER_COLOR = 34;
     public const int DWMWA_WINDOW_CORNER_PREFERENCE = 33;
@@ -2159,6 +2077,81 @@ public static partial class Win32Helper
     [return: MarshalAs(UnmanagedType.Bool)]
     public static partial bool GetCursorPos(out POINT lpPoint);
 
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool ClientToScreen(IntPtr hWnd, ref POINT lpPoint);
+
+    [LibraryImport("user32.dll")]
+    private static partial uint GetMessagePos();
+
+    // GetMessagePos packs signed screen coordinates for the input message
+    // currently being dispatched; both words must be sign-extended so windows
+    // left of / above the primary monitor resolve correctly. It reflects the
+    // pointer event itself, not the shared cursor, so touch drags work.
+    private static bool IsPointOnVirtualDesktop(POINT point)
+    {
+        int vx = GetSystemMetrics(SM_XVIRTUALSCREEN);
+        int vy = GetSystemMetrics(SM_YVIRTUALSCREEN);
+        int width = GetSystemMetrics(SM_CXVIRTUALSCREEN);
+        int height = GetSystemMetrics(SM_CYVIRTUALSCREEN);
+        return width > 0 && height > 0 &&
+            point.X >= vx && point.X <= vx + width &&
+            point.Y >= vy && point.Y <= vy + height;
+    }
+
+    /// <summary>
+    /// Resolves the screen-space point of the pointer event being dispatched,
+    /// from the thread message queue (GetMessagePos) instead of the shared
+    /// mouse cursor. Touch contact never moves the cursor, so GetCursorPos-
+    /// based drag and resize math silently no-ops on touch. GetMessagePos is
+    /// also independent of this window's bounds, unlike the client-origin +
+    /// XAML-position conversion, which feedback-loops when window moves are
+    /// paced behind pointer events during fast drags; that conversion stays
+    /// as a fallback only.
+    /// </summary>
+    public static bool TryGetPointerScreenPoint(
+        IntPtr hWnd,
+        Microsoft.UI.Xaml.UIElement? relativeTo,
+        Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e,
+        out POINT screenPoint)
+    {
+        screenPoint = default;
+        uint messagePos = GetMessagePos();
+        if (messagePos != 0)
+        {
+            var candidate = new POINT
+            {
+                X = (short)(messagePos & 0xFFFF),
+                Y = (short)(messagePos >> 16),
+            };
+            if (IsPointOnVirtualDesktop(candidate))
+            {
+                screenPoint = candidate;
+                return true;
+            }
+        }
+
+        if (relativeTo?.XamlRoot is not { } xamlRoot)
+        {
+            return false;
+        }
+
+        Windows.Foundation.Point position = e.GetCurrentPoint(relativeTo).Position;
+        double scale = GetDpiScaleForWindow(hWnd, xamlRoot);
+        var clientOrigin = default(POINT);
+        if (!ClientToScreen(hWnd, ref clientOrigin))
+        {
+            return false;
+        }
+
+        screenPoint = new POINT
+        {
+            X = clientOrigin.X + (int)Math.Round(position.X * scale),
+            Y = clientOrigin.Y + (int)Math.Round(position.Y * scale),
+        };
+        return true;
+    }
+
     [StructLayout(LayoutKind.Sequential)]
     public struct RECT
     {
@@ -2225,7 +2218,8 @@ public static partial class Win32Helper
         RECT WorkArea,
         string DeviceName,
         bool IsPrimary,
-        double DpiScale);
+        double DpiScale,
+        string StableId);
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     private struct DISPLAY_DEVICEW
@@ -2421,6 +2415,48 @@ public static partial class Win32Helper
     }
 
     /// <summary>
+    /// Full physical monitor rectangle of the display currently containing
+    /// the window. Per-monitor consumers (panorama background fitting) must
+    /// key off this rect rather than the virtual-desktop union — the union
+    /// mixes monitor DPI scales and only behaves like one canvas when every
+    /// monitor shares a single scale.
+    /// </summary>
+    public static bool TryGetWindowMonitorRect(IntPtr hWnd, out RECT monitorRect)
+    {
+        monitorRect = default;
+        if (hWnd == IntPtr.Zero)
+        {
+            return false;
+        }
+
+        try
+        {
+            IntPtr monitor = MonitorFromWindow(hWnd, MONITOR_DEFAULTTONEAREST);
+            if (monitor == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            var info = new MONITORINFO
+            {
+                cbSize = Marshal.SizeOf<MONITORINFO>()
+            };
+            if (!GetMonitorInfo(monitor, ref info))
+            {
+                return false;
+            }
+
+            monitorRect = info.rcMonitor;
+            return true;
+        }
+        catch (Exception ex) when (
+            ex is DllNotFoundException or EntryPointNotFoundException or BadImageFormatException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
     /// Returns the refresh rate of the monitor currently containing the window.
     /// Invalid driver values safely normalize to 60 Hz.
     /// </summary>
@@ -2429,48 +2465,6 @@ public static partial class Win32Helper
         try
         {
             IntPtr monitor = MonitorFromWindow(hWnd, MONITOR_DEFAULTTONEAREST);
-            if (monitor == IntPtr.Zero)
-            {
-                return WidgetDisplayRefreshRatePolicy.DefaultRefreshRateHz;
-            }
-
-            var monitorInfo = new MONITORINFOEX
-            {
-                cbSize = Marshal.SizeOf<MONITORINFOEX>(),
-                szDevice = string.Empty
-            };
-            if (!GetMonitorInfoEx(monitor, ref monitorInfo) ||
-                string.IsNullOrWhiteSpace(monitorInfo.szDevice))
-            {
-                return WidgetDisplayRefreshRatePolicy.DefaultRefreshRateHz;
-            }
-
-            var mode = new DEVMODE
-            {
-                dmDeviceName = string.Empty,
-                dmFormName = string.Empty,
-                dmSize = (short)Marshal.SizeOf<DEVMODE>()
-            };
-            return EnumDisplaySettings(monitorInfo.szDevice, EnumCurrentSettings, ref mode)
-                ? WidgetDisplayRefreshRatePolicy.Normalize((uint)Math.Max(0, mode.dmDisplayFrequency))
-                : WidgetDisplayRefreshRatePolicy.DefaultRefreshRateHz;
-        }
-        catch (Exception ex) when (
-            ex is DllNotFoundException or EntryPointNotFoundException or BadImageFormatException)
-        {
-            return WidgetDisplayRefreshRatePolicy.DefaultRefreshRateHz;
-        }
-    }
-
-    /// <summary>
-    /// Returns the refresh rate of the primary monitor for windowless pacing
-    /// consumers. Invalid driver values safely normalize to 60 Hz.
-    /// </summary>
-    public static int GetPrimaryDisplayRefreshRate()
-    {
-        try
-        {
-            IntPtr monitor = MonitorFromPoint(default, MONITOR_DEFAULTTOPRIMARY);
             if (monitor == IntPtr.Zero)
             {
                 return WidgetDisplayRefreshRatePolicy.DefaultRefreshRateHz;
@@ -2549,12 +2543,14 @@ public static partial class Win32Helper
                 };
                 if (GetMonitorInfoEx(hMonitor, ref info))
                 {
+                    string deviceName = info.szDevice ?? string.Empty;
                     areas.Add(new MonitorWorkAreaInfo(
                         info.rcMonitor,
                         info.rcWork,
-                        info.szDevice ?? string.Empty,
+                        deviceName,
                         (info.dwFlags & MonitorInfoPrimary) == MonitorInfoPrimary,
-                        GetDpiScaleForMonitor(hMonitor)));
+                        GetDpiScaleForMonitor(hMonitor),
+                        ResolveStableMonitorId(deviceName)));
                 }
                 else
                 {
@@ -2569,7 +2565,8 @@ public static partial class Win32Helper
                             fallbackInfo.rcWork,
                             string.Empty,
                             (fallbackInfo.dwFlags & MonitorInfoPrimary) == MonitorInfoPrimary,
-                            GetDpiScaleForMonitor(hMonitor)));
+                            GetDpiScaleForMonitor(hMonitor),
+                            ResolveStableMonitorId(null)));
                     }
                 }
 
@@ -2578,6 +2575,64 @@ public static partial class Win32Helper
             IntPtr.Zero);
 
         return areas;
+    }
+
+    /// <summary>EnumDisplayDevices dwFlags: retrieve the device interface name for the monitor.</summary>
+    private const uint EddGetDeviceInterfaceName = 0x00000001;
+
+    /// <summary>
+    /// Best-effort stable identity for a monitor: the PnP device interface id
+    /// when the adapter exposes one, otherwise the registry device key, and
+    /// finally the (unstable) <c>\\.\DISPLAYn</c> name. Unlike the device name,
+    /// the first two survive the renumbering Windows performs around lock,
+    /// sleep, and display-mode switches, so persisted monitor references key
+    /// on this value.
+    /// </summary>
+    public static string ResolveStableMonitorId(string? deviceName)
+    {
+        string fallback = string.IsNullOrWhiteSpace(deviceName) ? "unknown-display" : deviceName.Trim();
+        if (string.IsNullOrWhiteSpace(deviceName))
+        {
+            return fallback;
+        }
+
+        try
+        {
+            var displayDevice = new DisplayDevice
+            {
+                Size = Marshal.SizeOf<DisplayDevice>(),
+                DeviceName = string.Empty,
+                DeviceString = string.Empty,
+                DeviceId = string.Empty,
+                DeviceKey = string.Empty
+            };
+            if (EnumDisplayDevices(
+                    deviceName,
+                    0,
+                    ref displayDevice,
+                    EddGetDeviceInterfaceName))
+            {
+                if (!string.IsNullOrWhiteSpace(displayDevice.DeviceId))
+                {
+                    return displayDevice.DeviceId.Trim();
+                }
+
+                if (!string.IsNullOrWhiteSpace(displayDevice.DeviceKey))
+                {
+                    return displayDevice.DeviceKey.Trim();
+                }
+            }
+        }
+        catch (Exception ex) when (
+            ex is DllNotFoundException or
+                EntryPointNotFoundException or
+                BadImageFormatException or
+                MarshalDirectiveException or
+                TypeLoadException)
+        {
+        }
+
+        return fallback;
     }
 
     /// <summary>
@@ -2606,13 +2661,25 @@ public static partial class Win32Helper
                 ExplorerShellLaunchBackendMode.Rust
                 ? "rust"
                 : "csharp";
-        if (ExplorerShellLaunchService.TryOpen(
+        if (ExplorerLaunchCircuitBreaker.ShouldBypassExplorerHostedLaunch())
+        {
+            // #455: RPC-class failures mean the Explorer desktop thread is
+            // unhealthy, and every further explorer-hosted open re-pays the
+            // same synchronous cross-process COM storm. Stay on the local
+            // path until the breaker sees a restarted shell.
+            App.Log(
+                "[OpenFile] Explorer-hosted launch bypassed (circuit open, explorer restarted or RPC failures) " +
+                $"path='{path}'");
+        }
+        else if (ExplorerShellLaunchService.TryOpen(
                 path,
                 directory,
                 "open",
                 out string? explorerLaunchError,
-                out ExplorerShellLaunchNativeCallResult? explorerLaunchResult))
+                out ExplorerShellLaunchNativeCallResult? explorerLaunchResult,
+                out int explorerLaunchHResult))
         {
+            ExplorerLaunchCircuitBreaker.RecordSuccess();
             App.Log(
                 $"[OpenFile] backend=explorer-hosted implementation={explorerBackend} " +
                 $"path='{path}'" +
@@ -2622,11 +2689,14 @@ public static partial class Win32Helper
                     : string.Empty));
             return true;
         }
-
-        App.Log(
-            $"[OpenFile] Explorer-hosted launch unavailable for '{path}': " +
-            $"implementation={explorerBackend} " +
-            $"{explorerLaunchError ?? "unknown error"}. Falling back to local ShellExecuteEx.");
+        else
+        {
+            ExplorerLaunchCircuitBreaker.RecordFailure(explorerLaunchHResult);
+            App.Log(
+                $"[OpenFile] Explorer-hosted launch unavailable for '{path}': " +
+                $"implementation={explorerBackend} " +
+                $"{explorerLaunchError ?? "unknown error"}. Falling back to local ShellExecuteEx.");
+        }
 
         var startInfo = new ProcessStartInfo
         {
@@ -2636,48 +2706,14 @@ public static partial class Win32Helper
             WorkingDirectory = directory
         };
 
-        // ELECTRON_RUN_AS_NODE=1 makes any Electron-based default handler (MarkText,
-        // VS Code, Obsidian, ...) run as a plain Node.js process and crash trying to
-        // execute the target file as a script. Explorer doesn't carry this variable, so
-        // double-clicking there works; a process launched from developer tooling that
-        // sets it (e.g., an Electron-based host shell) would otherwise break opening
-        // such files. UseShellExecute=true cannot set a custom env block, so temporarily
-        // clear it from this process's environment around the launch and restore it
-        // afterwards, so the child behaves like it does from Explorer.
-        string? savedElectronRunAsNode = Environment.GetEnvironmentVariable("ELECTRON_RUN_AS_NODE");
-        if (savedElectronRunAsNode is not null)
-        {
-            Environment.SetEnvironmentVariable("ELECTRON_RUN_AS_NODE", null);
-        }
-
-        // Observation only: never abort the call or release the caller's slot —
-        // native Shell calls cannot be safely aborted (BoundedStaOperationRunner
-        // relies on that invariant), and ShellExecuteEx may sit in legitimate
-        // modal UI (UAC, SmartScreen) for as long as the user takes. A pending
-        // marker after this threshold separates those opens from a wedged Shell
-        // (feedback #9: .lnk resolution never returned on a machine whose
-        // Explorer desktop window was missing from ShellWindows).
-        const int LocalShellExecutePendingLogSeconds = 15;
-        bool localLaunchCompleted = false;
-        _ = Task.Delay(TimeSpan.FromSeconds(LocalShellExecutePendingLogSeconds))
-            .ContinueWith(
-                _ =>
-                {
-                    // Volatile: the timer thread reads what the caller thread
-                    // writes; a stale read only costs a wrong pending log line.
-                    if (!Volatile.Read(ref localLaunchCompleted))
-                    {
-                        App.Log(
-                            $"[OpenFile] local ShellExecuteEx still pending for '{path}' after " +
-                            $"{LocalShellExecutePendingLogSeconds}s (system Shell may be unresponsive).");
-                    }
-                },
-                TaskScheduler.Default);
+        using IDisposable? electronRunAsNodeScope = SuppressElectronRunAsNodeForChildLaunch();
+        LocalShellExecuteCompletionMarker pendingLocalLaunch =
+            WatchPendingLocalShellExecute(path);
 
         try
         {
             Process.Start(startInfo);
-            Volatile.Write(ref localLaunchCompleted, true);
+            pendingLocalLaunch.MarkCompleted();
             App.Log(
                 $"[OpenFile] backend=local-shell-execute path='{path}'");
             return true;
@@ -2707,12 +2743,132 @@ public static partial class Win32Helper
             App.Log($"[OpenFile] Failed to open '{path}': {ex.Message}");
             return false;
         }
-        finally
+    }
+
+    /// <summary>
+    /// Opens <paramref name="path"/> locally with the Shell's default verb — the
+    /// dispatch a desktop double-click performs — instead of the explicit "open"
+    /// verb, and without delegating to the Explorer desktop process. Folder
+    /// shortcuts need this (#459): third-party file managers register as the
+    /// Folder default handler, and an explicit "open" verb never reaches that
+    /// registration. Shares the local-launch pipeline (environment scrub,
+    /// pending observation) with the fallback in
+    /// <see cref="OpenFileOrChooseApp(IntPtr, string)"/>.
+    /// </summary>
+    internal static bool OpenWithDefaultVerbLocally(string path, string workingDirectory)
+    {
+        var startInfo = new ProcessStartInfo
         {
-            if (savedElectronRunAsNode is not null)
-            {
-                Environment.SetEnvironmentVariable("ELECTRON_RUN_AS_NODE", savedElectronRunAsNode);
-            }
+            FileName = path,
+            UseShellExecute = true,
+            WorkingDirectory = workingDirectory
+            // Deliberately no Verb: a NULL verb is the desktop double-click
+            // dispatch, which resolves the target's default handler.
+        };
+
+        using IDisposable? electronRunAsNodeScope = SuppressElectronRunAsNodeForChildLaunch();
+        LocalShellExecuteCompletionMarker pendingLocalLaunch =
+            WatchPendingLocalShellExecute(path);
+
+        try
+        {
+            Process.Start(startInfo);
+            pendingLocalLaunch.MarkCompleted();
+            App.Log(
+                $"[OpenFile] backend=local-default-verb path='{path}'");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[OpenFile] Failed to open '{path}' with the default verb: {ex.Message}");
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// ELECTRON_RUN_AS_NODE=1 makes any Electron-based default handler (MarkText,
+    /// VS Code, Obsidian, ...) run as a plain Node.js process and crash trying to
+    /// execute the target file as a script. Explorer doesn't carry this variable, so
+    /// double-clicking there works; a process launched from developer tooling that
+    /// sets it (e.g., an Electron-based host shell) would otherwise break opening
+    /// such files. UseShellExecute=true cannot set a custom env block, so temporarily
+    /// clear it from this process's environment and restore it on disposal, so the
+    /// child behaves like it does from Explorer. Returns null when the variable is
+    /// not set.
+    /// </summary>
+    private static IDisposable? SuppressElectronRunAsNodeForChildLaunch()
+    {
+        string? savedElectronRunAsNode = Environment.GetEnvironmentVariable("ELECTRON_RUN_AS_NODE");
+        if (savedElectronRunAsNode is null)
+        {
+            return null;
+        }
+
+        Environment.SetEnvironmentVariable("ELECTRON_RUN_AS_NODE", null);
+        return new EnvironmentVariableRestoreScope("ELECTRON_RUN_AS_NODE", savedElectronRunAsNode);
+    }
+
+    private sealed class EnvironmentVariableRestoreScope : IDisposable
+    {
+        private readonly string _name;
+        private readonly string? _value;
+
+        internal EnvironmentVariableRestoreScope(string name, string? value)
+        {
+            _name = name;
+            _value = value;
+        }
+
+        public void Dispose()
+        {
+            Environment.SetEnvironmentVariable(_name, _value);
+        }
+    }
+
+    private const int LocalShellExecutePendingLogSeconds = 15;
+
+    /// <summary>
+    /// Starts the one-shot pending marker shared by every local ShellExecuteEx
+    /// launch.
+    /// </summary>
+    private static LocalShellExecuteCompletionMarker WatchPendingLocalShellExecute(string path)
+    {
+        // Observation only: never abort the call or release the caller's slot —
+        // native Shell calls cannot be safely aborted (BoundedStaOperationRunner
+        // relies on that invariant), and ShellExecuteEx may sit in legitimate
+        // modal UI (UAC, SmartScreen) for as long as the user takes. A pending
+        // marker after this threshold separates those opens from a wedged Shell
+        // (feedback #9: .lnk resolution never returned on a machine whose
+        // Explorer desktop window was missing from ShellWindows).
+        var marker = new LocalShellExecuteCompletionMarker();
+        _ = Task.Delay(TimeSpan.FromSeconds(LocalShellExecutePendingLogSeconds))
+            .ContinueWith(
+                _ =>
+                {
+                    if (marker.Completed)
+                    {
+                        return;
+                    }
+
+                    App.Log(
+                        $"[OpenFile] local ShellExecuteEx still pending for '{path}' after " +
+                        $"{LocalShellExecutePendingLogSeconds}s (system Shell may be unresponsive).");
+                },
+                TaskScheduler.Default);
+        return marker;
+    }
+
+    private sealed class LocalShellExecuteCompletionMarker
+    {
+        // Volatile: the timer thread reads what the caller thread writes;
+        // a stale read only costs a wrong pending log line.
+        private volatile bool _completed;
+
+        internal bool Completed => _completed;
+
+        internal void MarkCompleted()
+        {
+            _completed = true;
         }
     }
 

@@ -62,11 +62,28 @@ public sealed partial class FileWidgetSettingsSection : UserControl
         set => SetValue(InteractionProperty, value);
     }
 
+    /// <summary>
+    /// Mounts the managed-storage (收纳与路径) section inside the overview
+    /// card stack — directly below the 桌面整理 entry card (index 0) and
+    /// above 文件显示: storage path card → drag-behavior expander →
+    /// desktop-shortcut card, all inside this one attached stack.
+    /// </summary>
+    private const int ManagedStorageSectionIndex = 1;
+
+    public void AttachManagedStorageSection(FrameworkElement section)
+    {
+        int index = Math.Min(ManagedStorageSectionIndex, SectionCardsPanel.Children.Count);
+        SectionCardsPanel.Children.Insert(index, section);
+    }
+
     public event EventHandler<SettingsSectionNavigationRequestedEventArgs>? NavigationRequested;
 
     private void NestedSettingsButton_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is Button { Tag: string sectionTag })
+        // Drill-down rows are Buttons, but the 文件显示-style entry cards are
+        // toolkit SettingsCards (ButtonBase, not Button); match the shell's
+        // FrameworkElement guard so both navigate.
+        if (sender is FrameworkElement { Tag: string sectionTag })
         {
             NavigationRequested?.Invoke(this, new SettingsSectionNavigationRequestedEventArgs(sectionTag));
         }

@@ -27,6 +27,12 @@ public sealed partial class BackupSettingsViewModel : ObservableObject, IDisposa
     private CancellationTokenSource? _endpointCancellation;
     private CancellationTokenSource? _commandCancellation;
     private Task<IReadOnlyList<BackupRemoteSnapshot>?>? _listInFlight;
+    // Aggregates every in-flight read that holds the current scope's tokens
+    // (credential checks, snapshot lists, post-upload verification delays).
+    // A canceled scope is retired against this drain instead of being
+    // disposed immediately: disposing a source a pending read still uses
+    // throws ObjectDisposedException from token members such as WaitHandle.
+    private Task _readDrain = Task.CompletedTask;
     private int _visitGeneration;
     private int _endpointGeneration;
     private int _commandGeneration;
@@ -90,16 +96,55 @@ public sealed partial class BackupSettingsViewModel : ObservableObject, IDisposa
         _endpointCancellation?.Cancel();
         _commandCancellation?.Cancel();
         _commandCancellation = null;
-        _listInFlight = null;
-        _endpointCancellation?.Dispose();
-        _endpointCancellation = null;
-        _visit.Dispose();
+        // Hidden-visit reads keep running on the canceled tokens, so the
+        // scope must be retired (kept referenced, disposed only once its
+        // drain settles) rather than disposed in place.
+        RetireCancellationScope(_visit, _endpointCancellation, _readDrain);
+        _readDrain = Task.CompletedTask;
         _visit = null;
+        _endpointCancellation = null;
+        // The retired read keeps its own reference; clearing the active slot
+        // only stops the next visit from deduplicating against it.
+        _listInFlight = null;
         IsBusy = false;
         CredentialSaved = false;
         Message = BackupPageMessage.Empty;
         RemoteSnapshots = [];
     }
+
+    /// <summary>
+    /// Releases a canceled cancellation scope. The sources must outlive the
+    /// reads that still hold their tokens (Dispose-before-drain makes token
+    /// members such as <see cref="CancellationToken.WaitHandle"/> throw
+    /// ObjectDisposedException), so the disposal is deferred to the drain
+    /// task that aggregates those reads. A drain that never settles (test
+    /// gates, teardown racing a hung transport) leaves the canceled sources
+    /// to the process-level backstop instead of disposing them unsafely.
+    /// </summary>
+    private static void RetireCancellationScope(
+        CancellationTokenSource? visit, CancellationTokenSource? endpoint, Task drain)
+    {
+        if (drain.IsCompleted)
+        {
+            endpoint?.Dispose();
+            visit?.Dispose();
+            return;
+        }
+
+        _ = drain.ContinueWith(_ =>
+        {
+            endpoint?.Dispose();
+            visit?.Dispose();
+        }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+    }
+
+    /// <summary>
+    /// Adds one background read to the drain that retirement waits on before
+    /// releasing the current scope's cancellation sources. Every launch site
+    /// that hands <see cref="EndpointToken"/> to fire-and-forget work must
+    /// route through here so the drain stays complete.
+    /// </summary>
+    private void TrackRead(Task read) => _readDrain = Task.WhenAll(_readDrain, read);
 
     public void RefreshState() => RefreshState(recheckCredential: true);
 
@@ -126,7 +171,10 @@ public sealed partial class BackupSettingsViewModel : ObservableObject, IDisposa
     {
         ++_endpointGeneration;
         _endpointCancellation?.Cancel();
-        _endpointCancellation?.Dispose();
+        // The superseded endpoint's reads keep running on its canceled token:
+        // retire the source against its drain instead of disposing it inline.
+        RetireCancellationScope(null, _endpointCancellation, _readDrain);
+        _readDrain = Task.CompletedTask;
         _endpointCancellation = IsActive
             ? CancellationTokenSource.CreateLinkedTokenSource(_visit!.Token) : null;
         _commandCancellation?.Cancel();
@@ -146,7 +194,19 @@ public sealed partial class BackupSettingsViewModel : ObservableObject, IDisposa
         IsActive && visit == _visitGeneration && endpoint == _endpointGeneration &&
         !token.IsCancellationRequested;
 
-    public async Task RefreshCredentialAsync(bool listAfter = false)
+    /// <summary>
+    /// Re-checks the endpoint credential (and optionally lists snapshots).
+    /// The entry point routes the read through <see cref="TrackRead"/> so the
+    /// cancellation scope retirement waits for it no matter who launched it.
+    /// </summary>
+    public Task RefreshCredentialAsync(bool listAfter = false)
+    {
+        Task read = RefreshCredentialCoreAsync(listAfter);
+        TrackRead(read);
+        return read;
+    }
+
+    private async Task RefreshCredentialCoreAsync(bool listAfter)
     {
         if (!IsActive) return;
         int visit = _visitGeneration;
@@ -234,6 +294,7 @@ public sealed partial class BackupSettingsViewModel : ObservableObject, IDisposa
         if (!IsActive) return Task.FromResult<IReadOnlyList<BackupRemoteSnapshot>?>(null);
         if (_listInFlight is { IsCompleted: false } pending) return pending;
         Task<IReadOnlyList<BackupRemoteSnapshot>?> task = ListCoreAsync(checkCredential);
+        TrackRead(task);
         _listInFlight = task.IsCompleted ? null : task;
         return task;
     }
@@ -289,7 +350,7 @@ public sealed partial class BackupSettingsViewModel : ObservableObject, IDisposa
         if (!IsActive) return;
         RemoteSnapshots = RemoteSnapshots.Where(item => item.Name != name).ToArray();
         Message = BackupPageMessage.Empty;
-        _ = RefreshAfterDelayAsync();
+        TrackRead(RefreshAfterDelayAsync());
     }
 
     private async Task RefreshAfterDelayAsync()
@@ -317,7 +378,7 @@ public sealed partial class BackupSettingsViewModel : ObservableObject, IDisposa
             if (notification.Endpoint != Endpoint || !notification.Uploaded ||
                 notification.RemoteFilePath is not { } path) return;
             int slash = path.LastIndexOf('/');
-            _ = VerifyUploadedSnapshotAsync(path[(slash + 1)..]);
+            TrackRead(VerifyUploadedSnapshotAsync(path[(slash + 1)..]));
         });
     }
 

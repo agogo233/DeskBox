@@ -276,7 +276,7 @@ public sealed partial class DesktopOrganizationTaskView : UserControl
         CancelButton.Content = T("DesktopOrganization.Window.Cancel");
         RetryPublicButton.Content = T("DesktopOrganization.Layout.RetryRemaining");
         RecoverButton.Content = T("DesktopOrganization.Public.Recover");
-        RecoveryInfoText.Text = T("DesktopOrganization.Public.RecoveryPending");
+        RecoveryInfo.Message = T("DesktopOrganization.Public.RecoveryPending");
         AbandonRecoveryButton.Content = T("DesktopOrganization.Public.AbandonRestore");
         AbandonUndoButton.Content = T("DesktopOrganization.Public.AbandonRestore");
         DoneButton.Content = T("DesktopOrganization.Window.Done");

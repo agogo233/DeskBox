@@ -105,3 +105,6 @@ docs/wechat/*.webp
 .tmp/
 store-listing/
 .zcode/
+
+# Agent scratch workspace (review/fix iteration artifacts)
+.scratch/

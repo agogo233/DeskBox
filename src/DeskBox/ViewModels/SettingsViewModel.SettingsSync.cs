@@ -51,9 +51,9 @@ private void OnLanguageChanged()
 
     private void OnSettingsChanged()
     {
-        if (App.UiDispatcherQueue is { } dispatcherQueue && !dispatcherQueue.HasThreadAccess)
+        if (!DeskBox.Platform.UiDispatch.HasAccess)
         {
-            dispatcherQueue.TryEnqueue(OnSettingsChanged);
+            DeskBox.Platform.UiDispatch.RunOrDefer(ApplySettingsSnapshot);
             return;
         }
 
@@ -71,6 +71,7 @@ private void OnLanguageChanged()
         {
             SelectedLanguage = LocalizationService.NormalizeLanguageSetting(settings.Language);
             AutoCheckForUpdates = settings.AutoCheckForUpdates;
+            SilentStartup = settings.SilentStartup;
             ShowHoverButtons = settings.ShowHoverButtons;
             ApplyHoverButtonActionSelection(settings.WidgetHoverButtonActions);
 

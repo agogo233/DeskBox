@@ -54,6 +54,7 @@ public sealed record WeatherPresentationSettings(
     string WindSpeedUnit,
     string DefaultView,
     string Skin,
+    string IconStyle,
     string DataSource,
     int RefreshIntervalMinutes,
     bool ShowForecast,
@@ -104,6 +105,8 @@ public interface IFeatureWidgetsSettings
     bool SetWeatherDefaultView(string? view);
 
     bool SetWeatherSkin(string? skin);
+
+    bool SetWeatherIconStyle(string? style);
 
     bool SetWeatherDataSource(string? source);
 

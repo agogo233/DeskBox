@@ -20,7 +20,8 @@ public sealed record NativeDropIntentEventArgs(
     bool ShortcutRequested,
     bool RightButtonDrag,
     uint FeedbackEffect,
-    uint KeyState);
+    uint KeyState,
+    uint AllowedEffects);
 
 /// <summary>
 /// Everything a shortcut-launch consumer needs to delegate a drop to the
@@ -108,6 +109,7 @@ public sealed class NativeDropTarget : IDisposable
     private static readonly ushort s_fileGroupDescriptorFormat;
     private static readonly ushort s_fileContentsFormat;
     private static readonly ushort s_shellIdListFormat;
+    private static readonly ushort s_performedDropEffectFormat;
 
     // ── State ──
 
@@ -172,6 +174,21 @@ public sealed class NativeDropTarget : IDisposable
     public event Action<int>? UndisplayableDropBlocked;
 
     /// <summary>
+    /// Optional probe consulted inside DragEnter/DragOver/Drop to decide
+    /// whether the dragged paths and the destination live on the same
+    /// volume. When unset the feedback assumes same-volume semantics.
+    /// </summary>
+    internal Func<IReadOnlyList<string>, bool>? SameVolumeProbe { get; set; }
+
+    /// <summary>
+    /// Optional gate consulted inside the OLE Drop callback before the
+    /// completion effect is committed. Returning true refuses the drop so a
+    /// busy import pipeline is never silently dropped after the source was
+    /// told the drop succeeded.
+    /// </summary>
+    internal Func<bool>? ImportBusyProbe { get; set; }
+
+    /// <summary>
     /// Runs inside the OLE Drop callback before the import events, while the
     /// source data object is alive, so the handler can delegate the drop to a
     /// Shell drop target (drop onto an application shortcut). Returning
@@ -183,17 +200,7 @@ public sealed class NativeDropTarget : IDisposable
         set;
     }
 
-    /// <summary>
-    /// Returns the widget id currently hosted by this drop target's window, or
-    /// null when unknown. A native drag-out stamped with the same id is the
-    /// drag returning to its own widget: the drag is refused (no launch, no
-    /// import, no relocation) so the source files stay untouched.
-    /// </summary>
-    internal Func<string?>? SelfDragSourceWidgetProvider { get; set; }
 
-    private bool _isSelfSourceDrag;
-
-    private const uint DropeffectNone = 0;
 
     /// <summary>
     /// Whether the current drag payload contains file drop data (CF_HDROP).
@@ -224,6 +231,7 @@ public sealed class NativeDropTarget : IDisposable
         s_fileGroupDescriptorFormat = (ushort)OleDropTargetNativeMethods.RegisterClipboardFormatW("FileGroupDescriptorW");
         s_fileContentsFormat = (ushort)OleDropTargetNativeMethods.RegisterClipboardFormatW("FileContents");
         s_shellIdListFormat = (ushort)OleDropTargetNativeMethods.RegisterClipboardFormatW("Shell IDList Array");
+        s_performedDropEffectFormat = (ushort)OleDropTargetNativeMethods.RegisterClipboardFormatW("Performed DropEffect");
 
         // Ensure OLE is initialized (WinUI 3 usually does this, but call
         // again is harmless if already initialized).
@@ -335,7 +343,6 @@ public sealed class NativeDropTarget : IDisposable
         uint allowedEffects = effect;
         InspectDragData(dataObject);
         PeekDropPaths(dataObject);
-        _isSelfSourceDrag = IsSelfSourceDrag(dataObject);
         _dragPathHints = HasFileData && !HasVirtualFileData
             ? TryExtractHDropPathHints(dataObject)
             : [];
@@ -349,17 +356,9 @@ public sealed class NativeDropTarget : IDisposable
             HasShellApplicationData,
             _defaultMoveProvider(),
             followWindows: GetFollowWindowsSetting(),
+            sameVolume: GetSameVolume(_dragPathHints),
             shortcutOutsideDesktop: GetShortcutOutsideDesktopSetting(),
             sourcesOnDesktop: ResolveSourcesOnDesktop(_peekedDropPaths));
-        if (_isSelfSourceDrag)
-        {
-            // The drag left this widget and came back; nothing here may
-            // accept it. 1a scope: reorder-through-native-drag is not wired
-            // yet, so the honest feedback is the "no drop" cursor.
-            effect = DropeffectNone;
-            return S_OK;
-        }
-
         if (HasFileData)
         {
             RetainActiveDataObject(dataObject);
@@ -386,14 +385,9 @@ public sealed class NativeDropTarget : IDisposable
             HasShellApplicationData,
             _defaultMoveProvider(),
             followWindows: GetFollowWindowsSetting(),
+            sameVolume: GetSameVolume(_dragPathHints),
             shortcutOutsideDesktop: GetShortcutOutsideDesktopSetting(),
             sourcesOnDesktop: ResolveSourcesOnDesktop(_peekedDropPaths));
-        if (_isSelfSourceDrag)
-        {
-            effect = DropeffectNone;
-            return S_OK;
-        }
-
         UpdateShellVisual(point, effect);
         return S_OK;
     }
@@ -413,22 +407,6 @@ public sealed class NativeDropTarget : IDisposable
         POINT point,
         ref uint effect)
     {
-        if (_isSelfSourceDrag)
-        {
-            // The drag returned to its own widget: refuse before the launch
-            // delegate and the import pipeline can touch anything, and keep
-            // the source files exactly where they are.
-            ClearActiveDropDescriptionAndReleaseDataObject();
-            _shellVisualActive = false;
-            ResetDragDataState();
-            _rightButtonDragActive = false;
-            _isSelfSourceDrag = false;
-            effect = DropeffectNone;
-            App.Log(
-                "[DropTarget] NativeDrop refused self-source drag " +
-                "(returned to its own widget)");
-            return S_OK;
-        }
 
         uint allowedEffects = effect;
         bool shellApplicationDrop = HasShellApplicationData;
@@ -445,6 +423,7 @@ public sealed class NativeDropTarget : IDisposable
             shellApplicationDrop,
             defaultMove,
             followWindows: followWindows,
+            sameVolume: GetSameVolume(_dragPathHints),
             shortcutOutsideDesktop: GetShortcutOutsideDesktopSetting(),
             sourcesOnDesktop: ResolveSourcesOnDesktop(_peekedDropPaths));
         IReadOnlyList<string> paths = shellApplicationDrop
@@ -458,11 +437,20 @@ public sealed class NativeDropTarget : IDisposable
         }
         bool shortcutOutsideDesktop = GetShortcutOutsideDesktopSetting();
         bool sourcesOnDesktop = ResolveSourcesOnDesktop(paths);
+        // The transfer decision must respect the allowed effects the source
+        // announced (the same constraint the feedback effect applies). A
+        // copy-only source whose files are moved would delete originals the
+        // source never sanctioned for deletion.
+        bool sourceCanCopy = (allowedEffects & NativeDropEffectPolicy.Copy) != 0;
+        bool sourceCanMove = (allowedEffects & NativeDropEffectPolicy.Move) != 0;
         bool copyRequested = NativeDropEffectPolicy.ShouldCopyMappedTransfer(
             containsTemporaryFiles,
             keyState,
             defaultMove,
             followWindows: followWindows,
+            sameVolume: GetSameVolume(_dragPathHints),
+            canCopy: sourceCanCopy,
+            canMove: sourceCanMove,
             shortcutOutsideDesktop: shortcutOutsideDesktop,
             sourcesOnDesktop: sourcesOnDesktop);
         bool shortcutRequested = createdShellApplicationLinks ||
@@ -516,12 +504,14 @@ public sealed class NativeDropTarget : IDisposable
             if (launch.Consumed)
             {
                 effect = NativeDropEffectPolicy.None;
+                WritePerformedDropEffect(dataObject, effect);
                 return S_OK;
             }
 
             if (launch.Handled)
             {
                 effect = launch.Effect;
+                WritePerformedDropEffect(dataObject, effect);
                 return S_OK;
             }
         }
@@ -552,8 +542,22 @@ public sealed class NativeDropTarget : IDisposable
                 }
 
                 effect = NativeDropEffectPolicy.None;
+                WritePerformedDropEffect(dataObject, effect);
                 return S_OK;
             }
+        }
+
+        // A busy import pipeline cannot accept a drop: refuse it before the
+        // completion effect commits so the source is never told the drop
+        // succeeded while the files are silently skipped.
+        if (paths.Count > 0 && IsImportBusy())
+        {
+            App.Log(
+                $"[DropTarget] Refused drop: import pipeline busy " +
+                $"count={paths.Count}");
+            effect = NativeDropEffectPolicy.None;
+            WritePerformedDropEffect(dataObject, effect);
+            return S_OK;
         }
 
         if (paths.Count > 0)
@@ -567,7 +571,8 @@ public sealed class NativeDropTarget : IDisposable
                 shortcutRequested,
                 rightButtonDrag,
                 feedbackEffect,
-                keyState));
+                keyState,
+                allowedEffects));
             DropEvent?.Invoke(
                 paths,
                 point.X,
@@ -584,6 +589,7 @@ public sealed class NativeDropTarget : IDisposable
             effect = NativeDropEffectPolicy.None;
         }
 
+        WritePerformedDropEffect(dataObject, effect);
         return S_OK;
     }
 
@@ -604,6 +610,77 @@ public sealed class NativeDropTarget : IDisposable
         try
         {
             return _shortcutOutsideDesktopProvider?.Invoke() == true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    // The OLE drop protocol asks the target to record the effect it
+    // actually performed back onto the source's data object. Explorer reads
+    // this receipt when present; our own guarded data object consumes it.
+    private static void WritePerformedDropEffect(nint dataObject, uint effect)
+    {
+        if (dataObject == 0 || s_performedDropEffectFormat == 0)
+        {
+            return;
+        }
+
+        nint buffer = 0;
+        try
+        {
+            buffer = Marshal.AllocHGlobal(sizeof(uint));
+            Marshal.WriteInt32(buffer, unchecked((int)effect));
+            var format = new NativeFormatEtc
+            {
+                ClipboardFormat = s_performedDropEffectFormat,
+                TargetDevice = 0,
+                Aspect = DVASPECT_CONTENT,
+                Index = -1,
+                MediumType = TYMED_HGLOBAL
+            };
+            var medium = new NativeStorageMedium
+            {
+                MediumType = TYMED_HGLOBAL,
+                Content = buffer,
+                ReleaseUnknown = 0
+            };
+            int result = new NativeOleDataObject(dataObject)
+                .SetData(ref format, ref medium, release: true);
+            if (result < 0)
+            {
+                Marshal.FreeHGlobal(buffer);
+            }
+        }
+        catch
+        {
+            if (buffer != 0)
+            {
+                Marshal.FreeHGlobal(buffer);
+            }
+        }
+    }
+
+    private bool GetSameVolume(IReadOnlyList<string> paths)
+    {
+        try
+        {
+            return SameVolumeProbe?.Invoke(paths) ?? true;
+        }
+        catch
+        {
+            // Unknown volume pairing is the same-volume default this path
+            // has always reported; a wrong guess only affects the glyph.
+            return true;
+        }
+    }
+
+    private bool IsImportBusy()
+    {
+        try
+        {
+            return ImportBusyProbe?.Invoke() == true;
         }
         catch
         {
@@ -710,27 +787,6 @@ public sealed class NativeDropTarget : IDisposable
         HasShellApplicationData = false;
         _peekedDropPaths = [];
         _dragPathHints = [];
-        _isSelfSourceDrag = false;
-    }
-
-    private bool IsSelfSourceDrag(nint dataObject)
-    {
-        if (SelfDragSourceWidgetProvider is null)
-        {
-            return false;
-        }
-
-        if (!NativeFileDragOut.TryReadSourceTag(
-                dataObject,
-                out string sourceWidgetId,
-                out _))
-        {
-            return false;
-        }
-
-        string? hostedWidgetId = SelfDragSourceWidgetProvider();
-        return hostedWidgetId is not null &&
-            string.Equals(sourceWidgetId, hostedWidgetId, StringComparison.Ordinal);
     }
 
     private bool ShouldUseShellVisual()

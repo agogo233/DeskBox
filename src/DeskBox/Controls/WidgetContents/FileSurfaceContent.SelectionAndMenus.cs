@@ -11,8 +11,6 @@ using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Windows.ApplicationModel.DataTransfer;
-using Windows.Storage.Pickers;
-using WinRT.Interop;
 
 namespace DeskBox.Controls.WidgetContents;
 
@@ -157,7 +155,7 @@ public sealed partial class FileSurfaceContent
     {
         if (sender is ListViewBase listView)
         {
-            FinishBoxSelection(listView);
+            HandleItemsPointerCaptureLost(listView);
         }
     }
 
@@ -179,6 +177,7 @@ public sealed partial class FileSurfaceContent
         }
 
         return !FileItemSelectionGeometry.IsWithinItemSurface(source) &&
+               !FileItemSelectionGeometry.HasAncestor<SelectorItem>(source) &&
                !FileItemSelectionGeometry.HasAncestor<ScrollBar>(source) &&
                !FileItemSelectionGeometry.HasAncestor<ButtonBase>(source) &&
                !FileItemSelectionGeometry.HasAncestor<TextBox>(source);
@@ -855,31 +854,6 @@ public sealed partial class FileSurfaceContent
                 await StartItemRenameAsync(newFolder);
             }
         });
-    }
-
-    private async Task PickMappedFolderAsync()
-    {
-        var picker = new FolderPicker
-        {
-            SuggestedStartLocation =
-                PickerLocationId.Desktop
-        };
-        picker.FileTypeFilter.Add("*");
-        IntPtr foreground = Win32Helper.GetForegroundWindow();
-        IntPtr owner = Win32Helper.GetAncestor(
-            foreground,
-            Win32Helper.GA_ROOT);
-        InitializeWithWindow.Initialize(
-            picker,
-            owner == IntPtr.Zero ? foreground : owner);
-        Windows.Storage.StorageFolder? folder =
-            await picker.PickSingleFolderAsync();
-        if (folder is not null)
-        {
-            await RunAsync(
-                () => ViewModel.UpdateMappedFolderPathAsync(
-                    folder.Path));
-        }
     }
 
     private void AddSortItem(

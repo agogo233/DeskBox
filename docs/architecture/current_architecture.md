@@ -54,6 +54,41 @@ optional list and content text-size overrides also use that coordinator;
 stored zero continues to inherit the global text size without being rewritten
 as an explicit override during settings refresh.
 
+## 2026-09-29 state snapshot
+
+The first architecture-optimization phase closed at batch 51. The facts below
+are the settled end state on top of the historical sections underneath; the
+per-batch record lives in
+[architecture-optimization-progress-20260922.md](architecture-optimization-progress-20260922.md)
+(batches 1-51, full log).
+
+- Settings shell. `SettingsViewModel` went from 33 partials / 11,495 lines to
+  23 partials / 3,941 lines through the batch 29-50 settings-coordinator
+  migration and facade retirement. All settings-page writes and binding
+  surfaces are owned by the settings coordinators (13 per the batch-50
+  contract; `PerformanceSettingsCoordinator` joined as the 14th in batch 50)
+  and the 16 Features editor VMs. General (language / auto-start) and About
+  (update card) stay on the shell by the batch-50 verdict: host-lifeline
+  sections whose writers are services the Features layer must not reference.
+- P/Invoke. Non-Platform declarations are a hard zero since batch 31: all 270
+  declarations live under `src/DeskBox/Platform`.
+- AppSettings. Re-qualified by batch 51 as a frozen on-disk wire contract:
+  the 220 passthroughs are pure disk-schema mapping and cannot be deleted,
+  slice-direct serialization cannot stay byte-equivalent, and runtime
+  dependencies should read through slices. Growing or shrinking the facade is
+  a disk schema change and requires a versioned migration.
+- Widget content. Seven widget kinds are unified on `WidgetContentAdapterBase`
+  (the adapter owns the view model and a lazy view; the leaf can be dropped).
+  Search's cold subscription no longer materializes a tree.
+- Device layer. `widget-layout.json` is the sealed home for layout state
+  (batch 30 verification). `IFeatureRuntime` and `FeatureRuntimeRegistry` are
+  formalized contracts (batch 32): idempotent Start/Dispose semantics,
+  reverse-registration shutdown sweep, leak isolation.
+- Tests and AOT gates. The full suite grew from 4,073 to 4,487 tests. The AOT
+  gates are WMC1510 = 864 (zero touch), the nameof-count ratchets (shell AOT
+  bridge = 33; per-editor bridges pinned by their own tests), and the
+  21-scenario managed-UI smoke matrix in `scripts/run-aot-managed-ui-smoke.ps1`.
+
 This document describes the current architecture after the 1.2.0 widget foundation work. It is intended as the short, current-state handoff for future maintenance. Historical plans and checkpoints live under the archive folders.
 
 ## Current Goal
@@ -129,6 +164,13 @@ Shared shell and window helpers:
 - `src/DeskBox/Services/WidgetTrayAnimationController.cs`
 - `src/DeskBox/Services/WidgetTitleBarMetrics.cs`
 - `src/DeskBox/Services/WidgetSessionManager.cs`
+
+Display binding (widgets pinned to a display by hardware identity; requirements in `docs/requirements/widget-screen-binding.md`):
+
+- `src/DeskBox/Services/WidgetScreenCatalog.cs`: enumerates monitors into stable identities (PnP device-interface id via `Win32Helper.ResolveStableMonitorId`, rejecting unstable `\\.\DISPLAYn` fallbacks) and resolves bound widgets/groups to a target work area.
+- `src/DeskBox/Services/WidgetScreenMenuBuilder.cs`: builds the per-widget/group "show on" context-menu section (auto / follow primary / pinned to a named display).
+- `src/DeskBox/Views/SettingsSections/DisplaySettingsSection.xaml(.cs)`: the Displays settings page — arrangement preview (accent-filled selection applied in code-behind), identify overlay trigger, per-screen widget lists with inline rebind combos, pin-all, and the clearable default display for new widgets.
+- `src/DeskBox/Views/DisplayIdentifyOverlayWindow.cs`: borderless topmost per-monitor overlay that flashes the display number and fades out (classic layered-window alpha).
 
 Current windows:
 
@@ -473,7 +515,7 @@ QuickCapture data:
 - `%LocalAppData%/DeskBox/data/quick-capture/images/...`
 - `%LocalAppData%/DeskBox/data/quick-capture/thumbnails/...`
 
-Uninstalling the app may remove binaries but should not be assumed to remove `%LocalAppData%/DeskBox`. This is user data.
+Uninstalling the app may remove binaries but should not be assumed to remove `%LocalAppData%/DeskBox`. This is user data. (Correction 2026-10-04: this holds for the direct-install channel. The store build's `%LocalAppData%` writes are redirected by MSIX AppData write virtualization to `Packages/[PFN]/LocalCache`, which is removed on uninstall and preserved only across same-PackageFamilyName updates — see `module-boundary-roadmap-20260918.md`.)
 
 ## Adding A New Content Widget
 

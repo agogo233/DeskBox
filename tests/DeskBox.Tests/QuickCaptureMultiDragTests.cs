@@ -126,40 +126,6 @@ public sealed class QuickCaptureMultiDragTests
     }
 
     [Fact]
-    public void StandaloneWindow_UsesManualRowDropWithoutMutatingTheProjection()
-    {
-        string xaml = File.ReadAllText(TestPaths.FromRepository(
-            "src/DeskBox/Views/QuickCaptureWidgetWindow.xaml"));
-        string source = File.ReadAllText(TestPaths.FromRepository(
-            "src/DeskBox/Views/QuickCaptureWidgetWindow.ItemActions.cs"));
-
-        Assert.Contains(
-            "CanReorderItems=\"False\"",
-            xaml,
-            StringComparison.Ordinal);
-        Assert.Contains(
-            "QuickCaptureDragPackage.ResolveManualDropTargetIndex",
-            source,
-            StringComparison.Ordinal);
-        Assert.DoesNotContain(
-            "ResolveReorderedTargetIndex",
-            source,
-            StringComparison.Ordinal);
-        Assert.DoesNotContain(
-            "ViewModel.Items.IndexOf(item)",
-            source,
-            StringComparison.Ordinal);
-        Assert.Contains(
-            "MovePinnedItemToIndexAsync(",
-            source,
-            StringComparison.Ordinal);
-        Assert.Contains(
-            "MoveItemAsync(",
-            source,
-            StringComparison.Ordinal);
-    }
-
-    [Fact]
     public void TodoCopy_OnlyReportsFailureWhenSetContentFails()
     {
         string repositoryRoot = FindRepositoryRoot();

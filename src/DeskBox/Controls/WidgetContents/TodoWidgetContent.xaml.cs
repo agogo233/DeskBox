@@ -636,84 +636,6 @@ public sealed partial class TodoWidgetContent : UserControl
         EnsureWideDetailSelection();
     }
 
-    private void DraftImportantButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (ViewModel is null)
-        {
-            return;
-        }
-
-        ViewModel.DraftImportant = !ViewModel.DraftImportant;
-    }
-
-    private void DraftDueDateButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (sender is not Button button || ViewModel is null)
-        {
-            return;
-        }
-
-        var flyout = CreateDraftDueDateFlyout();
-        flyout.ShowAt(button, new FlyoutShowOptions { Placement = FlyoutPlacementMode.Bottom });
-    }
-
-    private MenuFlyout CreateDraftDueDateFlyout()
-    {
-        var flyout = new MenuFlyout();
-        var localization = App.Current.LocalizationService;
-
-        var todayItem = new MenuFlyoutItem { Text = localization.T("Todo.Due.Today") };
-        todayItem.Click += (_, _) => ViewModel?.SetDraftDueDatePreset(TodoDuePreset.Today);
-        flyout.Items.Add(todayItem);
-
-        var tomorrowItem = new MenuFlyoutItem { Text = localization.T("Todo.Due.Tomorrow") };
-        tomorrowItem.Click += (_, _) => ViewModel?.SetDraftDueDatePreset(TodoDuePreset.Tomorrow);
-        flyout.Items.Add(tomorrowItem);
-
-        var thisWeekItem = new MenuFlyoutItem { Text = localization.T("Todo.Due.ThisWeek") };
-        thisWeekItem.Click += (_, _) => ViewModel?.SetDraftDueDatePreset(TodoDuePreset.ThisWeek);
-        flyout.Items.Add(thisWeekItem);
-
-        var nextMondayItem = new MenuFlyoutItem { Text = localization.T("Todo.Due.NextMonday") };
-        nextMondayItem.Click += (_, _) => ViewModel?.SetDraftDueDatePreset(TodoDuePreset.NextMonday);
-        flyout.Items.Add(nextMondayItem);
-
-        flyout.Items.Add(new MenuFlyoutSeparator());
-
-        var customItem = new MenuFlyoutItem
-        {
-            Text = localization.T("Todo.Due.Custom"),
-            Icon = new FontIcon { Glyph = "\uE8A5" }
-        };
-        customItem.Click += async (_, _) => await PickCustomDueDateAsync(null);
-        flyout.Items.Add(customItem);
-
-        if (ViewModel?.DraftDueDate is not null)
-        {
-            var clearItem = new MenuFlyoutItem
-            {
-                Text = localization.T("Todo.Due.Clear"),
-                Icon = new FontIcon { Glyph = "\uE711" }
-            };
-            clearItem.Click += (_, _) => ViewModel?.SetDraftDueDatePreset(TodoDuePreset.Clear);
-            flyout.Items.Add(clearItem);
-        }
-
-        return flyout;
-    }
-
-    private void MetadataImportant_Click(object sender, RoutedEventArgs e)
-    {
-        if (sender is not FrameworkElement element ||
-            element.DataContext is not TodoItemViewModel item ||
-            ViewModel is null)
-        {
-            return;
-        }
-
-        _ = SetImportantWithFeedbackAsync(item, !item.IsImportant);
-    }
-
     private void MetadataDueDate_Click(object sender, RoutedEventArgs e)
     {
         if (sender is not Button button ||
@@ -819,53 +741,6 @@ public sealed partial class TodoWidgetContent : UserControl
         }
 
         flyout.ShowAt(button, new FlyoutShowOptions { Placement = FlyoutPlacementMode.Bottom });
-    }
-
-    private async void InlineEditTextBox_LostFocus(object sender, RoutedEventArgs e)
-    {
-        if (sender is not FrameworkElement element ||
-            element.DataContext is not TodoItemViewModel item ||
-            ViewModel is null)
-        {
-            return;
-        }
-
-        if (!item.IsEditing)
-        {
-            return;
-        }
-
-        _ = await ViewModel.CommitEditAsync(item.Id);
-    }
-
-    private async void InlineEditTextBox_KeyDown(object sender, KeyRoutedEventArgs e)
-    {
-        if (sender is not FrameworkElement element ||
-            element.DataContext is not TodoItemViewModel item ||
-            ViewModel is null)
-        {
-            return;
-        }
-
-        if (e.Key == VirtualKey.Escape)
-        {
-            ViewModel.CancelEdit(item.Id);
-            e.Handled = true;
-            return;
-        }
-
-        if (e.Key == VirtualKey.Enter)
-        {
-            e.Handled = true;
-            if (ShouldSubmitTodoEditor(e))
-            {
-                _ = await ViewModel.CommitEditAsync(item.Id);
-            }
-            else if (sender is TextBox textBox)
-            {
-                TextBoxEditorShortcutHelper.InsertLineBreak(textBox);
-            }
-        }
     }
 
     private async void DetailBackButton_Click(object sender, RoutedEventArgs e)

@@ -60,10 +60,6 @@ public sealed class DpiAdaptiveLayoutContractTests
             "src/DeskBox/Controls/WidgetShell.xaml.cs"));
         string switcher = File.ReadAllText(TestPaths.FromRepository(
             "src/DeskBox/Controls/WidgetGroupTitleSwitcher.xaml"));
-        string quickCapture = File.ReadAllText(TestPaths.FromRepository(
-            "src/DeskBox/Views/QuickCaptureWidgetWindow.xaml"));
-        string quickCaptureCode = File.ReadAllText(TestPaths.FromRepository(
-            "src/DeskBox/Views/QuickCaptureWidgetWindow.Appearance.cs"));
 
         Assert.Equal("Auto", (string?)titleRow.Attribute("Height"));
         Assert.Equal("40", (string?)titleRow.Attribute("MinHeight"));
@@ -71,9 +67,6 @@ public sealed class DpiAdaptiveLayoutContractTests
         Assert.Contains("ShellRoot.RowDefinitions[0].MinHeight", shellCode, StringComparison.Ordinal);
         Assert.Contains("MinHeight=\"32\"", switcher, StringComparison.Ordinal);
         Assert.DoesNotContain("x:Name=\"Root\"\r\n        Height=\"32\"", switcher, StringComparison.Ordinal);
-        Assert.Contains("<RowDefinition Height=\"Auto\" MinHeight=\"46\" />", quickCapture, StringComparison.Ordinal);
-        Assert.Contains("RootGrid.RowDefinitions[0].MinHeight", quickCaptureCode, StringComparison.Ordinal);
-        Assert.Contains("RootGrid.RowDefinitions[0].Height = GridLength.Auto", quickCaptureCode, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -50,12 +50,6 @@ public static class DataBackupSettingsPolicy
     public static string? NormalizeCustomDirectory(string? path) =>
         BackupOptionKinds.NormalizeLocalDirectory(path);
 
-    public static void SetIntervalMinutes(AppSettings settings, int value) =>
-        settings.AutomaticBackupIntervalMinutes = NormalizeIntervalMinutes(value);
-
-    public static void SetRetentionCount(AppSettings settings, int value) =>
-        settings.AutomaticBackupRetentionCount = NormalizeRetentionCount(value);
-
     public static AutomaticBackupOptions GetOptions(AppSettings settings) => new(
         settings.AutomaticBackupEnabled,
         NormalizeIntervalMinutes(settings.AutomaticBackupIntervalMinutes),

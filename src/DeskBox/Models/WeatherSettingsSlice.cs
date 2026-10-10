@@ -52,6 +52,13 @@ public sealed class WeatherSettingsSlice
     public string WeatherSkin { get; set; } = "Standard";
 
     /// <summary>
+    /// Weather icon style. Valid values: <c>"Fluent"</c>, <c>"DeskBox"</c>,
+    /// <c>"Flat"</c>, <c>"Line"</c>. Persisted values outside this set
+    /// (including the retired <c>"Emoji"</c>) normalize to the default.
+    /// </summary>
+    public string WeatherIconStyle { get; set; } = "Fluent";
+
+    /// <summary>
     /// Whether to show the 7-day forecast in the widget.
     /// </summary>
     public bool WeatherShowForecast { get; set; } = true;

@@ -5,6 +5,8 @@ using DeskBox.Models;
 using DeskBox.Services;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Media.Imaging;
 using Windows.UI;
 
 namespace DeskBox.ViewModels;
@@ -270,8 +272,8 @@ public sealed partial class WeatherWidgetViewModel
         IsDay = current.IsDay == 1;
         CurrentWeatherCode = current.WeatherCode;
         CurrentCondition = WeatherCodeMapper.GetCondition(current.WeatherCode);
-        CurrentEmoji = WeatherCodeMapper.GetEmoji(current.WeatherCode, IsDay);
         CurrentIconGlyph = WeatherCodeMapper.GetGlyph(current.WeatherCode, IsDay);
+        CurrentIcon = CreateIcon(current.WeatherCode, IsDay);
         CurrentDescription = WeatherCodeMapper.GetDescription(current.WeatherCode, _localizationService.CurrentCultureName);
         CurrentTemperatureText = FormatTemperature(current.Temperature);
         
@@ -455,8 +457,8 @@ public sealed partial class WeatherWidgetViewModel
             DailyForecast.Add(new WeatherDayViewModel
             {
                 DayLabel = dayLabel,
-                Emoji = WeatherCodeMapper.GetEmoji(wmoCode, isDay: true),
                 IconGlyph = WeatherCodeMapper.GetGlyph(wmoCode, isDay: true),
+                Icon = CreateIcon(wmoCode, isDay: true),
                 Description = WeatherCodeMapper.GetDescription(wmoCode, lang),
                 TempMaxText = FormatTemperature(tempMax),
                 TempMinText = FormatTemperature(tempMin),
@@ -467,6 +469,22 @@ public sealed partial class WeatherWidgetViewModel
         }
 
         OnPropertyChanged(nameof(DailyForecastItemsSource));
+    }
+
+    private ImageSource? CreateIcon(int wmoCode, bool isDay)
+    {
+        try
+        {
+            return new SvgImageSource(WeatherCodeMapper.GetIconUri(
+                wmoCode, isDay, _iconStyle));
+        }
+        catch (System.Runtime.InteropServices.COMException)
+        {
+            // Only reachable in hosts without a live XAML runtime (the
+            // headless test host): SvgImageSource construction needs one.
+            // The icon simply stays unmaterialized there.
+            return null;
+        }
     }
 
     private void PopulateHourlyForecast(WeatherHourly hourly)
@@ -495,8 +513,8 @@ public sealed partial class WeatherWidgetViewModel
                 HourLabel = hourLabel,
                 TemperatureText = FormatTemperature(temp),
                 PrecipitationText = precip > 0 ? $"{(int)precip}%" : "",
-                Emoji = WeatherCodeMapper.GetEmoji(wmoCode, isDaytime),
                 IconGlyph = WeatherCodeMapper.GetGlyph(wmoCode, isDaytime),
+                Icon = CreateIcon(wmoCode, isDaytime),
                 IsCurrentHour = i == 0,
                 ForecastHourTextSize = this.ForecastHourTextSize
             });

@@ -11,6 +11,9 @@ namespace DeskBox.Services;
 [JsonSerializable(
     typeof(DesktopOrganizationRecoveryJournal),
     TypeInfoPropertyName = "RecoveryJournal")]
+[JsonSerializable(
+    typeof(DesktopSuppressionLedger),
+    TypeInfoPropertyName = "SuppressionLedger")]
 internal sealed partial class DesktopRecoveryJsonContext : JsonSerializerContext
 {
 }

@@ -9,8 +9,6 @@ public sealed class WidgetCoordinatedMoveContractTests
         string manager = Read("src/DeskBox/Services/WidgetManager.CoordinatedMove.cs");
         string contentInteraction = Read(
             "src/DeskBox/Views/ContentWidgetWindow.WindowInteraction.cs");
-        string quickCaptureInteraction = Read(
-            "src/DeskBox/Views/QuickCaptureWidgetWindow.WindowInteraction.cs");
 
         Assert.Contains("VirtualKey.Control", interaction, StringComparison.Ordinal);
         Assert.Contains("TryBeginCoordinatedMove(HWnd)", interaction, StringComparison.Ordinal);
@@ -32,10 +30,6 @@ public sealed class WidgetCoordinatedMoveContractTests
         Assert.Contains(
             "!Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Control)",
             contentInteraction,
-            StringComparison.Ordinal);
-        Assert.Contains(
-            "!Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Control)",
-            quickCaptureInteraction,
             StringComparison.Ordinal);
     }
 

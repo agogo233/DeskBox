@@ -34,6 +34,32 @@ internal static class FileDropIntentPolicy
     {
         if (!hasMappedFolder)
         {
+            // The widget has no managed folder yet, but the import creates
+            // one on demand, so an explicit modifier must still decide the
+            // transfer semantics. Only the unmodified default defers to the
+            // reference/settings-backed decision; swallowing Ctrl/Shift here
+            // would let a Ctrl (copy) gesture run the default move and delete
+            // the source against the user's explicit intent.
+            if (forceCopy)
+            {
+                return canCopy ? FileDropIntent.Copy : FileDropIntent.None;
+            }
+
+            if ((altDown || (controlDown && shiftDown)) && canLink)
+            {
+                return FileDropIntent.Shortcut;
+            }
+
+            if (controlDown)
+            {
+                return canCopy ? FileDropIntent.Copy : FileDropIntent.None;
+            }
+
+            if (shiftDown)
+            {
+                return canMove ? FileDropIntent.Move : FileDropIntent.None;
+            }
+
             return FileDropIntent.Reference;
         }
 

@@ -53,6 +53,8 @@ public interface IFeatureRuntime : IAsyncDisposable
 
     // DisposeAsync is inherited from IAsyncDisposable: the "disable"/shutdown
     // transition that releases every held resource back to zero. Idempotent,
-    // cancellable-draining, and serialized against StartAsync per the state
+    // host-bounded disposal (the host limits the wait and quarantines the
+    // runtime past the deadline; the interface itself carries no
+    // CancellationToken), and serialized against StartAsync per the state
     // machine in the remarks above.
 }

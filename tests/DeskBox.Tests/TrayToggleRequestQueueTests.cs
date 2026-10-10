@@ -113,6 +113,60 @@ public sealed class TrayToggleRequestQueueTests
         Assert.Equal("simulated failure", snapshot.LastError);
     }
 
+    [Fact]
+    public async Task TrayIconDoubleClick_withinWindow_togglesOnlyOnce()
+    {
+        int executions = 0;
+        var queue = new DeskBox.Services.TrayToggleRequestQueue(
+            _ => { Interlocked.Increment(ref executions); return Task.CompletedTask; },
+            trayIconDoubleClickWindow: TimeSpan.FromSeconds(30));
+
+        await queue.EnqueueAsync(DeskBox.Services.TrayToggleRequestQueue.TrayIconSource);
+        await queue.EnqueueAsync(DeskBox.Services.TrayToggleRequestQueue.TrayIconSource);
+        await queue.EnqueueAsync(DeskBox.Services.TrayToggleRequestQueue.TrayIconSource);
+
+        // The second and third clicks are within the double-click window and
+        // must complete without toggling; the widget stays revealed.
+        Assert.Equal(1, executions);
+        TrayToggleQueueSnapshot snapshot = queue.GetSnapshot();
+        Assert.Equal(2, snapshot.SuppressedTrayIconDoubleClicks);
+        Assert.Equal(3, snapshot.TotalRequests);
+    }
+
+    [Fact]
+    public async Task TrayIconClicks_spacedBeyondWindow_toggleEachTime()
+    {
+        int executions = 0;
+        var queue = new DeskBox.Services.TrayToggleRequestQueue(
+            _ => { Interlocked.Increment(ref executions); return Task.CompletedTask; },
+            trayIconDoubleClickWindow: TimeSpan.FromMilliseconds(40));
+
+        await queue.EnqueueAsync(DeskBox.Services.TrayToggleRequestQueue.TrayIconSource);
+        await Task.Delay(120);
+        await queue.EnqueueAsync(DeskBox.Services.TrayToggleRequestQueue.TrayIconSource);
+
+        Assert.Equal(2, executions);
+        Assert.Equal(0, queue.GetSnapshot().SuppressedTrayIconDoubleClicks);
+    }
+
+    [Fact]
+    public async Task Suppression_appliesOnlyToTrayIconSource()
+    {
+        int executions = 0;
+        var queue = new DeskBox.Services.TrayToggleRequestQueue(
+            _ => { Interlocked.Increment(ref executions); return Task.CompletedTask; },
+            trayIconDoubleClickWindow: TimeSpan.FromSeconds(30));
+
+        await queue.EnqueueAsync(DeskBox.Services.TrayToggleRequestQueue.TrayIconSource);
+        await queue.EnqueueAsync("global-hotkey");
+        await queue.EnqueueAsync("desktop-double-click");
+
+        // Other sources never double-fire from one physical gesture, so they
+        // keep parity semantics without a double-click window.
+        Assert.Equal(3, executions);
+        Assert.Equal(0, queue.GetSnapshot().SuppressedTrayIconDoubleClicks);
+    }
+
     private static void InterlockedMax(ref int location, int value)
     {
         int current;

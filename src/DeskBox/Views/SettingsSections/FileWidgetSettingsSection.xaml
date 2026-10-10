@@ -4,7 +4,8 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:controls="using:DeskBox.Controls"
-    xmlns:svc="using:DeskBox.Services">
+    xmlns:svc="using:DeskBox.Services"
+    xmlns:toolkit="using:CommunityToolkit.WinUI.Controls">
 
     <UserControl.Resources>
         <ResourceDictionary>
@@ -16,118 +17,83 @@
 
     <StackPanel Style="{StaticResource SectionPanelStyle}">
         <TextBlock Style="{StaticResource SectionTitleTextStyle}" svc:Localized.Key="Settings.Appearance.DetailTitle" />
-        <StackPanel Margin="0,8,0,0" Spacing="4">
-            <Border Style="{StaticResource SettingsGroupStyle}">
-                <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="12" Margin="4">
-                    <Button Grid.Column="0" Click="NestedSettingsButton_Click" Style="{StaticResource DrillDownRowStyle}" Tag="DesktopOrganizationSettings">
-                        <Grid ColumnDefinitions="Auto,*" Style="{StaticResource SettingCardIdentityGridStyle}">
-                            <FontIcon Grid.Column="0" FontSize="18" Glyph="&#xE74C;" IsHitTestVisible="False" VerticalAlignment="Center" />
-                            <StackPanel Grid.Column="1" IsHitTestVisible="False" Spacing="3" VerticalAlignment="Center">
-                                <TextBlock Style="{StaticResource SettingTitleTextStyle}" svc:Localized.Key="DesktopOrganization.Settings.Title" />
-                                <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" svc:Localized.Key="DesktopOrganization.Settings.EntryDescription" />
-                            </StackPanel>
-                        </Grid>
-                    </Button>
-                    <Button
-                        Grid.Column="1"
-                        Click="OrganizeDesktopButton_Click"
-                        Style="{StaticResource AccentButtonStyle}">
+        <StackPanel x:Name="SectionCardsPanel" Margin="0,8,0,0" Spacing="4">
+            <toolkit:SettingsCard
+                Click="NestedSettingsButton_Click"
+                HorizontalContentAlignment="Right"
+                IsClickEnabled="True"
+                Tag="DesktopOrganizationSettings"
+                svc:Localized.DescriptionKey="DesktopOrganization.Settings.EntryDescription"
+                svc:Localized.HeaderKey="DesktopOrganization.Settings.Title">
+                <toolkit:SettingsCard.HeaderIcon>
+                    <FontIcon Glyph="&#xE74C;" />
+                </toolkit:SettingsCard.HeaderIcon>
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <Button Click="OrganizeDesktopButton_Click" Style="{StaticResource AccentButtonStyle}">
                         <StackPanel Orientation="Horizontal" Spacing="6">
                             <FontIcon FontSize="13" Glyph="&#xE74C;" />
                             <TextBlock svc:Localized.Key="DesktopOrganization.Settings.StartAction" />
                         </StackPanel>
                     </Button>
-                    <FontIcon Grid.Column="2" FontSize="12" Glyph="&#xE76C;" IsHitTestVisible="False" VerticalAlignment="Center" />
-                </Grid>
-            </Border>
+                </StackPanel>
+            </toolkit:SettingsCard>
 
-            <Border Style="{StaticResource SettingsGroupStyle}">
-                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12" Margin="4">
-                    <Button Grid.Column="0" Click="NestedSettingsButton_Click" Style="{StaticResource DrillDownRowStyle}" Tag="FileDisplaySettings">
-                        <Grid ColumnDefinitions="Auto,*" Style="{StaticResource SettingCardIdentityGridStyle}">
-                            <FontIcon Grid.Column="0" FontSize="18" Glyph="&#xE8A5;" IsHitTestVisible="False" VerticalAlignment="Center" />
-                            <StackPanel Grid.Column="1" IsHitTestVisible="False" Spacing="3" VerticalAlignment="Center">
-                                <TextBlock Style="{StaticResource SettingTitleTextStyle}" svc:Localized.Key="Settings.Group.FileLayout.Title" />
-                                <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" svc:Localized.Key="Settings.Group.FileLayout.Description" />
-                            </StackPanel>
-                        </Grid>
-                    </Button>
-                    <FontIcon
-                        Grid.Column="1"
-                        FontSize="12"
-                        Glyph="&#xE76C;"
-                        IsHitTestVisible="False"
-                        VerticalAlignment="Center"
-                        />
-                </Grid>
-            </Border>
+            <toolkit:SettingsCard
+                Click="NestedSettingsButton_Click"
+                IsClickEnabled="True"
+                Tag="FileDisplaySettings"
+                svc:Localized.DescriptionKey="Settings.Group.FileLayout.Description"
+                svc:Localized.HeaderKey="Settings.Group.FileLayout.Title">
+                <toolkit:SettingsCard.HeaderIcon>
+                    <FontIcon Glyph="&#xE8A5;" />
+                </toolkit:SettingsCard.HeaderIcon>
+            </toolkit:SettingsCard>
 
-            <Border Style="{StaticResource SettingsGroupStyle}">
-                <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="12" Margin="4">
-                    <Button Grid.Column="0" Click="NestedSettingsButton_Click" Style="{StaticResource DrillDownRowStyle}" Tag="FileStackSettings">
-                        <Grid ColumnDefinitions="Auto,*" Style="{StaticResource SettingCardIdentityGridStyle}">
-                            <FontIcon Grid.Column="0" FontSize="18" Glyph="&#xE81E;" IsHitTestVisible="False" VerticalAlignment="Center" />
-                            <StackPanel Grid.Column="1" IsHitTestVisible="False" Spacing="3" VerticalAlignment="Center">
-                                <TextBlock Style="{StaticResource SettingTitleTextStyle}" svc:Localized.Key="Settings.FileStacks.Title" />
-                                <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" Text="{x:Bind FileStack.SettingsSummaryText, Mode=OneWay}" />
-                            </StackPanel>
-                        </Grid>
-                    </Button>
-                    <ToggleSwitch
-                        Grid.Column="1"
-                        MinWidth="0"
-                        VerticalAlignment="Center"
-                        OnContent=""
-                        OffContent=""
-                        IsOn="{x:Bind FileStack.StacksEnabled, Mode=TwoWay}" />
-                    <FontIcon Grid.Column="2" FontSize="12" Glyph="&#xE76C;" IsHitTestVisible="False" VerticalAlignment="Center" />
-                </Grid>
-            </Border>
+            <toolkit:SettingsCard
+                Click="NestedSettingsButton_Click"
+                Description="{x:Bind FileStack.SettingsSummaryText, Mode=OneWay}"
+                HorizontalContentAlignment="Right"
+                IsClickEnabled="True"
+                Tag="FileStackSettings"
+                svc:Localized.HeaderKey="Settings.FileStacks.Title">
+                <toolkit:SettingsCard.HeaderIcon>
+                    <FontIcon Glyph="&#xE81E;" />
+                </toolkit:SettingsCard.HeaderIcon>
+                <ToggleSwitch
+                    MinWidth="0"
+                    OnContent=""
+                    OffContent=""
+                    IsOn="{x:Bind FileStack.StacksEnabled, Mode=TwoWay}" />
+            </toolkit:SettingsCard>
 
-            <Border Style="{StaticResource SettingsGroupStyle}">
-                <Grid
-                    MinHeight="{StaticResource SettingsRowMinHeight}"
-                    Padding="{StaticResource SettingsRowPadding}"
-                    ColumnDefinitions="*,Auto"
-                    ColumnSpacing="12">
-                    <Grid Grid.Column="0" ColumnDefinitions="Auto,*" Style="{StaticResource SettingCardIdentityGridStyle}">
-                        <FontIcon Grid.Column="0" FontSize="18" Glyph="&#xE838;" IsHitTestVisible="False" VerticalAlignment="Center" />
-                        <StackPanel Grid.Column="1" IsHitTestVisible="False" Spacing="3" VerticalAlignment="Center">
-                            <TextBlock Style="{StaticResource SettingTitleTextStyle}" svc:Localized.Key="Settings.FileWidget.FolderOpenBehavior.Title" />
-                            <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" svc:Localized.Key="Settings.FileWidget.FolderOpenBehavior.Description" />
-                        </StackPanel>
-                    </Grid>
-                    <ComboBox
-                        Grid.Column="1"
-                        MinWidth="{StaticResource SettingsControlMinWidth}"
-                        VerticalAlignment="Center"
-                        ItemsSource="{x:Bind FeatureWidgets.AvailableFolderOpenBehaviorOptionItems, Mode=OneWay}"
-                        controls:SettingsComboBox.Value="{x:Bind FeatureWidgets.FolderOpenBehavior, Mode=TwoWay}" />
-                </Grid>
-            </Border>
+            <toolkit:SettingsCard
+                HorizontalContentAlignment="Right"
+                svc:Localized.DescriptionKey="Settings.FileWidget.FolderOpenBehavior.Description"
+                svc:Localized.HeaderKey="Settings.FileWidget.FolderOpenBehavior.Title">
+                <toolkit:SettingsCard.HeaderIcon>
+                    <FontIcon Glyph="&#xE838;" />
+                </toolkit:SettingsCard.HeaderIcon>
+                <ComboBox
+                    MinWidth="{StaticResource SettingsControlMinWidth}"
+                    VerticalAlignment="Center"
+                    ItemsSource="{x:Bind FeatureWidgets.AvailableFolderOpenBehaviorOptionItems, Mode=OneWay}"
+                    controls:SettingsComboBox.Value="{x:Bind FeatureWidgets.FolderOpenBehavior, Mode=TwoWay}" />
+            </toolkit:SettingsCard>
 
-            <Border Style="{StaticResource SettingsGroupStyle}">
-                <Grid
-                    MinHeight="{StaticResource SettingsRowMinHeight}"
-                    Padding="{StaticResource SettingsRowPadding}"
-                    ColumnDefinitions="*,Auto"
-                    ColumnSpacing="12">
-                    <Grid Grid.Column="0" ColumnDefinitions="Auto,*" Style="{StaticResource SettingCardIdentityGridStyle}">
-                        <FontIcon Grid.Column="0" FontSize="18" Glyph="&#xE712;" IsHitTestVisible="False" VerticalAlignment="Center" />
-                        <StackPanel Grid.Column="1" IsHitTestVisible="False" Spacing="3" VerticalAlignment="Center">
-                            <TextBlock Style="{StaticResource SettingTitleTextStyle}" svc:Localized.Key="Settings.FileWidget.SystemContextMenu.Title" />
-                            <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" svc:Localized.Key="Settings.FileWidget.SystemContextMenu.Description" />
-                        </StackPanel>
-                    </Grid>
-                    <ToggleSwitch
-                        Grid.Column="1"
-                        MinWidth="0"
-                        VerticalAlignment="Center"
-                        OnContent=""
-                        OffContent=""
-                        IsOn="{x:Bind Interaction.FileItemContextMenuEnabled, Mode=TwoWay}" />
-                </Grid>
-            </Border>
+            <toolkit:SettingsCard
+                HorizontalContentAlignment="Right"
+                svc:Localized.DescriptionKey="Settings.FileWidget.SystemContextMenu.Description"
+                svc:Localized.HeaderKey="Settings.FileWidget.SystemContextMenu.Title">
+                <toolkit:SettingsCard.HeaderIcon>
+                    <FontIcon Glyph="&#xE712;" />
+                </toolkit:SettingsCard.HeaderIcon>
+                <ToggleSwitch
+                    MinWidth="0"
+                    VerticalAlignment="Center"
+                    OnContent=""
+                    OffContent=""
+                    IsOn="{x:Bind Interaction.FileItemContextMenuEnabled, Mode=TwoWay}" />
+            </toolkit:SettingsCard>
 
         </StackPanel>
     </StackPanel>

@@ -1,11 +1,11 @@
 using DeskBox.Helpers;
 using DeskBox.Platform;
+using DeskBox.Services;
 using DeskBox.ViewModels;
 using Microsoft.UI.Xaml;
+using Microsoft.Windows.Storage.Pickers;
 using Windows.Storage;
-using Windows.Storage.Pickers;
 using Windows.System;
-using WinRT.Interop;
 
 namespace DeskBox.Controls.WidgetContents;
 
@@ -20,19 +20,16 @@ public sealed partial class TodoWidgetContent
 
         try
         {
-            var picker = new FileOpenPicker
-            {
-                SuggestedStartLocation = PickerLocationId.Desktop
-            };
-            picker.FileTypeFilter.Add("*");
             IntPtr foreground = Win32Helper.GetForegroundWindow();
             IntPtr owner = Win32Helper.GetAncestor(foreground, Win32Helper.GA_ROOT);
-            InitializeWithWindow.Initialize(picker, owner == IntPtr.Zero ? foreground : owner);
-
-            IReadOnlyList<StorageFile> files = await picker.PickMultipleFilesAsync();
-            foreach (StorageFile file in files)
+            IReadOnlyList<string> files =
+                await FileOpenPickerService.PickMultipleFilesAsync(
+                    owner == IntPtr.Zero ? foreground : owner,
+                    [],
+                    PickerLocationId.Desktop);
+            foreach (string file in files)
             {
-                await ViewModel.AddAttachmentPathAsync(item.Id, file.Path);
+                await ViewModel.AddAttachmentPathAsync(item.Id, file);
             }
         }
         catch (Exception ex)

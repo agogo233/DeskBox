@@ -262,7 +262,10 @@ public abstract partial class WidgetWindowBase
         SimplifyBackdropForInteraction();
         HasMovedTitleBarDrag = false;
         DisplayChangeWatcher?.SuppressRestore();
-        Win32Helper.GetCursorPos(out InitialCursorPt);
+        if (!Win32Helper.TryGetPointerScreenPoint(HWnd, RootElement, e, out InitialPointerPt))
+        {
+            Win32Helper.GetCursorPos(out InitialPointerPt);
+        }
         RectInt32 initialBounds = GetActualWindowBounds();
         InitialWindowPos = new PointInt32(initialBounds.X, initialBounds.Y);
         InitialWindowSize = new SizeInt32(initialBounds.Width, initialBounds.Height);
@@ -292,9 +295,14 @@ public abstract partial class WidgetWindowBase
             return;
         }
 
-        Win32Helper.GetCursorPos(out var currentPt);
-        int deltaX = currentPt.X - InitialCursorPt.X;
-        int deltaY = currentPt.Y - InitialCursorPt.Y;
+        if (!Win32Helper.TryGetPointerScreenPoint(HWnd, RootElement, e, out var currentPt) &&
+            !Win32Helper.GetCursorPos(out currentPt))
+        {
+            e.Handled = true;
+            return;
+        }
+        int deltaX = currentPt.X - InitialPointerPt.X;
+        int deltaY = currentPt.Y - InitialPointerPt.Y;
         int dragDistanceSquared = (deltaX * deltaX) + (deltaY * deltaY);
 
         if (!HasMovedTitleBarDrag)
@@ -435,8 +443,7 @@ public abstract partial class WidgetWindowBase
             CompleteCompactArrangementDrag();
             RectInt32 finalBounds = GetActualWindowBounds();
             finalBounds = CompleteExpandedWidgetDrag(finalBounds);
-            CapturePositionAnchor(finalBounds.X, finalBounds.Y, finalBounds.Width, finalBounds.Height);
-            UpdateConfigBoundsFromPhysical(finalBounds.X, finalBounds.Y, finalBounds.Width, finalBounds.Height, persist: true);
+            CommitUserPlacementFromWindow(WidgetPlacementSource.Drag);
             if (_targetCollapsed)
             {
                 // The pointer is still resting on the just-dropped capsule; an
@@ -497,7 +504,10 @@ public abstract partial class WidgetWindowBase
         ResizeDirection = direction;
         DisplayChangeWatcher?.SuppressRestore();
         OnResizeStart();
-        Win32Helper.GetCursorPos(out InitialCursorPt);
+        if (!Win32Helper.TryGetPointerScreenPoint(HWnd, RootElement, e, out InitialPointerPt))
+        {
+            Win32Helper.GetCursorPos(out InitialPointerPt);
+        }
         RectInt32 initialBounds = GetActualWindowBounds();
         InitialWindowPos = new PointInt32(initialBounds.X, initialBounds.Y);
         InitialWindowSize = new SizeInt32(initialBounds.Width, initialBounds.Height);
@@ -520,7 +530,8 @@ public abstract partial class WidgetWindowBase
             return;
         }
 
-        if (Win32Helper.GetCursorPos(out var currentPt))
+        if (Win32Helper.TryGetPointerScreenPoint(HWnd, RootElement, e, out var currentPt) ||
+            Win32Helper.GetCursorPos(out currentPt))
         {
             QueueInteractiveResizePointer(new PointInt32(currentPt.X, currentPt.Y));
         }
@@ -529,8 +540,8 @@ public abstract partial class WidgetWindowBase
 
     private RectInt32 ResolveInteractiveResizeBounds(PointInt32 currentPt)
     {
-        int deltaX = currentPt.X - InitialCursorPt.X;
-        int deltaY = currentPt.Y - InitialCursorPt.Y;
+        int deltaX = currentPt.X - InitialPointerPt.X;
+        int deltaY = currentPt.Y - InitialPointerPt.Y;
 
         int newWidth = InitialWindowSize.Width;
         int newHeight = InitialWindowSize.Height;
@@ -716,8 +727,7 @@ public abstract partial class WidgetWindowBase
             CompleteCompactArrangementDrag();
             RectInt32 finalBounds = GetActualWindowBounds();
             finalBounds = CompleteExpandedWidgetDrag(finalBounds);
-            CapturePositionAnchor(finalBounds.X, finalBounds.Y, finalBounds.Width, finalBounds.Height);
-            UpdateConfigBoundsFromPhysical(finalBounds.X, finalBounds.Y, finalBounds.Width, finalBounds.Height, persist: true);
+            CommitUserPlacementFromWindow(WidgetPlacementSource.Drag);
             if (_targetCollapsed)
             {
                 _suppressHoverExpansionAfterDragUntilPointerExit = true;
@@ -764,6 +774,85 @@ public abstract partial class WidgetWindowBase
         }
 
         RestoreDesktopLayer();
+    }
+
+    // ── Chained flyout handoff ───────────────────────────────
+
+    /// <summary>
+    /// Holds the compact and widget-manager interaction leases across a
+    /// chained flyout transition, where one flyout closes and a successor
+    /// opens on a later dispatcher turn (for example a context menu handing
+    /// off to the foreground color picker). The lease intentionally does not
+    /// elevate; the successor flyout's own show path owns Z-order.
+    /// </summary>
+    protected IDisposable AcquireFlyoutHandoff(string reason)
+    {
+        BeginCompactInteraction();
+        WidgetManager? widgetManager = App.Current.WidgetManager;
+        widgetManager?.BeginWidgetInteraction(reason);
+        return new FlyoutInteractionHandoff(this, widgetManager, reason);
+    }
+
+    protected void QueueInteractionGuardedShow(
+        IDisposable? interactionHandoff,
+        Func<Task> showAsync)
+    {
+        if (DispatcherQueue.TryEnqueue(async () =>
+        {
+            try
+            {
+                // The show delegate acquires its own interaction (see the
+                // window-level flyout show helpers) before this handoff is
+                // released, so a grouped Smart capsule cannot collapse
+                // between the two flyouts.
+                await showAsync();
+            }
+            catch (Exception ex)
+            {
+                App.Log($"{LogPrefix} Queued flyout failed: {ex}");
+            }
+            finally
+            {
+                interactionHandoff?.Dispose();
+            }
+        }))
+        {
+            return;
+        }
+
+        interactionHandoff?.Dispose();
+    }
+
+    private sealed class FlyoutInteractionHandoff : IDisposable
+    {
+        private WidgetWindowBase? _owner;
+        private WidgetManager? _widgetManager;
+        private readonly string _reason;
+
+        public FlyoutInteractionHandoff(
+            WidgetWindowBase owner,
+            WidgetManager? widgetManager,
+            string reason)
+        {
+            _owner = owner;
+            _widgetManager = widgetManager;
+            _reason = reason;
+        }
+
+        public void Dispose()
+        {
+            WidgetWindowBase? owner = Interlocked.Exchange(ref _owner, null);
+            WidgetManager? widgetManager = Interlocked.Exchange(
+                ref _widgetManager,
+                null);
+            if (owner is null)
+            {
+                return;
+            }
+
+            owner.EndCompactInteraction();
+            widgetManager?.EndWidgetInteraction($"{_reason}-completed");
+        }
     }
 
     // ── Tray animation helpers ─────────────────────────────────

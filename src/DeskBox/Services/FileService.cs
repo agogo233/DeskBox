@@ -1368,14 +1368,6 @@ public sealed partial class FileService
     }
 
     /// <summary>
-    /// Move or copy the given files or folders into a destination folder.
-    /// </summary>
-    public async Task TransferItemsAsync(IEnumerable<string> sourcePaths, string destinationFolder, bool move)
-    {
-        await TransferItemsWithResultAsync(sourcePaths, destinationFolder, move);
-    }
-
-    /// <summary>
     /// Move or copy the given files or folders into a destination folder and return the realized destination paths.
     /// </summary>
     public async Task<IReadOnlyList<FileTransferResult>> TransferItemsWithResultAsync(
@@ -1787,22 +1779,6 @@ public sealed partial class FileService
                materialized.All(plan => IsCompletedShellMove(
                    plan.SourcePath,
                    plan.DestinationPath));
-    }
-
-    /// <summary>
-    /// Move the given files or folders into a destination folder.
-    /// </summary>
-    public async Task MoveItemsAsync(IEnumerable<string> sourcePaths, string destinationFolder)
-    {
-        await TransferItemsAsync(sourcePaths, destinationFolder, move: true);
-    }
-
-    /// <summary>
-    /// Copy the given files or folders into a destination folder.
-    /// </summary>
-    public async Task CopyItemsAsync(IEnumerable<string> sourcePaths, string destinationFolder)
-    {
-        await TransferItemsAsync(sourcePaths, destinationFolder, move: false);
     }
 
     /// <summary>

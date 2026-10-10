@@ -5,7 +5,8 @@ namespace DeskBox.Services;
 
 /// <summary>
 /// Sole settings-page writer for the interaction section fields: autostart
-/// reflection, update auto-check, open-method and file-item context menu,
+/// reflection, update auto-check, silent startup, open-method and file-item
+/// context menu,
 /// resize snap (enabled plus spacing), show-desktop visibility, widget layer
 /// mode, hover buttons (enabled plus the selected action set) and the
 /// idle/hidden working-set trims. The section has no live-preview coupling
@@ -77,6 +78,15 @@ public sealed class InteractionSettingsCoordinator : IInteractionSettings
         CoreSettingsSlice core = _settings.Settings.Core;
         if (core.AutoCheckForUpdates == value) return;
         core.AutoCheckForUpdates = value;
+        _settings.SaveDebounced();
+    }
+
+    public void SetSilentStartup(bool value)
+    {
+        ThrowIfStopped();
+        CoreSettingsSlice core = _settings.Settings.Core;
+        if (core.SilentStartup == value) return;
+        core.SilentStartup = value;
         _settings.SaveDebounced();
     }
 

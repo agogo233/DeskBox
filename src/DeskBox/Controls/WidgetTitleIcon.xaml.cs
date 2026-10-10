@@ -61,6 +61,20 @@ public sealed partial class WidgetTitleIcon : UserControl
             typeof(WidgetTitleIcon),
             new PropertyMetadata(14d, OnAppearancePropertyChanged));
 
+    public static readonly DependencyProperty CustomEmojiProperty =
+        DependencyProperty.Register(
+            nameof(CustomEmoji),
+            typeof(string),
+            typeof(WidgetTitleIcon),
+            new PropertyMetadata(string.Empty, OnAppearancePropertyChanged));
+
+    public static readonly DependencyProperty CustomImageSourceProperty =
+        DependencyProperty.Register(
+            nameof(CustomImageSource),
+            typeof(ImageSource),
+            typeof(WidgetTitleIcon),
+            new PropertyMetadata(null, OnAppearancePropertyChanged));
+
     public WidgetTitleIcon()
     {
         InitializeComponent();
@@ -102,6 +116,24 @@ public sealed partial class WidgetTitleIcon : UserControl
     {
         get => (double)GetValue(IconSizeProperty);
         set => SetValue(IconSizeProperty, value);
+    }
+
+    /// <summary>
+    /// Per-widget emoji override. When non-empty it wins over every icon mode
+    /// except <see cref="WidgetTitleIconMode.Hidden"/>, which stays a global
+    /// off switch for the whole title icon.
+    /// </summary>
+    public string CustomEmoji
+    {
+        get => (string)GetValue(CustomEmojiProperty);
+        set => SetValue(CustomEmojiProperty, value);
+    }
+
+    /// <summary>Per-widget image override; empty emoji takes precedence when both are set.</summary>
+    public ImageSource? CustomImageSource
+    {
+        get => (ImageSource?)GetValue(CustomImageSourceProperty);
+        set => SetValue(CustomImageSourceProperty, value);
     }
 
     public TextBlock TextLabelElement => LabelElement;
@@ -166,6 +198,8 @@ public sealed partial class WidgetTitleIcon : UserControl
         FilledIconHost.Visibility = Visibility.Collapsed;
         HideMonoIconPaths();
         LabelElement.Visibility = Visibility.Collapsed;
+        CustomImage.Visibility = Visibility.Collapsed;
+        CustomEmojiElement.Visibility = Visibility.Collapsed;
 
         IconSurface.Padding = new Thickness(0);
         IconSurface.BorderThickness = new Thickness(0);
@@ -176,23 +210,34 @@ public sealed partial class WidgetTitleIcon : UserControl
         IconSurface.Height = Math.Clamp(Math.Round(iconSize + 2), 15, 34);
         IconSurface.MinWidth = 0;
 
-        switch (mode)
+        if (!string.IsNullOrEmpty(CustomEmoji))
         {
-            case WidgetTitleIconMode.LineMono:
-                ApplyMonoIcon(kind, iconSize, accent, filled: false);
-                break;
+            ApplyCustomEmoji(iconSize);
+        }
+        else if (CustomImageSource is { } customSource)
+        {
+            ApplyCustomImage(customSource, iconSize);
+        }
+        else
+        {
+            switch (mode)
+            {
+                case WidgetTitleIconMode.LineMono:
+                    ApplyMonoIcon(kind, iconSize, accent, filled: false);
+                    break;
 
-            case WidgetTitleIconMode.FilledMono:
-                ApplyMonoIcon(kind, iconSize, accent, filled: true);
-                break;
+                case WidgetTitleIconMode.FilledMono:
+                    ApplyMonoIcon(kind, iconSize, accent, filled: true);
+                    break;
 
-            case WidgetTitleIconMode.TextLabel:
-                ApplyTextLabel(kind, iconSize, accent);
-                break;
+                case WidgetTitleIconMode.TextLabel:
+                    ApplyTextLabel(kind, iconSize, accent);
+                    break;
 
-            default:
-                ApplyColorIcon(kind, iconSize);
-                break;
+                default:
+                    ApplyColorIcon(kind, iconSize);
+                    break;
+            }
         }
 
         ApplySurfaceCornerRadiusOverride();
@@ -230,6 +275,27 @@ public sealed partial class WidgetTitleIcon : UserControl
         }
 
         ColorIcon.Visibility = Visibility.Visible;
+    }
+
+    private void ApplyCustomEmoji(double iconSize)
+    {
+        double surfaceSize = Math.Clamp(Math.Round(iconSize + 3), 18, 34);
+        IconSurface.Width = surfaceSize;
+        IconSurface.Height = surfaceSize;
+        CustomEmojiElement.Text = CustomEmoji;
+        CustomEmojiElement.FontSize = Math.Clamp(Math.Round(iconSize), 12, 26);
+        CustomEmojiElement.Visibility = Visibility.Visible;
+    }
+
+    private void ApplyCustomImage(ImageSource source, double iconSize)
+    {
+        double imageSize = Math.Clamp(Math.Round(iconSize + 3), 18, 34);
+        IconSurface.Width = imageSize;
+        IconSurface.Height = imageSize;
+        CustomImage.Width = imageSize;
+        CustomImage.Height = imageSize;
+        CustomImage.Source = source;
+        CustomImage.Visibility = Visibility.Visible;
     }
 
     private void ApplyMonoIcon(WidgetTitleIconKind kind, double iconSize, Color accent, bool filled)
@@ -332,6 +398,8 @@ public sealed partial class WidgetTitleIcon : UserControl
         LineIconHost.Visibility = Visibility.Collapsed;
         FilledIconHost.Visibility = Visibility.Collapsed;
         HideMonoIconPaths();
+        CustomImage.Visibility = Visibility.Collapsed;
+        CustomEmojiElement.Visibility = Visibility.Collapsed;
 
         string fallbackLabel = CreateShortLabel(LabelText);
         IconSurface.Width = double.NaN;

@@ -20,7 +20,7 @@ public sealed class StartupRegistrationContractTests
     ];
 
     [Fact]
-    public void SettingsAndOnboardingExposeWindowsStartupAppsRecovery()
+    public void SettingsExposesWindowsStartupAppsRecovery()
     {
         string root = FindRepositoryRoot();
         string settingsXaml = File.ReadAllText(Path.Combine(
@@ -29,9 +29,6 @@ public sealed class StartupRegistrationContractTests
         string settingsStartup = File.ReadAllText(Path.Combine(
             root,
             "src/DeskBox/Views/SettingsWindow.Startup.cs"));
-        string onboarding = File.ReadAllText(Path.Combine(
-            root,
-            "src/DeskBox/Views/OnboardingWindow.Hotkey.cs"));
 
         Assert.Contains(
             "AutoStartSystemSettingsVisibility",
@@ -44,14 +41,6 @@ public sealed class StartupRegistrationContractTests
         Assert.Contains(
             "RefreshAutoStartState()",
             settingsStartup,
-            StringComparison.Ordinal);
-        Assert.Contains(
-            "result.RequiresSystemSettings",
-            onboarding,
-            StringComparison.Ordinal);
-        Assert.Contains(
-            "RefreshStartupToggleFromSystem()",
-            onboarding,
             StringComparison.Ordinal);
     }
 

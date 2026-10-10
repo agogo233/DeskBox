@@ -208,6 +208,9 @@ public sealed partial class FeatureWidgetsSettingsViewModel : ObservableObject
     public bool SetWeatherSkin(string? skin) =>
         _settings.SetWeatherSkin(skin);
 
+    public bool SetWeatherIconStyle(string? style) =>
+        _settings.SetWeatherIconStyle(style);
+
     public bool SetWeatherDataSource(string? source) =>
         _settings.SetWeatherDataSource(source);
 

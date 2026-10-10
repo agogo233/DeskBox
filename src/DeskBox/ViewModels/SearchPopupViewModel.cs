@@ -78,6 +78,15 @@ public sealed partial class SearchPopupViewModel : ObservableObject, IDisposable
 
     public Action? HidePopupCallback;
 
+    /// <summary>
+    /// True when the Everything-backed file-name search is not connected
+    /// (not installed, not enabled, or not running). Drives the empty-state
+    /// hint so an all-empty result list is explained instead of silent.
+    /// </summary>
+    public bool IsFileSearchProviderUnavailable =>
+        _searchEngine.EverythingProvider.CurrentSnapshot.State is
+            not EverythingConnectionState.Connected;
+
     public IntPtr OwnerWindowHandle { get; set; }
 
     [ObservableProperty]
@@ -178,9 +187,6 @@ public sealed partial class SearchPopupViewModel : ObservableObject, IDisposable
 
     /// <summary>Palette (command) mode: a compact launcher.</summary>
     public bool IsPaletteMode => string.Equals(DisplayMode, "Palette", StringComparison.OrdinalIgnoreCase);
-
-    /// <summary>Spotlight mode: the default balanced search experience.</summary>
-    public bool IsSpotlightMode => !IsHomeMode && !IsPaletteMode;
 
     private IReadOnlyList<SearchResultItem> ActivePool => IsQueryActive ? _allResults : _emptyStateItems;
 
@@ -1268,16 +1274,6 @@ public sealed partial class SearchPopupViewModel : ObservableObject, IDisposable
     /// Whether the current query is pinned as a favorite.
     /// </summary>
     public bool IsCurrentQueryFavorite => _historyService.IsFavorite(Query);
-
-    /// <summary>
-    /// Toggles the current query in favorites and returns the new state.
-    /// </summary>
-    public bool ToggleFavoriteForCurrentQuery()
-    {
-        bool isFavorite = _historyService.ToggleFavorite(Query);
-        OnPropertyChanged(nameof(IsCurrentQueryFavorite));
-        return isFavorite;
-    }
 
     /// <summary>
     /// Clears all recent search history (one-click cleanup) and refreshes the

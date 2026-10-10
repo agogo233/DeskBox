@@ -23,4 +23,11 @@ public partial class SettingsViewModel
     private void OnQuickCaptureListTextSizeCommitted() => SaveAppearanceChange();
 
     private void OnQuickCaptureContentTextSizeCommitted() => SaveAppearanceChange();
+
+    // Todo editors commit text-size writes under the same contract (raw
+    // override persisted with scheduleSave:false); the shared appearance
+    // save pass owns the preview orchestration and debounced persistence.
+    private void OnTodoListTextSizeCommitted() => SaveAppearanceChange();
+
+    private void OnTodoContentTextSizeCommitted() => SaveAppearanceChange();
 }

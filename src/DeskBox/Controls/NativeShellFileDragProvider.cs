@@ -26,16 +26,9 @@ internal static partial class NativeShellFileDragProvider
 
     // Native entry points live in DeskBox.Platform.ShellItemDragNativeMethods.
 
-    /// <param name="hidePreferredDropEffect">
-    /// Hide the CFSTR_PREFERREDDROPEFFECT value WinUI copies from
-    /// DataPackage.RequestedOperation from out-of-process drop targets so a
-    /// multi-bit request can widen the external allowed-operation mask
-    /// without making Explorer prompt for the operation on every drop.
-    /// </param>
     internal static bool TryAttach(
         DataPackage dataPackage,
-        IReadOnlyList<string> sourcePaths,
-        bool hidePreferredDropEffect = false)
+        IReadOnlyList<string> sourcePaths)
     {
         ArgumentNullException.ThrowIfNull(dataPackage);
         if (!CanAttachPaths(sourcePaths))
@@ -56,16 +49,22 @@ internal static partial class NativeShellFileDragProvider
                 return false;
             }
 
-            nint attachedDataObject = shellDataObject;
-            if (hidePreferredDropEffect)
+            filterDataObject = FileDragSourceGuardDataObject.CreateInterfacePointer(
+                shellDataObject);
+            // End-to-end self-check: the guard wrapper must still answer
+            // CF_HDROP. If the IDataObject ABI assumptions break under a new
+            // WASDK/AOT combination this fails instead of silently shipping
+            // an empty payload.
+            if (filterDataObject == 0 ||
+                !HasFileDropFormat(filterDataObject))
             {
-                filterDataObject =
-                    PreferredDropEffectFilterDataObject.CreateInterfacePointer(
-                        shellDataObject);
-                attachedDataObject = filterDataObject;
+                App.Log(
+                    "[DragStart] Guarded Shell data object failed its " +
+                    "CF_HDROP self-check.");
+                return false;
             }
 
-            int result = SetDataObject(dataPackage, attachedDataObject);
+            int result = SetDataObject(dataPackage, filterDataObject);
             if (result < 0)
             {
                 App.Log(
@@ -76,8 +75,7 @@ internal static partial class NativeShellFileDragProvider
 
             App.LogVerbose(
                 $"[DragStart] Attached native Shell file data object " +
-                $"paths={sourcePaths.Count} " +
-                $"hidePreferredDropEffect={hidePreferredDropEffect}");
+                $"paths={sourcePaths.Count} sourceGuard=True");
             return true;
         }
         catch (Exception ex)
@@ -89,7 +87,7 @@ internal static partial class NativeShellFileDragProvider
         }
         finally
         {
-            PreferredDropEffectFilterDataObject.ReleaseInterfacePointer(
+            FileDragSourceGuardDataObject.ReleaseInterfacePointer(
                 filterDataObject);
             ReleaseInterface(shellDataObject);
         }

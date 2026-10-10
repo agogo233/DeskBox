@@ -27,11 +27,11 @@
 NativeAOT 是 opt-in 审计档案，**直接用助手脚本**（本机 BuildTools 默认 VC 工具集 14.42 缺 x64 静态 CRT，脚本会 pin 到 14.44 并让 ILCompiler 用环境工具链）：
 
 ```powershell
-# 从仓库根目录
-cmd /c scripts\publish-aot-x64.cmd
+# 从仓库根目录（全量 AOT 审计，含冒烟矩阵）
+powershell -File scripts\publish-aot-audit.ps1
 ```
 
-等价的裸命令（在 `vcvarsall.bat amd64 -vcvars_ver=14.44` 环境内）：
+或用下方等价的裸命令（只做编译验证、不跑冒烟）：
 
 ```powershell
 dotnet publish src/DeskBox/DeskBox.csproj -c Release `

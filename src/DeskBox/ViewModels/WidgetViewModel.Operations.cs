@@ -49,12 +49,6 @@ public partial class WidgetViewModel
     /// <summary>
     /// Add file or folder items to the widget, or move/copy them into a mapped folder.
     /// </summary>
-    [RelayCommand]
-    public async Task AddItemsAsync(IEnumerable<string> paths)
-    {
-        await ImportPathsAsync(paths);
-    }
-
     public async Task<IReadOnlyList<string>> ImportPathsAsync(
         IEnumerable<string> paths,
         bool? moveWhenMapped = null,
@@ -651,79 +645,6 @@ public partial class WidgetViewModel
         }
     }
 
-    public async Task UpdateMappedFolderPathAsync(string folderPath)
-    {
-        if (string.IsNullOrWhiteSpace(folderPath))
-        {
-            return;
-        }
-
-        string normalizedPath = Path.GetFullPath(folderPath);
-        if (App.Current?.WidgetManager is { } pathWidgetManager)
-        {
-            pathWidgetManager.EnsureFileWidgetPathAvailable(
-                normalizedPath,
-                Config.Id,
-                candidateFollowsDefaultStoragePath: false);
-        }
-        else
-        {
-            WidgetConfig? conflict = _settingsService.Settings.Widgets.FirstOrDefault(widget =>
-                widget.WidgetKind == WidgetKind.File &&
-                !string.Equals(widget.Id, Config.Id, StringComparison.Ordinal) &&
-                !string.IsNullOrWhiteSpace(widget.MappedFolderPath) &&
-                WidgetManager.IsFileWidgetPathConflict(
-                    normalizedPath,
-                    candidateFollowsDefaultStoragePath: false,
-                    widget));
-            string managedStorageRoot =
-                SettingsService.NormalizeManagedStorageRootPath(
-                    _settingsService.Settings.DefaultManagedStorageRootPath);
-            if (conflict is not null ||
-                FileService.PathsOverlap(normalizedPath, managedStorageRoot))
-            {
-                throw new InvalidOperationException(_localizationService.Format(
-                    "Widget.Error.FileWidgetPathConflict",
-                    conflict?.Name ??
-                    _localizationService.T("WidgetTitleIcon.Label.ManagedStorage")));
-            }
-        }
-
-        if (!FileService.TryResolveExistingPathForTraversal(
-                normalizedPath,
-                out string traversalPath))
-        {
-            Directory.CreateDirectory(normalizedPath);
-            traversalPath = FileService.TryResolveExistingPathForTraversal(
-                normalizedPath,
-                out string createdTraversalPath)
-                ? createdTraversalPath
-                : normalizedPath;
-        }
-
-        Config.WidgetKind = WidgetKind.File;
-        Config.IsDisabled = false;
-        Config.FollowsDefaultStoragePath = false;
-        Config.ManagedFolderName = null;
-        Config.MappedFolderPath = normalizedPath;
-        Config.Items.Clear();
-        ResetAddedAtTracking();
-        MappedFolderPath = normalizedPath;
-        _mappedFolderTraversalPath = traversalPath;
-        SetCurrentFolderPath(traversalPath);
-        OnPropertyChanged(nameof(FollowsDefaultStoragePath));
-
-        if (App.Current?.WidgetManager is { } widgetManager)
-        {
-            widgetManager.SyncMappedWidgetShortcut(Config.Id);
-        }
-
-        _settingsService.UpdateWidget(Config);
-        await ConfigureFolderWatchersAsync(traversalPath);
-        await ReloadFolderContentsAsync(traversalPath);
-        UpdateDependentProperties();
-    }
-
     public Task HandleItemsMovedOutAsync(IEnumerable<string> sourcePaths)
     {
         var normalizedPaths = sourcePaths
@@ -1048,17 +969,5 @@ public partial class WidgetViewModel
         IsSizeLocked = value;
         Config.IsSizeLocked = value;
         _settingsService.UpdateWidget(Config);
-    }
-
-    [RelayCommand]
-    public void TogglePositionLock()
-    {
-        SetPositionLocked(!IsPositionLocked);
-    }
-
-    [RelayCommand]
-    public void ToggleSizeLock()
-    {
-        SetSizeLocked(!IsSizeLocked);
     }
 }

@@ -136,6 +136,7 @@ public sealed partial class WidgetGroupTitleSwitcher : UserControl
             CancelTabInteraction();
             CancelAllHoverSwitches();
             CancelDragHoverSwitch();
+            ExitFileDragStripFreeze();
         };
         Visibility = Visibility.Collapsed;
     }
@@ -601,6 +602,14 @@ public sealed partial class WidgetGroupTitleSwitcher : UserControl
             return;
         }
 
+        // PointerEntered can leak through on some machines while an OLE file
+        // drag is running; during a file drag the dwell switch owns member
+        // switching, so the 80ms hover path must stay out of its way.
+        if (_isFileDragStripFreeze)
+        {
+            return;
+        }
+
         _hoveredTabMemberId = memberId;
         _tabHoverSwitchCancellation?.Cancel();
         var cancellation = new CancellationTokenSource();
@@ -702,16 +711,6 @@ public sealed partial class WidgetGroupTitleSwitcher : UserControl
         Root.Opacity = 0.72;
         DetachScaleTransform.ScaleX = 0.985;
         DetachScaleTransform.ScaleY = 0.985;
-    }
-
-    private void GroupTitle_PointerPressed(
-        object sender,
-        PointerRoutedEventArgs e)
-    {
-        if (sender is UIElement source)
-        {
-            BeginDetachLongPress(source, e);
-        }
     }
 
     private void GroupTitle_PointerMoved(
@@ -1050,14 +1049,16 @@ public sealed partial class WidgetGroupTitleSwitcher : UserControl
                 member.WidgetId,
                 _displayedIdentity?.WidgetId,
                 StringComparison.Ordinal);
+            // An emoji override renders as a colored text prefix: FontIcon
+            // cannot be trusted to rasterize color emoji on every surface.
+            string memberEmoji = member.CustomTitleIconEmoji;
             var item = new MenuFlyoutItem
             {
-                Text = member.Name,
+                Text = memberEmoji.Length > 0
+                    ? $"{memberEmoji} {member.Name}"
+                    : member.Name,
                 FontWeight = Microsoft.UI.Text.FontWeights.Normal,
-                Icon = new FontIcon
-                {
-                    Glyph = isCurrent ? "\uE73E" : member.Glyph
-                }
+                Icon = CreateMemberMenuIcon(member, isCurrent, memberEmoji.Length > 0)
             };
             int index = FindMemberIndex(
                 _presentation.Members,
@@ -1077,6 +1078,37 @@ public sealed partial class WidgetGroupTitleSwitcher : UserControl
 
         AddGroupCommands(flyout);
         return flyout;
+    }
+
+    /// <summary>
+    /// The members menu keeps the check glyph for the current member; a
+    /// member with a custom image icon shows that instead of its default
+    /// kind glyph. Emoji overrides skip the icon slot entirely — they ride
+    /// the item text as a colored prefix (FontIcon color-font support is
+    /// unreliable).
+    /// </summary>
+    private static IconElement? CreateMemberMenuIcon(
+        WidgetGroupMemberPresentation member,
+        bool isCurrent,
+        bool hasEmojiPrefix)
+    {
+        if (isCurrent)
+        {
+            return new FontIcon { Glyph = "\uE73E" };
+        }
+
+        if (hasEmojiPrefix)
+        {
+            return null;
+        }
+
+        if (WidgetTitleIconImageSourceFactory.TryCreate(
+                member.CustomTitleIconImagePath) is { } imageSource)
+        {
+            return new ImageIcon { Source = imageSource };
+        }
+
+        return new FontIcon { Glyph = member.Glyph };
     }
 
     private void AddGroupCommands(MenuFlyout flyout)
@@ -1236,7 +1268,9 @@ public sealed partial class WidgetGroupTitleSwitcher : UserControl
             active.Glyph,
             active.IconKind,
             activeIndex,
-            presentation.Members.Count);
+            presentation.Members.Count,
+            active.CustomTitleIconEmoji,
+            active.CustomTitleIconImagePath);
     }
 
     private static int FindActiveFlagIndex(
@@ -1279,6 +1313,9 @@ public sealed partial class WidgetGroupTitleSwitcher : UserControl
         icon.Glyph = identity?.Glyph ?? string.Empty;
         icon.IconKind = identity?.IconKind ??
             WidgetTitleIconKindNames.Default;
+        icon.CustomEmoji = identity?.CustomTitleIconEmoji ?? string.Empty;
+        icon.CustomImageSource = WidgetTitleIconImageSourceFactory.TryCreate(
+            identity?.CustomTitleIconImagePath);
         icon.LabelText = identity?.Name ?? string.Empty;
         title.Text = identity?.Name ?? string.Empty;
     }
@@ -1295,5 +1332,7 @@ public sealed partial class WidgetGroupTitleSwitcher : UserControl
         string Glyph,
         string IconKind,
         int Index,
-        int Count);
+        int Count,
+        string CustomTitleIconEmoji = "",
+        string? CustomTitleIconImagePath = null);
 }

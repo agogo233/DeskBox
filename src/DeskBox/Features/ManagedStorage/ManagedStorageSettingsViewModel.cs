@@ -38,11 +38,29 @@ public sealed partial class ManagedStorageSettingsViewModel : ObservableObject
         "Settings.DropAction.System"
     ];
 
+    private static readonly string[] DragOutActions =
+    [
+        ManagedDropActions.FollowWindows,
+        ManagedDropActions.Copy,
+        ManagedDropActions.Move
+    ];
+
+    private static readonly string[] DragOutActionNameKeys =
+    [
+        "Settings.DropAction.System",
+        "Settings.DropAction.Copy",
+        "Settings.DropAction.Move"
+    ];
+
     private readonly IManagedStorageSettings _settings;
     private readonly Func<string, string> _localize;
     private bool _isSyncingPresentation;
     private string[]? _cachedDropActionNames;
+    private string[]? _cachedDragOutActionNames;
     private string _dropAction = ManagedDropActions.Move;
+    private string _dragOutAction = ManagedDropActions.FollowWindows;
+    private bool _dragOutModifierTipEnabled = true;
+    private bool _dragOutResultHintEnabled = true;
     private string _rootPath = string.Empty;
     private bool _canInvokeQuickAccessAction = true;
     private bool _shouldUnpinQuickAccessAction;
@@ -94,6 +112,83 @@ public sealed partial class ManagedStorageSettingsViewModel : ObservableObject
             }
 
             return options;
+        }
+    }
+
+    /// <summary>
+    /// The preferred drop effect advertised to external targets when files
+    /// are dragged out of a file widget (FollowWindows/Copy/Move).
+    /// </summary>
+    public string DragOutAction
+    {
+        get => _dragOutAction;
+        set
+        {
+            if (!SetProperty(ref _dragOutAction, value))
+            {
+                return;
+            }
+
+            if (!_isSyncingPresentation)
+            {
+                _settings.SetManagedDragOutAction(value);
+            }
+        }
+    }
+
+    public IReadOnlyList<SettingsOption> AvailableDragOutActionOptions
+    {
+        get
+        {
+            _cachedDragOutActionNames ??= DragOutActionNameKeys.Select(key => _localize(key)).ToArray();
+            var options = new SettingsOption[DragOutActions.Length];
+            for (int index = 0; index < DragOutActions.Length; index++)
+            {
+                options[index] = new SettingsOption(DragOutActions[index], _cachedDragOutActionNames[index]);
+            }
+
+            return options;
+        }
+    }
+
+    /// <summary>
+    /// Whether the in-drag modifier tip (Shift=move / Ctrl=copy) is shown at
+    /// drag start. Defaults on; the editor writes through the coordinator.
+    /// </summary>
+    public bool DragOutModifierTipEnabled
+    {
+        get => _dragOutModifierTipEnabled;
+        set
+        {
+            if (!SetProperty(ref _dragOutModifierTipEnabled, value))
+            {
+                return;
+            }
+
+            if (!_isSyncingPresentation)
+            {
+                _settings.SetDragOutModifierTipEnabled(value);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Whether the post-drop receipt hint is shown after an external drop.
+    /// </summary>
+    public bool DragOutResultHintEnabled
+    {
+        get => _dragOutResultHintEnabled;
+        set
+        {
+            if (!SetProperty(ref _dragOutResultHintEnabled, value))
+            {
+                return;
+            }
+
+            if (!_isSyncingPresentation)
+            {
+                _settings.SetDragOutResultHintEnabled(value);
+            }
         }
     }
 
@@ -160,6 +255,9 @@ public sealed partial class ManagedStorageSettingsViewModel : ObservableObject
         try
         {
             DropAction = snapshot.DropAction;
+            DragOutAction = snapshot.DragOutAction;
+            DragOutModifierTipEnabled = snapshot.DragOutModifierTipEnabled;
+            DragOutResultHintEnabled = snapshot.DragOutResultHintEnabled;
             RootPath = snapshot.RootPath;
         }
         finally
@@ -175,7 +273,9 @@ public sealed partial class ManagedStorageSettingsViewModel : ObservableObject
     public void RefreshLocalization()
     {
         _cachedDropActionNames = null;
+        _cachedDragOutActionNames = null;
         OnPropertyChanged(nameof(AvailableDropActionOptions));
+        OnPropertyChanged(nameof(AvailableDragOutActionOptions));
     }
 
     /// <summary>

@@ -13,7 +13,7 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
         Guid.NewGuid().ToString("N"));
 
     [Fact]
-    public void ProductionInventory_IsFrozenAtThirtySevenFilesAndEightySevenCalls()
+    public void ProductionInventory_IsFrozenAtFortyFilesAndNinetyFourCalls()
     {
         var expected = new Dictionary<string, int>(StringComparer.Ordinal)
         {
@@ -34,6 +34,7 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
             ["src/DeskBox/Services/DeskBoxAttachmentHealthService.cs"] = 1,
             ["src/DeskBox/Services/DeskBoxDataBackupService.cs"] = 12,
             ["src/DeskBox/Services/DeskBoxDiagnosticsBundleService.cs"] = 1,
+            ["src/DeskBox/Services/DesktopAutoOrganizationSuppressionRegistry.cs"] = 2,
             ["src/DeskBox/Services/DesktopOrganizationHistoryStore.cs"] = 2,
             ["src/DeskBox/Services/DesktopOrganizationRecoveryStore.cs"] = 2,
             ["src/DeskBox/Services/FeedbackService.cs"] = 4,
@@ -41,6 +42,7 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
             ["src/DeskBox/Services/GlanceWidgetStore.cs"] = 7,
             ["src/DeskBox/Services/LocalizationService.cs"] = 1,
             ["src/DeskBox/Services/MusicSettingsStore.cs"] = 3,
+            ["src/DeskBox/Services/ManagedStorageMigrationService.cs"] = 2
             ["src/DeskBox/Services/NativeNotificationActivationEnvelopeStore.cs"] = 2,
             ["src/DeskBox/Services/QuickCaptureStore.cs"] = 2,
             ["src/DeskBox/Services/SearchHistoryService.cs"] = 2,
@@ -54,6 +56,9 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
             ["src/DeskBox/Services/WidgetFileStackSettings.cs"] = 7,
             ["src/DeskBox/Services/WidgetLayoutStore.cs"] = 2,
             ["src/DeskBox/Services/WidgetStyleBackupProjection.cs"] = 1
+            // 3: the title-icon asset store's recent-emoji state file
+            // (load deserialize, add deserialize, atomic save serialize).
+            ["src/DeskBox/Services/WidgetTitleIconAssetStore.cs"] = 3
         };
 
         Dictionary<string, int> actual = ProductionSourceFiles()
@@ -73,8 +78,8 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
             Assert.Equal(expectedCount, actual[path]);
         }
 
-        Assert.Equal(37, actual.Count);
-        Assert.Equal(87, actual.Values.Sum());
+        Assert.Equal(40, actual.Count);
+        Assert.Equal(94, actual.Values.Sum());
 
         string[] expectedContextOwners =
         [
@@ -99,6 +104,7 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
             "src/DeskBox/Services/GlanceImageService.cs",
             "src/DeskBox/Services/GlanceWidgetStore.cs",
             "src/DeskBox/Services/LocalizationService.cs",
+            "src/DeskBox/Services/ManagedStorageMigrationModels.cs",
             "src/DeskBox/Services/MusicSettingsStore.cs",
             "src/DeskBox/Services/NativeNotificationActivationEnvelopeStore.cs",
             "src/DeskBox/Services/QuickCaptureStore.cs",
@@ -111,7 +117,8 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
             "src/DeskBox/Services/WidgetFileStackSettings.cs",
             "src/DeskBox/Services/WidgetLayoutStore.cs",
             "src/DeskBox/Services/WidgetStyleBackupProjection.cs",
-            "src/DeskBox/Sync/SyncJsonContext.cs"
+            "src/DeskBox/Services/WidgetTitleIconAssetStore.cs",
+            "src/DeskBox/Sync/SyncJsonContext.cs",
         ];
         string[] actualContextOwners = ProductionSourceFiles()
             .Where(path => File.ReadAllText(path).Contains(
@@ -121,7 +128,7 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
             .Order()
             .ToArray();
 
-        Assert.Equal(34, actualContextOwners.Length);
+        Assert.Equal(36, actualContextOwners.Length);
         Assert.Equal(expectedContextOwners, actualContextOwners);
     }
 

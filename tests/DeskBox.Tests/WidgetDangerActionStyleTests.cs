@@ -14,9 +14,6 @@ public sealed class WidgetDangerActionStyleTests
         string contentMenus = File.ReadAllText(Path.Combine(
             root,
             "src/DeskBox/Views/ContentWidgetWindow.Commands.cs"));
-        string quickCaptureMenus = File.ReadAllText(Path.Combine(
-            root,
-            "src/DeskBox/Views/QuickCaptureWidgetWindow.Menus.cs"));
         string confirmationBuilder = File.ReadAllText(Path.Combine(
             root,
             "src/DeskBox/Services/WidgetCompactConfirmationMenuBuilder.cs"));
@@ -31,10 +28,6 @@ public sealed class WidgetDangerActionStyleTests
         Assert.Contains(
             "WidgetDangerActionStyle.Apply(disableWidget)",
             contentMenus,
-            StringComparison.Ordinal);
-        Assert.Contains(
-            "WidgetDangerActionStyle.Apply(disableWidget)",
-            quickCaptureMenus,
             StringComparison.Ordinal);
         Assert.Contains(
             "WidgetDangerActionStyle.Apply(confirmItem)",

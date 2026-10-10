@@ -431,7 +431,7 @@ public sealed class WidgetVisualActivityContractTests
         string compactLive = ExtractSection(
             source,
             "private void StartCompactLiveIndeterminate(bool isFullBleed)",
-            "private DispatcherQueueTimer? _compactLiveBreathingTimer");
+            "private void ApplyFullBleedVisibility(bool visible)");
         string edgeGlow = ExtractSection(
             source,
             "private ScalarKeyFrameAnimation? _edgeGlowPulseAnimation;",
@@ -439,11 +439,23 @@ public sealed class WidgetVisualActivityContractTests
 
         Assert.Contains("isFullBleed ? 0.22 : 0.30", compactLive, StringComparison.Ordinal);
         Assert.Contains("midpoint: 0.6f, amplitude: 0.2f", compactLive, StringComparison.Ordinal);
+        Assert.Contains("!CompactAmbientAnimationsEnabled()", compactLive, StringComparison.Ordinal);
         Assert.Contains("!SystemAnimationsEnabled()", compactLive, StringComparison.Ordinal);
+        // Reduced motion: the gate-fail branch stops the animations and parks
+        // the visuals at their fixed static values instead of animating.
         Assert.Contains("CompactLiveProgressTransform.ScaleX = 1", compactLive, StringComparison.Ordinal);
+        Assert.Contains("CompactLiveProgress.Opacity = isFullBleed ? 0.72 : 0.5;", compactLive, StringComparison.Ordinal);
+        Assert.Contains("StopCompactLiveBreathing();", compactLive, StringComparison.Ordinal);
+        Assert.Contains("resetOpacity: 0.6,", compactLive, StringComparison.Ordinal);
         Assert.Contains("WidgetAnimationTemplate.CompactLiveTranslation", compactLive, StringComparison.Ordinal);
         Assert.Contains("WidgetAnimationTemplate.CompactLiveOpacity", compactLive, StringComparison.Ordinal);
+        // The breathing fade is a compositor sine, not a dispatcher timer.
+        Assert.Contains(
+            "_compactLiveBreathingAnimation = StartSineOpacityBreathing(",
+            compactLive,
+            StringComparison.Ordinal);
         Assert.DoesNotContain("CreateTimer()", compactLive, StringComparison.Ordinal);
+        Assert.DoesNotContain("_compactLiveBreathingTimer", compactLive, StringComparison.Ordinal);
 
         Assert.Contains("midpoint: 0.48f, amplitude: 0.1f", edgeGlow, StringComparison.Ordinal);
         Assert.Contains("EdgeGlowPulseDurationSeconds", edgeGlow, StringComparison.Ordinal);
@@ -498,9 +510,6 @@ public sealed class WidgetVisualActivityContractTests
     [InlineData(
         "src/DeskBox/Views/ContentWidgetWindow.TrayAnimations.cs",
         "AppWindow.Hide();")]
-    [InlineData(
-        "src/DeskBox/Views/QuickCaptureWidgetWindow.xaml.cs",
-        "_appWindow.Hide();")]
     public void VisualActivity_SuspendsOnlyAfterNativeWindowHide(
         string relativePath,
         string hideCall)
@@ -516,30 +525,38 @@ public sealed class WidgetVisualActivityContractTests
     }
 
     [Fact]
-    public void QuickCaptureShow_ResumesVisualsBeforeRemovingCloak()
+    public void TrayShow_ResumesVisualsBeforeRemovingCloak()
     {
-        string source = Read("src/DeskBox/Views/QuickCaptureWidgetWindow.xaml.cs");
         string show = ExtractSection(
-            source,
+            Read("src/DeskBox/Views/ContentWidgetWindow.xaml.cs"),
             "public void ShowPreparedRaisedFromTray(bool persistVisibility = true)",
-            "public void EnsureRaisedFromTrayTopMost()");
-
+            "public void PlayTrayShowAnimation()");
         int resumeIndex = show.IndexOf(
-            "NotifyCompactHostVisibilityChanged(true);",
+            "ShowWithoutActivation(persistVisibility);",
             StringComparison.Ordinal);
         int revealIndex = show.IndexOf(
-            "_trayAnimation.RevealWindowForTrayShow();",
+            "TrayAnimation.RevealWindowForTrayShow();",
             StringComparison.Ordinal);
         Assert.True(resumeIndex >= 0 && resumeIndex < revealIndex);
+
+        string showWithoutActivation = ExtractSection(
+            Read("src/DeskBox/Views/ContentWidgetWindow.WindowInteraction.cs"),
+            "private void ShowWithoutActivation(bool persistVisibility)",
+            "private void QueueVisibleContentResume()");
+        Assert.Contains(
+            "NotifyCompactHostVisibilityChanged(true);",
+            showWithoutActivation,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "QueueVisibleContentResume();",
+            showWithoutActivation,
+            StringComparison.Ordinal);
     }
 
     [Theory]
     [InlineData(
         "src/DeskBox/Views/ContentWidgetWindow.WindowInteraction.cs",
         "generation != _contentVisibilityGeneration")]
-    [InlineData(
-        "src/DeskBox/Views/QuickCaptureWidgetWindow.xaml.cs",
-        "generation != _visibleContentResumeGeneration")]
     public void RevealCompletedBackgroundWork_IsDelayedAndGenerationCancelled(
         string relativePath,
         string generationGuard)

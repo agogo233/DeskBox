@@ -52,18 +52,6 @@ public sealed class WidgetPresentationAndDetachContractTests
         "public void PlayTrayShowAnimation()",
         "HoldTemporaryTopMost(showWindow: false);",
         "TrayAnimation.RevealWindowForTrayShow();")]
-    [InlineData(
-        "src/DeskBox/Views/QuickCaptureWidgetWindow.xaml.cs",
-        "public void ShowPreparedAtDesktopLayer(bool persistVisibility = true)",
-        "public void SetTrayAnimationOffsetOverride(double? offsetX, double? offsetY)",
-        "PushToBottom(showWindow: false);",
-        "_trayAnimation.RevealWindowForTrayShow();")]
-    [InlineData(
-        "src/DeskBox/Views/QuickCaptureWidgetWindow.xaml.cs",
-        "public void ShowPreparedRaisedFromTray(bool persistVisibility = true)",
-        "public void EnsureRaisedFromTrayTopMost()",
-        "HoldTemporaryTopMost(showWindow: false);",
-        "_trayAnimation.RevealWindowForTrayShow();")]
     public void PreparedPresentation_SettlesLayerBeforeRemovingDwmCloak(
         string relativePath,
         string startMarker,

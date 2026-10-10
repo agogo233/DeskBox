@@ -374,10 +374,46 @@ internal static class ResilientJsonStore
         {
             File.Move(storePath, corruptPath);
             App.Log($"[{logName}] Preserved corrupt store as '{corruptPath}'.");
+            PruneQuarantinedCopies(storePath, logName);
         }
         catch (Exception ex)
         {
             App.Log($"[{logName}] Failed to quarantine corrupt store: {ex}");
+        }
+    }
+
+    /// <summary>
+    /// Quarantined copies are recent forensic evidence, not an archive: keep
+    /// only the newest two per quarantined file. Nothing pruned them before,
+    /// and a store flapping under concurrent writers (test hosts racing the
+    /// running app) once accumulated dozens of copies.
+    /// </summary>
+    private const int MaxQuarantinedCopiesPerStore = 2;
+
+    private static void PruneQuarantinedCopies(string quarantinedPath, string logName)
+    {
+        try
+        {
+            string? directory = Path.GetDirectoryName(quarantinedPath);
+            if (directory is null)
+            {
+                return;
+            }
+
+            string prefix = $"{Path.GetFileName(quarantinedPath)}.corrupt-";
+            foreach (string stale in Directory.EnumerateFiles(directory, prefix + "*")
+                .OrderDescending(StringComparer.Ordinal)
+                .Skip(MaxQuarantinedCopiesPerStore))
+            {
+                TryDeleteFile(stale);
+                App.Log(
+                    $"[{logName}] Pruned old quarantined copy " +
+                    $"'{Path.GetFileName(stale)}'.");
+            }
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[{logName}] Quarantine prune failed: {ex.Message}");
         }
     }
 

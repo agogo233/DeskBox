@@ -55,7 +55,16 @@ public sealed class WidgetStyleProjectionContractTests
         "widgetLayerMode",                                     // window z-layer
         "keepWidgetsVisibleOnShowDesktop",                     // window behavior
         "resizeSnapEnabled", "widgetSnapSpacing",              // snap geometry
-        "focusClickedWidgetOnRaise"                            // raise behavior
+        "focusClickedWidgetOnRaise",                           // raise behavior
+        // Global widget background: the mode and image file names are device
+        // local — the shared image files never join the backup, so syncing
+        // the keys would restore a half-state; it self-heals to material.
+        "widgetBackgroundMode", "widgetBackgroundUnifiedImage",
+        "widgetBackgroundPanoramaImage", "widgetBackgroundDim",
+        "widgetBackgroundUnifiedFit",
+        // Pure visual device preference (schema v11) — syncs nothing the
+        // remote side could not re-derive locally.
+        "widgetTextShadowEnabled"
     };
 
     /// <summary>
@@ -74,7 +83,10 @@ public sealed class WidgetStyleProjectionContractTests
         "needsInitialPlacement", "positionAnchor",
         "positionMarginX", "positionMarginY",
         "positionMonitorKey", "positionMonitorDeviceName",
-        "positionMonitorWasPrimary", "boundsCoordinateVersion",
+        "positionMonitorStableId", "positionMonitorWasPrimary",
+        "boundsCoordinateVersion",
+        "screenBindingMode", "boundScreenId", "boundScreenLabel",
+        "disconnectCollapsedForScreenId",
         "compactPlacement",
         // file bindings + item payloads
         "mappedFolderPath", "followsDefaultStoragePath", "managedFolderName",
@@ -88,9 +100,18 @@ public sealed class WidgetStyleProjectionContractTests
     [Fact]
     public void ShellWhitelist_AccountsForEverySliceWireName()
     {
-        // Ground truth: the real serialized DOM. The legacy capsule flag is
-        // WhenWritingNull, so set it to make its wire name appear.
-        var settings = new AppSettings { LegacyWidgetCapsuleModeEnabled = true };
+        // Ground truth: the real serialized DOM. The legacy capsule flag and
+        // the schema-v10 background fields are WhenWritingNull, so set them
+        // to make their wire names appear.
+        var settings = new AppSettings
+        {
+            LegacyWidgetCapsuleModeEnabled = true,
+            WidgetBackgroundMode = "Panorama",
+            WidgetBackgroundUnifiedImage = "background.png",
+            WidgetBackgroundPanoramaImage = "panorama.png",
+            WidgetBackgroundDim = 42,
+            WidgetBackgroundUnifiedFit = "Contain"
+        };
         JsonObject dom = JsonSerializer
             .SerializeToNode(settings, SettingsJsonContext.Default.AppSettings)!
             .AsObject();

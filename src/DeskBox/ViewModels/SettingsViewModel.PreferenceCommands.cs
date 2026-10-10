@@ -14,8 +14,6 @@ namespace DeskBox.ViewModels;
 
 public partial class SettingsViewModel
 {
-    public Color GetCurrentAccentColor() => _currentAccentColor;
-
     // Host-side working state for the accent card. The XAML binding surface
     // lives on the appearance editor (section-level DataContext switch); the
     // shell keeps the accent-mode flag its theme-service write chain needs
@@ -53,14 +51,11 @@ public partial class SettingsViewModel
 
     public void UpdateManagedStorageRootPath(string path)
     {
-        // The coordinator owns the raw-path normalization, the stored write
-        // and the debounced save; the file migration that moved widget
-        // content to the new root already ran on the host's existing
-        // WidgetManager chain before this commit step. The editor owns the
-        // section's read-only path display, so the committed path is pushed
-        // onto its binding surface by the commit itself.
-        string normalizedPath = _managedStorageSettings.CommitRootPath(path);
+        // The verified migration already committed both durable settings files.
+        // This only refreshes presentation, without another settings write.
+        string normalizedPath = SettingsService.NormalizeManagedStorageRootPath(path);
         ManagedStorageRootPath = normalizedPath;
+        _managedStorageSettings.UpdateRootPath(normalizedPath);
         _ = RefreshQuickAccessStateAsync(showBusy: true);
     }
 

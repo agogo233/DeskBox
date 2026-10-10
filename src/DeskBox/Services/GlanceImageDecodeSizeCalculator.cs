@@ -8,7 +8,12 @@ internal static class GlanceImageDecodeSizeCalculator
     private const double DefaultLogicalWidth = 360;
     private const double DefaultLogicalHeight = 240;
     private const double ShrinkRefreshRatio = 0.8;
-    private const double SupersamplingFactor = 2;
+
+    // The shrink-refresh cycle displays at up to 1 / ShrinkRefreshRatio of
+    // the settled size, so decoding at exactly that headroom covers it. The
+    // historical blanket 2x supersample paid 4x the memory for headroom
+    // nothing else consumed (issue tracked in the 2026-10-03 memory audit).
+    private const double SupersamplingFactor = 1.0 / ShrinkRefreshRatio;
 
     internal static int Calculate(
         double logicalWidth,

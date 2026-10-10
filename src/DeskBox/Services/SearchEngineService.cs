@@ -150,13 +150,6 @@ public sealed class SearchEngineService : IDisposable
         return response;
     }
 
-    public async IAsyncEnumerable<SearchResponse> SearchStagedAsync(
-        string query,
-        [EnumeratorCancellation] CancellationToken cancellationToken = default)
-    {
-        yield return await SearchAsync(query, cancellationToken).ConfigureAwait(false);
-    }
-
     private SearchResponse BuildSearchResponse(
         string query,
         SearchFileQueryPage filePage,

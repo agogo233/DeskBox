@@ -19,7 +19,10 @@ public static class TextBoxEditorShortcutHelper
             textBox.SelectionLength,
             0,
             text.Length - selectionStart);
-        string lineBreak = Environment.NewLine;
+        // The RichEdit-based TextBox collapses "\r\n" to a single "\r" when Text
+        // is assigned; insert the single-char break so the caret offset matches
+        // the text the control actually stores.
+        string lineBreak = "\r";
 
         textBox.Text = text
             .Remove(selectionStart, selectionLength)

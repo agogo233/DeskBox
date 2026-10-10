@@ -138,6 +138,70 @@ public sealed class FileSettingsEditorTests : IDisposable
     }
 
     [Fact]
+    public void ManagedStorage_DragOutEdits_WriteThroughNormalizeAndPersist()
+    {
+        (SettingsService settings, _, ManagedStorageSettingsViewModel storage) = CreateEditors(_root);
+        int notified = 0;
+        settings.SettingsChanged += () => notified++;
+
+        storage.DragOutAction = ManagedDropActions.Move;
+        Assert.Equal(
+            ManagedDropActions.Move,
+            settings.Settings.FileWidget.ManagedDragOutAction);
+        Assert.Equal(1, notified);
+
+        // The coordinator normalizes unknown values to the safe default:
+        // FollowWindows advertises no preferred effect, so a receiver can
+        // never gain the Move token that would let it remove the source.
+        storage.DragOutAction = "Nonsense";
+        Assert.Equal(
+            ManagedDropActions.FollowWindows,
+            settings.Settings.FileWidget.ManagedDragOutAction);
+
+        // Unchanged writes skip the redundant debounced save.
+        int notifiedAfterWrite = notified;
+        storage.DragOutAction = ManagedDropActions.FollowWindows;
+        Assert.Equal(notifiedAfterWrite, notified);
+    }
+
+    [Fact]
+    public void ManagedStorage_DragOutOptions_ListFollowWindowsFirstWithLocalizedNames()
+    {
+        (_, _, ManagedStorageSettingsViewModel storage) = CreateEditors(_root);
+
+        SettingsOption[] options = [.. storage.AvailableDragOutActionOptions];
+        Assert.Equal(3, options.Length);
+        Assert.Equal(ManagedDropActions.FollowWindows, options[0].Value);
+        Assert.Equal(ManagedDropActions.Copy, options[1].Value);
+        Assert.Equal(ManagedDropActions.Move, options[2].Value);
+        Assert.Equal("Settings.DropAction.System", options[0].DisplayName);
+        Assert.Equal("Settings.DropAction.Copy", options[1].DisplayName);
+        Assert.Equal("Settings.DropAction.Move", options[2].DisplayName);
+    }
+
+    [Fact]
+    public void ManagedStorage_DragOutSync_RefreshesProjectionWithoutWritingBack()
+    {
+        (SettingsService settings, _, ManagedStorageSettingsViewModel storage) =
+            CreateEditors(
+                _root,
+                static settings =>
+                    settings.Settings.FileWidget.ManagedDragOutAction =
+                        SettingsService.ManagedDragOutActionCopy);
+        int notified = 0;
+        settings.SettingsChanged += () => notified++;
+
+        Assert.Equal(ManagedDropActions.Copy, storage.DragOutAction);
+
+        settings.Settings.FileWidget.ManagedDragOutAction =
+            SettingsService.ManagedDragOutActionMove;
+        storage.SyncPresentation();
+
+        Assert.Equal(ManagedDropActions.Move, storage.DragOutAction);
+        Assert.Equal(0, notified);
+    }
+
+    [Fact]
     public void ExternalSync_RefreshesTheProjectionWithoutWritingBack()
     {
         (SettingsService settings, FileDisplaySettingsViewModel display, ManagedStorageSettingsViewModel storage) =
@@ -322,6 +386,22 @@ public sealed class FileSettingsEditorTests : IDisposable
         Assert.Contains("IsOn=\"{Binding ShowFileItemPathTooltips, Mode=TwoWay}\"", xaml, StringComparison.Ordinal);
         Assert.Contains("ItemsSource=\"{Binding AvailableDropActionOptions}\"", xaml, StringComparison.Ordinal);
         Assert.Contains("controls:SettingsComboBox.Value=\"{Binding DropAction, Mode=TwoWay}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("ItemsSource=\"{Binding AvailableDragOutActionOptions}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("controls:SettingsComboBox.Value=\"{Binding DragOutAction, Mode=TwoWay}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("IsOn=\"{Binding DragOutModifierTipEnabled, Mode=TwoWay}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("IsOn=\"{Binding DragOutResultHintEnabled, Mode=TwoWay}\"", xaml, StringComparison.Ordinal);
+        // The Windows 10 note and the modifier-tip toggle are named elements:
+        // the shell greys the toggle and reveals the note only on Win10,
+        // where external drops cannot carry a two-effect advertisement.
+        Assert.Contains("x:Name=\"DragOutWin10Note\"", xaml, StringComparison.Ordinal);
+        Assert.Contains(
+            "svc:Localized.Key=\"Settings.DragOutAction.Win10Note\"",
+            xaml,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "x:Name=\"DragOutModifierTipToggle\"",
+            xaml,
+            StringComparison.Ordinal);
         Assert.Contains("Text=\"{Binding RootPath, Mode=OneWay}\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Text=\"{Binding QuickAccessStatusText}\"", xaml, StringComparison.Ordinal);
         Assert.Contains("IsEnabled=\"{Binding CanInvokeQuickAccessAction}\"", xaml, StringComparison.Ordinal);
@@ -385,8 +465,12 @@ public sealed class FileSettingsEditorTests : IDisposable
         Assert.Contains("#if DESKBOX_NATIVE_AOT", storageBridge, StringComparison.Ordinal);
         foreach (string name in new[]
                  {
+                     "AvailableDragOutActionOptions",
                      "AvailableDropActionOptions",
                      "CanInvokeQuickAccessAction",
+                     "DragOutAction",
+                     "DragOutModifierTipEnabled",
+                     "DragOutResultHintEnabled",
                      "DropAction",
                      "PinQuickAccessButtonText",
                      "PinQuickAccessToolTipText",

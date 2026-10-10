@@ -299,6 +299,22 @@ public sealed class GlobalHotkeyService : IDisposable, IHookHealthProbeTarget
         RefreshRegistration();
     }
 
+    /// <summary>
+    /// Drops the current registration (including the reserved hook) while the
+    /// recorder dialog captures input, so the live hotkey cannot fire or eat
+    /// the keys being recorded. Settings are untouched;
+    /// <see cref="ResumeAfterRecording"/> restores registration from them.
+    /// </summary>
+    public void SuspendForRecording()
+    {
+        Unregister();
+    }
+
+    public void ResumeAfterRecording()
+    {
+        RefreshRegistration();
+    }
+
     string IHookHealthProbeTarget.ProbeName => "global-hotkey";
 
     // Only the reserved-gesture path owns a low-level hook; RegisterHotKey
@@ -402,13 +418,6 @@ public sealed class GlobalHotkeyService : IDisposable, IHookHealthProbeTarget
                    (int)VirtualKey.F5 or
                    (int)VirtualKey.F11 or
                    (int)VirtualKey.F12;
-    }
-
-    public static bool IsRiskyActivation(GlobalHotkeyActivation activation)
-    {
-        return activation.Kind == HotkeyActivationKind.WindowsTap ||
-               (activation.Kind == HotkeyActivationKind.Chord &&
-                IsRiskyGesture(activation.Gesture));
     }
 
     public static string FormatActivation(
@@ -629,26 +638,6 @@ public sealed class GlobalHotkeyService : IDisposable, IHookHealthProbeTarget
         return value;
     }
 
-    internal static bool AreCurrentModifiersPressed(HotkeyModifierKeys modifiers)
-    {
-        bool ctrl = Win32Helper.IsKeyDown((int)VirtualKey.Control) ||
-                    Win32Helper.IsKeyDown((int)VirtualKey.LeftControl) ||
-                    Win32Helper.IsKeyDown((int)VirtualKey.RightControl);
-        bool alt = Win32Helper.IsKeyDown((int)VirtualKey.Menu) ||
-                   Win32Helper.IsKeyDown((int)VirtualKey.LeftMenu) ||
-                   Win32Helper.IsKeyDown((int)VirtualKey.RightMenu);
-        bool shift = Win32Helper.IsKeyDown((int)VirtualKey.Shift) ||
-                     Win32Helper.IsKeyDown((int)VirtualKey.LeftShift) ||
-                     Win32Helper.IsKeyDown((int)VirtualKey.RightShift);
-        bool windows = Win32Helper.IsKeyDown((int)VirtualKey.LeftWindows) ||
-                       Win32Helper.IsKeyDown((int)VirtualKey.RightWindows);
-
-        return ctrl == modifiers.HasFlag(HotkeyModifierKeys.Control) &&
-               alt == modifiers.HasFlag(HotkeyModifierKeys.Alt) &&
-               shift == modifiers.HasFlag(HotkeyModifierKeys.Shift) &&
-               windows == modifiers.HasFlag(HotkeyModifierKeys.Windows);
-    }
-
     private static bool IsReservedHookDisabledByEnvironment()
     {
         string? value = Environment.GetEnvironmentVariable("DESKBOX_DISABLE_RESERVED_HOTKEY_HOOK");
@@ -688,7 +677,7 @@ public sealed class GlobalHotkeyService : IDisposable, IHookHealthProbeTarget
         return virtualKey is >= (int)VirtualKey.F1 and <= (int)VirtualKey.F24;
     }
 
-    private static string FormatVirtualKey(int virtualKey)
+    internal static string FormatVirtualKey(int virtualKey)
     {
         if (virtualKey is >= (int)VirtualKey.A and <= (int)VirtualKey.Z)
         {

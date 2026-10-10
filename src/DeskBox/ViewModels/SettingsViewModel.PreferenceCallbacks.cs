@@ -94,6 +94,16 @@ public partial class SettingsViewModel
         _interactionSettings.SetAutoCheckForUpdates(value);
     }
 
+    partial void OnSilentStartupChanged(bool value)
+    {
+        if (_isRestoringDefaults)
+        {
+            return;
+        }
+
+        _interactionSettings.SetSilentStartup(value);
+    }
+
     /// <summary>
     /// Host linkage for the interaction editor: the user toggled the
     /// file-item context menu (the editor persisted the value through the

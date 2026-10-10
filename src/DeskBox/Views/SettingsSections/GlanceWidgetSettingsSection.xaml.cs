@@ -5,9 +5,7 @@ using DeskBox.Services;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
-using Windows.Storage;
-using Windows.Storage.Pickers;
-using WinRT.Interop;
+using Microsoft.Windows.Storage.Pickers;
 
 namespace DeskBox.Views.SettingsSections;
 
@@ -948,22 +946,17 @@ public sealed partial class GlanceWidgetSettingsSection : UserControl
 
     private async void ChooseFilesButton_Click(object sender, RoutedEventArgs e)
     {
-        var picker = new FileOpenPicker { SuggestedStartLocation = PickerLocationId.PicturesLibrary };
-        picker.FileTypeFilter.Add(".jpg");
-        picker.FileTypeFilter.Add(".jpeg");
-        picker.FileTypeFilter.Add(".png");
-        picker.FileTypeFilter.Add(".webp");
-        picker.FileTypeFilter.Add(".bmp");
-        InitializeWithWindow.Initialize(picker, _ownerWindow);
-        IReadOnlyList<StorageFile> files = await picker.PickMultipleFilesAsync();
+        IReadOnlyList<string> files =
+            await FileOpenPickerService.PickMultipleFilesAsync(
+                _ownerWindow,
+                [".jpg", ".jpeg", ".png", ".webp", ".bmp"],
+                PickerLocationId.PicturesLibrary);
         if (files.Count == 0)
         {
             return;
         }
 
-        GlanceWidgetSettingsPolicy.SetLocalImageFiles(
-            _settings,
-            files.Select(file => file.Path));
+        GlanceWidgetSettingsPolicy.SetLocalImageFiles(_settings, files);
         if (_store is not { } store)
         {
             return;

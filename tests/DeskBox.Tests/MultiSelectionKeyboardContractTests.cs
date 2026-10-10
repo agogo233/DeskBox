@@ -6,7 +6,7 @@ public sealed class MultiSelectionKeyboardContractTests
     public void QuickCaptureDeleteKey_RoutesCustomMultiSelectionToBatchDelete()
     {
         string source = ReadRepositoryFile(
-            "src/DeskBox/Views/QuickCaptureWidgetWindow.Items.cs");
+            "src/DeskBox/Controls/WidgetContents/QuickCaptureSurfaceContent.xaml.cs");
 
         Assert.Contains(
             "GetSelectedQuickCaptureItemsInVisibleOrder()",

@@ -208,8 +208,6 @@ public sealed class DesktopOrganizationPlan
     public int EligibleItemCount => Targets.Sum(target => target.Items.Count);
 
     public int NewWidgetCount => Targets.Count(target => target.CreatesWidget);
-
-    public long TotalTransferSize => Targets.Sum(target => target.Items.Sum(item => item.Size));
 }
 
 public readonly record struct DesktopOrganizationRect(

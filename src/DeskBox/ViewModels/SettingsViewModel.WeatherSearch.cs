@@ -72,58 +72,74 @@ public partial class SettingsViewModel
     /// </summary>
     internal async Task UpdateWeatherCitySuggestionsAsync(string query)
     {
-        // Cancel any pending search
+        // Cancel any pending search. The superseded search's source is
+        // disposed by that invocation's own finally once it unwinds on the
+        // canceled token — never inline here, because the pending search
+        // still holds and uses its token (audit P3).
         _citySearchCts?.Cancel();
-        _citySearchCts = new CancellationTokenSource();
-        var ct = _citySearchCts.Token;
-
-        // Empty query → show nearby popular cities
-        if (string.IsNullOrWhiteSpace(query))
-        {
-            _weatherSettings.SetCitySuggestions(
-                Array.Empty<WeatherCitySearchResult>(), hasNoResults: false);
-            await PopulateWeatherNearbyCitiesAsync(ct);
-            return;
-        }
-
-        // Non-empty but too short → clear and wait.
-        // P1-1: Single CJK character is valid (e.g. "京" → 北京).
-        bool hasCjk = query.Any(c => c >= '\u4e00' && c <= '\u9fff');
-        if (!hasCjk && query.Length < 2)
-        {
-            _weatherSettings.SetCitySuggestions(
-                Array.Empty<WeatherCitySearchResult>(), hasNoResults: false);
-            return;
-        }
-
+        var search = new CancellationTokenSource();
+        _citySearchCts = search;
+        var ct = search.Token;
         try
         {
-            await Task.Delay(300, ct);
-
-            if (ct.IsCancellationRequested)
+            // Empty query → show nearby popular cities
+            if (string.IsNullOrWhiteSpace(query))
             {
+                _weatherSettings.SetCitySuggestions(
+                    Array.Empty<WeatherCitySearchResult>(), hasNoResults: false);
+                await PopulateWeatherNearbyCitiesAsync(ct);
                 return;
             }
 
-            _citySearchService ??= new CitySearchService();
-            var language = _localizationService.CurrentCultureName;
-            var results = await _citySearchService.SearchAsync(
-                query, language, _cachedLocationLat, _cachedLocationLon, ct);
-
-            if (ct.IsCancellationRequested)
+            // Non-empty but too short → clear and wait.
+            // P1-1: Single CJK character is valid (e.g., "京" → 北京).
+            bool hasCjk = query.Any(c => c >= '\u4e00' && c <= '\u9fff');
+            if (!hasCjk && query.Length < 2)
             {
+                _weatherSettings.SetCitySuggestions(
+                    Array.Empty<WeatherCitySearchResult>(), hasNoResults: false);
                 return;
             }
 
-            _weatherSettings.SetCitySuggestions(results, hasNoResults: results.Count == 0);
+            try
+            {
+                await Task.Delay(300, ct);
+
+                if (ct.IsCancellationRequested)
+                {
+                    return;
+                }
+
+                _citySearchService ??= new CitySearchService();
+                var language = _localizationService.CurrentCultureName;
+                var results = await _citySearchService.SearchAsync(
+                    query, language, _cachedLocationLat, _cachedLocationLon, ct);
+
+                if (ct.IsCancellationRequested)
+                {
+                    return;
+                }
+
+                _weatherSettings.SetCitySuggestions(results, hasNoResults: results.Count == 0);
+            }
+            catch (OperationCanceledException)
+            {
+                // Expected when a newer search supersedes this one.
+            }
+            catch (Exception ex)
+            {
+                App.Log($"[SettingsViewModel] City search failed: {ex.Message}");
+            }
         }
-        catch (OperationCanceledException)
+        finally
         {
-            // Expected when a newer search supersedes this one.
-        }
-        catch (Exception ex)
-        {
-            App.Log($"[SettingsViewModel] City search failed: {ex.Message}");
+            // This invocation owns the source it created; release it only
+            // after its own awaits settled (cancel-then-dispose ordering).
+            if (ReferenceEquals(_citySearchCts, search))
+            {
+                _citySearchCts = null;
+            }
+            search.Dispose();
         }
     }
 

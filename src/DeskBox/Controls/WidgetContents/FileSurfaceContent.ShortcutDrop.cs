@@ -16,11 +16,8 @@ public sealed partial class FileSurfaceContent
         string? destinationFolderPath = null,
         IEnumerable<string>? sourcePathsOverride = null)
     {
-        DataPackageOperation requested = dataView.RequestedOperation;
         DataPackageOperation supported =
-            allowedOperations == DataPackageOperation.None
-                ? requested
-                : allowedOperations;
+            DeskBoxDragData.GetFileTransferOperations(dataView, allowedOperations);
         bool noOperationMetadata =
             supported == DataPackageOperation.None;
         string destination = destinationFolderPath ??
@@ -66,9 +63,11 @@ public sealed partial class FileSurfaceContent
                 StringComparison.Ordinal),
             canCopy: noOperationMetadata ||
                 supported.HasFlag(DataPackageOperation.Copy),
+            // A Link-only source never authorized relocation: treating Link
+            // as move capability would let a managed move delete a file the
+            // drag source did not sanction for deletion.
             canMove: noOperationMetadata ||
-                supported.HasFlag(DataPackageOperation.Move) ||
-                supported.HasFlag(DataPackageOperation.Link),
+                supported.HasFlag(DataPackageOperation.Move),
             altDown: Win32Helper.IsKeyPressed(VirtualKey.Menu),
             followWindows,
             sameVolume,
@@ -100,6 +99,39 @@ public sealed partial class FileSurfaceContent
         return FileDropIntentPolicy.AreAllUnderDirectories(
             paths,
             [userDesktop, publicDesktop]);
+    }
+
+    internal static bool? ResolveMoveWhenMapped(bool mapped, FileDropIntent intent)
+    {
+        // An explicit Copy/Move intent must survive even when the widget has
+        // no managed folder yet (the import creates one on demand), so a Ctrl
+        // (copy) gesture never runs the default move and deletes the source
+        // against the user's intent. Only the unmodified Reference/Shortcut
+        // default defers to the settings-backed decision; a mapped surface
+        // always answers concretely.
+        return intent switch
+        {
+            FileDropIntent.Move => true,
+            FileDropIntent.Copy => false,
+            _ => mapped ? false : null
+        };
+    }
+
+    private bool HasShortcutDropDestination()
+    {
+        // Shortcut creation needs a concrete folder to write into. Without
+        // one the shortcut leg would create nothing and stay silent, so an
+        // unmapped widget keeps the settings-backed import instead.
+        return (ViewModel.CurrentFolderPath ?? ViewModel.MappedFolderPath) is
+            { Length: > 0 };
+    }
+
+    private FileDropIntent? ResolveShortcutIntentOverride(
+        FileDropIntent intent)
+    {
+        return intent == FileDropIntent.Shortcut && HasShortcutDropDestination()
+            ? FileDropIntent.Shortcut
+            : null;
     }
 
     private static DataPackageOperation ToDataPackageOperation(

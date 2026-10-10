@@ -44,6 +44,13 @@ public sealed class CoreSettingsSlice
     /// <summary>Null adopts the existing registration on upgrade; new installs use Standard.</summary>
     public StartupMode? AutoStartMode { get; set; }
 
+    /// <summary>
+    /// Whether widgets stay hidden after launch. The first reveal arrives
+    /// through the existing show paths (tray icon, global hotkey, jump list,
+    /// relaunching the app), so this only suppresses the startup restore.
+    /// </summary>
+    public bool SilentStartup { get; set; }
+
     /// <summary>Whether DeskBox should check for updates in the background.</summary>
     public bool AutoCheckForUpdates { get; set; } = true;
 

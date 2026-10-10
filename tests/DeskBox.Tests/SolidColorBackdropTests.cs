@@ -126,7 +126,6 @@ public sealed class SolidColorBackdropTests
         string baseWindow = File.ReadAllText(TestPaths.FromRepository("src/DeskBox/Views/WidgetWindowBase.cs"));
         string backdrop = File.ReadAllText(TestPaths.FromRepository("src/DeskBox/Views/WidgetWindowBase.Backdrop.cs"));
         string contentWindow = File.ReadAllText(TestPaths.FromRepository("src/DeskBox/Views/ContentWidgetWindow.xaml.cs"));
-        string quickCapture = File.ReadAllText(TestPaths.FromRepository("src/DeskBox/Views/QuickCaptureWidgetWindow.Appearance.cs"));
 
         Assert.Contains("<PackageReference Include=\"WinUIEx\" Version=\"2.9.3\" />", project, StringComparison.Ordinal);
         Assert.Contains("WinUIEx.TransparentTintBackdrop? _solidColorBackdrop", baseWindow, StringComparison.Ordinal);
@@ -134,7 +133,6 @@ public sealed class SolidColorBackdropTests
         Assert.Contains("SystemBackdrop = _solidColorBackdrop", backdrop, StringComparison.Ordinal);
         Assert.Contains("ClearSolidColorBackdrop();", baseWindow, StringComparison.Ordinal);
         Assert.Contains("!IsSolidColorBackdropActive", contentWindow, StringComparison.Ordinal);
-        Assert.Contains("!IsSolidColorBackdropActive", quickCapture, StringComparison.Ordinal);
         Assert.DoesNotContain("ApplyTransparentAcrylicController", backdrop, StringComparison.Ordinal);
     }
 }

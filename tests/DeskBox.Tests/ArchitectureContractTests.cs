@@ -16,8 +16,8 @@ namespace DeskBox.Tests;
 ///      migration may only shrink them).
 /// The DeskBox.Abstractions contract assembly gets its own purity guard.
 /// Aot smoke/fixture partials, SettingsViewModel partials, host window
-/// partials (ContentWidgetWindow/QuickCaptureWidgetWindow/WidgetManager) are
-/// excluded: they are host-owned until the roadmap moves them.
+/// partials (ContentWidgetWindow/WidgetManager) are excluded: they are
+/// host-owned until the roadmap moves them.
 /// </summary>
 public sealed class ArchitectureContractTests
 {
@@ -412,7 +412,6 @@ public sealed class ArchitectureContractTests
             fileName.EndsWith("Fixture.cs", StringComparison.Ordinal) ||
         fileName.StartsWith("SettingsViewModel.", StringComparison.Ordinal) ||
         fileName.StartsWith("ContentWidgetWindow.", StringComparison.Ordinal) ||
-        fileName.StartsWith("QuickCaptureWidgetWindow.", StringComparison.Ordinal) ||
         fileName.StartsWith("WidgetManager.", StringComparison.Ordinal);
 
     private static IEnumerable<string> ExtractDeskBoxUsings(string file)

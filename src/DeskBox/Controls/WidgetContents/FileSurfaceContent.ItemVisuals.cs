@@ -495,6 +495,8 @@ public sealed partial class FileSurfaceContent
                     payload.IsDeskBoxFileDrag,
                     regularPaths.Length,
                     movedSourcePaths.Length);
+                e.AcceptedOperation = DeskBoxDragData.ResolveFileDragFeedbackOperation(
+                    e.DataView, e.AcceptedOperation);
 
                 if (move)
                 {
@@ -879,7 +881,7 @@ public sealed partial class FileSurfaceContent
                 $"[WidgetSurface] Native stack drop failed id={WidgetId} " +
                 $"stack='{targetStackKey}': {ex}");
             ShowFeedback(new(
-                ex.Message,
+                DescribeImportFailure(ex, requestedCount: 0),
                 WidgetFeedbackSeverity.Error,
                 "native-stack-drop-error"));
             return false;
@@ -1029,8 +1031,8 @@ public sealed partial class FileSurfaceContent
         ClearExternalDropPreviewPlacement();
         SuppressExternalDragOperationBadge(e);
         // A launch is not a file transfer, so an external drag advertises a
-        // link. An internal drag only ever allows Move - the source is a
-        // ListView reorder - and the pointer being over the icon is what
+        // link when supported. A current internal file source allows Copy;
+        // the pointer being over the icon is what
         // claims the gesture: the arming DragOver above already discarded the
         // reorder state, and the completion resolves the release as a launch,
         // so no reorder ever commits.
@@ -1752,7 +1754,6 @@ public sealed partial class FileSurfaceContent
             SetStackMemberDropTarget(border);
             DataPackageOperation internalOperation =
                 ResolveInternalArrangementFeedbackOperation(
-                    payload.IsDeskBoxFileDrag,
                     e.AllowedOperations,
                     e.DataView.RequestedOperation);
             e.AcceptedOperation = internalOperation;
@@ -1963,9 +1964,9 @@ public sealed partial class FileSurfaceContent
 
                 bool mapped = !string.IsNullOrWhiteSpace(
                     ViewModel.MappedFolderPath);
-                bool? moveWhenMapped = mapped
-                    ? accepted == DataPackageOperation.Move
-                    : null;
+                bool? moveWhenMapped = ResolveMoveWhenMapped(
+                    mapped,
+                    resolvedIntent);
                 string? sourceWidgetId = TryGetString(
                     e.DataView.Properties,
                     "DeskBoxSourceWidgetId");
@@ -1973,9 +1974,8 @@ public sealed partial class FileSurfaceContent
                     await ImportDroppedFilesAsync(
                         batch.Files,
                         moveWhenMapped,
-                        intentOverride: resolvedIntent == FileDropIntent.Shortcut
-                            ? FileDropIntent.Shortcut
-                            : null);
+                        intentOverride: ResolveShortcutIntentOverride(
+                            resolvedIntent));
                 WidgetItem[] importedItems = ViewModel.Items
                     .Where(item => !existingPaths.Contains(
                         Path.GetFullPath(item.Path)))
@@ -2010,6 +2010,8 @@ public sealed partial class FileSurfaceContent
                         requestedMoveCount,
                         completedSourcePaths.Count)
                     : DataPackageOperation.None;
+                e.AcceptedOperation = DeskBoxDragData.ResolveFileDragFeedbackOperation(
+                    e.DataView, e.AcceptedOperation);
                 if (importedIntoStack)
                 {
                     ClearSelection();
@@ -2036,7 +2038,7 @@ public sealed partial class FileSurfaceContent
                         ImportCompletionState.Failed);
                 }
                 ShowFeedback(new(
-                    ex.Message,
+                    DescribeImportFailure(ex, requestedCount: 0),
                     WidgetFeedbackSeverity.Error,
                     "stack-file-drop-error"));
             }

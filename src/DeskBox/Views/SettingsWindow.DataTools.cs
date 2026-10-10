@@ -21,21 +21,6 @@ namespace DeskBox.Views;
 
 public sealed partial class SettingsWindow
 {
-    private void OpenQuickCaptureSettingsButton_Click(object sender, RoutedEventArgs e)
-    {
-        NavigateToSettingsSection("QuickCaptureSettings");
-    }
-
-    private void OpenTodoSettingsButton_Click(object sender, RoutedEventArgs e)
-    {
-        NavigateToSettingsSection("TodoSettings");
-    }
-
-    private void OpenAppearanceDetailButton_Click(object sender, RoutedEventArgs e)
-    {
-        NavigateToSettingsSection("AppearanceDetail");
-    }
-
     private async void ClearQuickCaptureDataButton_Click(object sender, RoutedEventArgs e)
     {
         if (SettingsRoot.XamlRoot is null)

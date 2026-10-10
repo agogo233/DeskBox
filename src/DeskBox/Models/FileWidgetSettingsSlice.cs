@@ -94,6 +94,27 @@ public sealed class FileWidgetSettingsSlice
     public string ManagedDropAction { get; set; } = "Move";
 
     /// <summary>
+    /// The preferred drop effect advertised to external targets when files are
+    /// dragged out of a file widget. Valid values: <c>"FollowWindows"</c>
+    /// (no preferred effect — the target applies its native default),
+    /// <c>"Move"</c>, <c>"Copy"</c>.
+    /// </summary>
+    public string ManagedDragOutAction { get; set; } = "FollowWindows";
+
+    /// <summary>
+    /// Whether the in-drag modifier tip (Shift=move / Ctrl=copy) is surfaced
+    /// at drag start. On by default so new users discover the gestures; users
+    /// who know the vocabulary can switch it off in settings.
+    /// </summary>
+    public bool DragOutModifierTipEnabled { get; set; } = true;
+
+    /// <summary>
+    /// Whether a receipt hint is shown after an external drop, explaining
+    /// which operation actually ran and which modifier would have flipped it.
+    /// </summary>
+    public bool DragOutResultHintEnabled { get; set; } = true;
+
+    /// <summary>
     /// Root folder used by widgets that follow the default managed storage path.
     /// </summary>
     public string DefaultManagedStorageRootPath { get; set; } = string.Empty;

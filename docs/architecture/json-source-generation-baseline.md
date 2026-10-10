@@ -272,3 +272,7 @@ Glance preferences 与 Glance image catalog 必须使用不同 context/options�
 | 规范 Debug 进程 | 重新启动后核对仓库内 `DeskBox.exe` | PID 27008；仓库内实例 1 个；路径精确匹配 `src/DeskBox/bin/Debug/net10.0-windows10.0.22621.0/DeskBox.exe`；启动时 Rust 模块数为 0（尚未触发按需加载） |
 
 上述自动化与 AOT 门槛全部通过，4B-4 与整个 4B JSON source generation 阶段完成。4B 完成时的固定基线是 16 个文件、49/49 处产品调用和 14 个 context 所有者；后续 AOT evidence 与 5B-4C3B2B1 产品 activation envelope 均以独立 context 增量登记。当前固定基线为 29 个文件、65/65 处 source-generated 调用、27 个 context 所有者、0 个非泛型 converter、审计构建默认反射关闭和 0 条 JSON 直接相关警告。
+
+## 2026-09-29 收纳迁移恢复记录登记
+
+新增 ManagedStorageMigrationService 的 2 处 JSON 读写，均显式使用 ManagedStorageMigrationModels 内的 StorageMigrationJsonContext。恢复记录使用独立 schema 1、camelCase 紧凑格式，不向 AppSettings 磁盘格式添加字段。本次精确清单更新为 36 个调用文件、85 处调用、33 个 context 所有者；此前阶段的统计保留为历史记录。

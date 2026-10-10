@@ -51,6 +51,50 @@ public static class WidgetCornerKinds
         preference is Square or Small ? preference : Round;
 }
 
+/// <summary>Canonical widget background modes (global, appearance-level).</summary>
+public static class WidgetBackgroundModeKinds
+{
+    /// <summary>Widgets follow the global window material (default).</summary>
+    public const string Material = "Material";
+
+    /// <summary>Every widget shows the same unified background image.</summary>
+    public const string UnifiedImage = "UnifiedImage";
+
+    /// <summary>
+    /// One panorama image spans the desktop coordinate space; every widget
+    /// samples the slice under its own screen position.
+    /// </summary>
+    public const string Panorama = "Panorama";
+
+    public static string Normalize(string? mode) =>
+        string.Equals(mode, UnifiedImage, StringComparison.OrdinalIgnoreCase)
+            ? UnifiedImage
+            : string.Equals(mode, Panorama, StringComparison.OrdinalIgnoreCase)
+                ? Panorama
+                : Material;
+}
+
+/// <summary>
+/// Canonical background image fit and dim values shared by the appearance
+/// editor and the per-widget customization services.
+/// </summary>
+public static class WidgetBackgroundKinds
+{
+    public const string FitFill = "Fill";
+    public const string FitContain = "Contain";
+
+    /// <summary>Default scrim strength in percent, applied over the image.</summary>
+    public const double DefaultDimPercent = 35;
+
+    public const double MinDimPercent = 0;
+    public const double MaxDimPercent = 100;
+
+    public static string NormalizeFit(string? value) =>
+        string.Equals(value, FitContain, StringComparison.OrdinalIgnoreCase)
+            ? FitContain
+            : FitFill;
+}
+
 /// <summary>Canonical widget title icon modes.</summary>
 public static class WidgetTitleIconKinds
 {
@@ -200,6 +244,9 @@ public static class WidgetAnimationKinds
     public const string EffectSlideLeftFade = "SlideLeftFade";
     public const string EffectSlideRightFade = "SlideRightFade";
     public const string EffectScaleSlide = "ScaleSlide";
+    public const string EffectEdgeScale = "EdgeScale";
+    public const string EffectTilt = "Tilt";
+    public const string EffectWipe = "Wipe";
 
     public const string SpeedVeryFast = "VeryFast";
     public const string SpeedFast = "Fast";
@@ -217,6 +264,7 @@ public static class WidgetAnimationKinds
     public const string EasingLight = "Light";
     public const string EasingStandard = "Standard";
     public const string EasingStrong = "Strong";
+    public const string EasingSpring = "Spring";
 
     public const string PresetGentle = "Gentle";
     public const string PresetStandard = "Standard";
@@ -228,7 +276,8 @@ public static class WidgetAnimationKinds
             EffectFade or EffectSlideRight or EffectSlideLeft or EffectSlideUp or
             EffectSlideDown or EffectScaleFade or EffectSlideFade or EffectZoom or
             EffectSlideUpFade or EffectSlideDownFade or EffectSlideLeftFade or
-            EffectSlideRightFade or EffectScaleSlide
+            EffectSlideRightFade or EffectScaleSlide or
+            EffectEdgeScale or EffectTilt or EffectWipe
             ? effect
             : EffectSlideFade;
 
@@ -243,9 +292,27 @@ public static class WidgetAnimationKinds
             : DirectionRight;
 
     public static string NormalizeEasingIntensity(string? intensity) =>
-        intensity is EasingNone or EasingLight or EasingStandard or EasingStrong
+        intensity is EasingNone or EasingLight or EasingStandard or EasingStrong or EasingSpring
             ? intensity
             : EasingStandard;
+
+    /// <summary>
+    /// Effects whose visual result depends on the configured slide
+    /// direction: the travel direction for slides, the anchor edge for
+    /// edge-scale, the tilt sign, and the wipe side. The settings
+    /// persistence normalizer uses this to decide whether a stored
+    /// direction is meaningful, and the appearance editor to enable the
+    /// direction picker.
+    /// </summary>
+    public static bool UsesSlideDirection(string? effect)
+    {
+        return NormalizeEffect(effect) is
+            EffectSlideFade or
+            EffectScaleSlide or
+            EffectEdgeScale or
+            EffectTilt or
+            EffectWipe;
+    }
 
     public static string ResolvePreset(
         string effect,
@@ -325,11 +392,19 @@ public readonly record struct AppearanceAnimationSettings(
     string Effect,
     string Speed,
     string SlideDirection,
-    string EasingIntensity);
+    string EasingIntensity,
+    bool StaggerEnabled = false);
 
 public readonly record struct AppearanceForegroundSettings(
     string ForegroundMode,
     string ForegroundColor);
+
+public readonly record struct AppearanceWidgetBackgroundSettings(
+    string Mode,
+    string? UnifiedImageFileName,
+    string? PanoramaImageFileName,
+    double DimPercent,
+    string UnifiedFit);
 
 /// <summary>
 /// Settings-page writes for the appearance section: material, density,
@@ -384,7 +459,19 @@ public interface IAppearanceSettings
     void SetAnimationSpeed(string? speed, bool scheduleSave = true);
     void SetAnimationSlideDirection(string? direction, bool scheduleSave = true);
     void SetAnimationEasingIntensity(string? intensity, bool scheduleSave = true);
+    void SetAnimationStaggerEnabled(bool enabled, bool scheduleSave = true);
 
     void SetWidgetForegroundMode(string? mode);
     void SetWidgetForegroundColor(string colorHex);
+
+    AppearanceWidgetBackgroundSettings ReadWidgetBackground();
+    void SetWidgetBackgroundMode(string? mode);
+    void SetWidgetBackgroundUnifiedImage(string? fileName);
+    void SetWidgetBackgroundPanoramaImage(string? fileName);
+    void SetWidgetBackgroundUnifiedFit(string? fit);
+    AppearanceValueUpdate UpdateWidgetBackgroundDim(double percent);
+    int ClearPerWidgetBackgrounds();
+
+    bool ReadWidgetTextShadowEnabled();
+    void SetWidgetTextShadowEnabled(bool enabled);
 }

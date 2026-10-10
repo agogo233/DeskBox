@@ -66,10 +66,8 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
     private bool _isSeeking;
     private bool _isChangingPlaybackMode;
     private bool _isChangingSystemVolume;
-    private bool _isChangingSessionVolume;
     private bool _isRefreshingVolume;
     private double? _pendingSystemVolume;
-    private double? _pendingSessionVolume;
     private bool _isDisposed;
     private DateTimeOffset _lastPositionSyncAt;
     private TimeSpan _lastSyncedPosition;
@@ -158,10 +156,6 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
     public string DisplayName => _config.IsDefaultTitle
         ? _localizationService.T("Music.Title")
         : _config.Name;
-
-    public double WidgetX => _config.X;
-
-    public double WidgetY => _config.Y;
 
     public string Title
     {
@@ -263,6 +257,9 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
                 OnPropertyChanged(nameof(HasSeekableTimeline));
                 OnPropertyChanged(nameof(CanInteractWithProgress));
                 OnPropertyChanged(nameof(DurationText));
+                // PositionText also depends on Duration (unknown-duration
+                // sessions flip between elapsed time and the placeholder).
+                OnPropertyChanged(nameof(PositionText));
                 if (!_isSeeking)
                 {
                     SeekValue = Math.Clamp(Position.TotalSeconds, 0, SeekMaximum);
@@ -537,7 +534,7 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
 
     public string RefreshTooltip => _localizationService.T("Common.Refresh");
 
-    public string PositionText => FormatTime(Position);
+    public string PositionText => FormatPositionText(Position, Duration);
 
     public string DurationText => Duration > TimeSpan.Zero ? FormatTime(Duration) : "--:--";
 
@@ -993,6 +990,19 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
 
         return $"{value.Minutes:00}:{value.Seconds:00}";
     }
+
+    /// <summary>
+    /// Players that never publish a timeline — and live streams, which reach
+    /// SMTC exactly the same way (a position with no end time; there is no
+    /// live flag to tell them apart) — must not read as a stuck 00:00. Show
+    /// real elapsed time whenever any of it is known; the "--:--" placeholder
+    /// appears only when both position and duration are unknown, matching
+    /// DurationText.
+    /// </summary>
+    internal static string FormatPositionText(TimeSpan position, TimeSpan duration) =>
+        duration > TimeSpan.Zero || position > TimeSpan.Zero
+            ? FormatTime(position)
+            : "--:--";
 
     private static double NormalizeVolume(double value)
     {

@@ -247,37 +247,6 @@ public sealed partial class MusicWidgetViewModel
         }
     }
 
-    public async Task RefreshVolumeAsync()
-    {
-        if (_isDisposed || _isRefreshingVolume)
-        {
-            return;
-        }
-
-        _isRefreshingVolume = true;
-        try
-        {
-            var snapshot = await _musicVolumeService.GetVolumeAsync(_sourceAppUserModelId, SourceDisplayName);
-            if (_isDisposed)
-            {
-                return;
-            }
-
-            SystemVolume = snapshot.SystemVolume;
-            SessionVolume = snapshot.SessionVolume;
-            HasSessionVolume = snapshot.HasSessionVolume;
-        }
-        catch (Exception ex)
-        {
-            App.Log($"[MusicWidget] Refresh volume failed: {ex.Message}");
-            HasSessionVolume = false;
-        }
-        finally
-        {
-            _isRefreshingVolume = false;
-        }
-    }
-
     public async Task RefreshSystemVolumeAsync()
     {
         if (_isDisposed || _isRefreshingVolume)
@@ -340,48 +309,6 @@ public sealed partial class MusicWidgetViewModel
         finally
         {
             _isChangingSystemVolume = false;
-        }
-    }
-
-    public async Task SetSessionVolumeAsync(double volume)
-    {
-        if (_isDisposed || !HasSessionVolume)
-        {
-            return;
-        }
-
-        SessionVolume = volume;
-        _pendingSessionVolume = SessionVolume;
-        if (_isChangingSessionVolume)
-        {
-            return;
-        }
-
-        _isChangingSessionVolume = true;
-        try
-        {
-            while (_pendingSessionVolume.HasValue)
-            {
-                double requestedVolume = _pendingSessionVolume.Value;
-                _pendingSessionVolume = null;
-
-                bool didChange = await _musicVolumeService.TrySetSessionVolumeAsync(_sourceAppUserModelId, SourceDisplayName, requestedVolume);
-                if (!didChange)
-                {
-                    App.Log("[MusicWidget] Session volume request was rejected.");
-                    HasSessionVolume = false;
-                    break;
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            App.Log($"[MusicWidget] Set session volume failed: {ex.Message}");
-            HasSessionVolume = false;
-        }
-        finally
-        {
-            _isChangingSessionVolume = false;
         }
     }
 

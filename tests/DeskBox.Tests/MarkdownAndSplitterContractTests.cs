@@ -223,13 +223,10 @@ public sealed class MarkdownAndSplitterContractTests
             "src/DeskBox/Controls/MarkdownDocumentView.cs"));
         string surface = File.ReadAllText(TestPaths.FromRepository(
             "src/DeskBox/Controls/WidgetContents/QuickCaptureSurfaceContent.xaml"));
-        string standalone = File.ReadAllText(TestPaths.FromRepository(
-            "src/DeskBox/Views/QuickCaptureWidgetWindow.xaml"));
 
         Assert.Contains("InternalScrollBarContentClearance = 12", reader, StringComparison.Ordinal);
         Assert.Contains("_documentText.Margin = UseInternalScrollViewer", reader, StringComparison.Ordinal);
         Assert.Contains("Margin=\"8,4,0,6\"", surface, StringComparison.Ordinal);
-        Assert.Contains("Margin=\"8,6,0,6\"", standalone, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -657,25 +654,14 @@ public sealed class MarkdownAndSplitterContractTests
     {
         string surfaceXaml = File.ReadAllText(TestPaths.FromRepository(
             "src/DeskBox/Controls/WidgetContents/QuickCaptureSurfaceContent.xaml"));
-        string legacyWindowXaml = File.ReadAllText(TestPaths.FromRepository(
-            "src/DeskBox/Views/QuickCaptureWidgetWindow.xaml"));
 
         Assert.Contains(
             "Foreground=\"{ThemeResource TextFillColorSecondaryBrush}\" Glyph=\"&#xE710;\"",
             surfaceXaml,
             StringComparison.Ordinal);
-        Assert.Contains(
-            "Foreground=\"{ThemeResource TextFillColorSecondaryBrush}\"",
-            legacyWindowXaml,
-            StringComparison.Ordinal);
-        Assert.Contains("Glyph=\"&#xE710;\"", legacyWindowXaml, StringComparison.Ordinal);
         Assert.DoesNotContain(
             "AccentTextFillColorPrimaryBrush",
             surfaceXaml,
-            StringComparison.Ordinal);
-        Assert.DoesNotContain(
-            "AccentTextFillColorPrimaryBrush",
-            legacyWindowXaml,
             StringComparison.Ordinal);
     }
 }

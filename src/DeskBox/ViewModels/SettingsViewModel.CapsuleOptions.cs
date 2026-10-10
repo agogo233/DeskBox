@@ -13,22 +13,9 @@ public partial class SettingsViewModel
     // widget/group override state machine (counts, projections, resets) and
     // pushes the projection into the editor after every real change.
 
-    public int CapsuleCustomRuleCount =>
-        _settingsService.Settings.Widgets.Count(widget =>
-            widget.Metadata?.ContainsKey(WidgetCollapseBehaviorNames.MetadataKey) == true) +
-        _settingsService.Settings.WidgetGroups.Count(group =>
-            !string.Equals(
-                group.CollapseBehavior,
-                WidgetCollapseBehaviorNames.System,
-                StringComparison.Ordinal));
-
     public int CapsuleCustomWidthCount =>
         _settingsService.Settings.Widgets.Count(widget => widget.CompactWidth is not null) +
         _settingsService.Settings.WidgetGroups.Count(group => group.CompactWidth is not null);
-
-    public int CapsuleSavedPlacementCount =>
-        _settingsService.Settings.Widgets.Count(widget => widget.CompactPlacement is not null) +
-        _settingsService.Settings.WidgetGroups.Count(group => group.CompactPlacement is not null);
 
     public int CapsuleOverrideWidgetCount => _settingsService.Settings.Widgets.Count(HasCapsuleOverride);
 

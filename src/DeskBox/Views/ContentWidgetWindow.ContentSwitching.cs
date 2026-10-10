@@ -82,6 +82,14 @@ public sealed partial class ContentWidgetWindow
         Diagnostics.SetWidgetContext(config);
         _titleViewModel.SetConfig(config);
         ApplyTitleIdentity(config, descriptor, content);
+        // Paint the Glance yield gate from the incoming member's config
+        // before the view's Loaded pass — a cached Glance view carries the
+        // previous member's flag and would draw one stale frame otherwise.
+        if (content.View is DeskBox.Controls.WidgetContents.GlanceWidgetContent glanceView)
+        {
+            glanceView.SetShellCustomBackgroundActive(
+                WidgetBackgroundCustomization.HasCustomBackground(config));
+        }
         AttachCompactPresentationSource(content);
         AttachFeedbackSource(content);
         AttachHostContextMenuSource(content);
@@ -189,6 +197,9 @@ public sealed partial class ContentWidgetWindow
         // either here turns the next reveal or group switch into a full XAML/data
         // reconstruction, which is more disruptive than the retained memory.
         _contentHost.CurrentContent?.OnWindowLongHidden();
+        // Custom backgrounds follow the same hidden-widget discipline: no
+        // decoded bitmaps stay alive while the window is long-hidden.
+        ReleaseCustomBackgroundSurface();
     }
 
     /// <summary>
@@ -204,6 +215,7 @@ public sealed partial class ContentWidgetWindow
         }
 
         _contentHost.CurrentContent?.OnWindowLongHidden();
+        ReleaseCustomBackgroundSurface();
         int releasedCachedContents = _cachedGroupContents.Count;
         DisposeCachedGroupContents();
         return releasedCachedContents;

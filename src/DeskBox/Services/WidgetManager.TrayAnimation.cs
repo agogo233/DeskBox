@@ -45,6 +45,9 @@ public sealed partial class WidgetManager
         string source = "raise-from-tray")
     {
         using var perfScope = PerformanceLogger.Measure("WidgetManager.RaiseWidgetsFromTray");
+        // A user reveal ends any open removal grace (spec 5.6): the parked
+        // topology restore applies before the widgets are shown.
+        EndRemovalGraceByUserAction?.Invoke();
         if (WidgetLayerService.UsesDesktopPinnedMode())
         {
             App.LogVerbose("[TrayBatch] Raise redirected to desktop-pinned show");
@@ -73,6 +76,9 @@ public sealed partial class WidgetManager
         _lastTrayLayerToggleUtc = now;
         _lastRaiseOriginatedFromTrayIcon =
             string.Equals(source, "tray-icon", StringComparison.Ordinal);
+        // A tray raise (tray icon, hotkey, desktop double-click, Quick Reveal)
+        // is the first explicit user reveal of a hidden startup session.
+        ClearStartupHiddenSession(source);
         try
         {
             CancelActiveTrayAnimationsAndRestorePositions();
@@ -293,7 +299,8 @@ public sealed partial class WidgetManager
                     options.DurationMs,
                     _settingsService.Settings.WidgetAnimationEasingIntensity,
                     isShowing: true,
-                    startDelayFrames: 1);
+                    startDelayFrames: 1,
+                    staggerIntervalMs: GetTrayStaggerIntervalMs(windows));
                 _ = RestoreInteractionBackdropsWhenIdleAsync(windows);
         }
         catch (Exception ex)
@@ -359,13 +366,29 @@ public sealed partial class WidgetManager
                     options.DurationMs,
                     _settingsService.Settings.WidgetAnimationEasingIntensity,
                     isShowing: false,
-                    startDelayFrames: 0);
+                    startDelayFrames: 0,
+                    staggerIntervalMs: GetTrayStaggerIntervalMs(windows));
                 _ = RestoreInteractionBackdropsWhenIdleAsync(windows);
         }
         catch (Exception ex)
         {
             App.Log($"[TrayBatch] Error during batch animation: {ex}");
         }
+    }
+
+    /// <summary>
+    /// Per-window stagger delay for batch animations. Zero keeps the default
+    /// lockstep; when enabled the interval shrinks as the group grows so the
+    /// whole batch stays within roughly one extra quarter-second.
+    /// </summary>
+    private int GetTrayStaggerIntervalMs(IReadOnlyList<IDesktopWidgetWindow> windows)
+    {
+        if (!_settingsService.Settings.WidgetAnimationStaggerEnabled || windows.Count < 2)
+        {
+            return 0;
+        }
+
+        return Math.Clamp(240 / (windows.Count - 1), 8, 48);
     }
 
     /// <summary>
@@ -416,27 +439,8 @@ public sealed partial class WidgetManager
             return;
         }
 
-        string effect = options.Effect;
-        string direction = effect switch
-        {
-            SettingsService.WidgetAnimationEffectSlideLeft or
-            SettingsService.WidgetAnimationEffectSlideLeftFade =>
-                SettingsService.WidgetAnimationSlideDirectionLeft,
-            SettingsService.WidgetAnimationEffectSlideUp or
-            SettingsService.WidgetAnimationEffectSlideUpFade =>
-                SettingsService.WidgetAnimationSlideDirectionUp,
-            SettingsService.WidgetAnimationEffectSlideDown or
-            SettingsService.WidgetAnimationEffectSlideDownFade =>
-                SettingsService.WidgetAnimationSlideDirectionDown,
-            SettingsService.WidgetAnimationEffectSlideRight or
-            SettingsService.WidgetAnimationEffectSlideRightFade =>
-                SettingsService.WidgetAnimationSlideDirectionRight,
-            SettingsService.WidgetAnimationEffectSlideFade or
-            SettingsService.WidgetAnimationEffectScaleSlide =>
-                options.SlideDirection,
-            _ => SettingsService.WidgetAnimationSlideDirectionNone
-        };
-
+        string direction = WidgetAnimationSettings.GetEffectiveSlideDirection(
+            options.Effect, options.SlideDirection);
         if (direction == SettingsService.WidgetAnimationSlideDirectionNone)
         {
             return;
@@ -451,6 +455,7 @@ public sealed partial class WidgetManager
             }
 
             var workArea = GetAnimationWorkArea(groupWindows[0]);
+
             // Use resting bounds: during prepare/play the HWNDs are physically
             // displaced offscreen, which would collapse the group offset to ~0
             // and leave windows parked at their final position when uncloaked.
@@ -459,6 +464,10 @@ public sealed partial class WidgetManager
             double groupRight = groupWindows.Max(window => window.RestingAnimationBounds.Right);
             double groupBottom = groupWindows.Max(window => window.RestingAnimationBounds.Bottom);
 
+            // The group ejects past this monitor's work-area boundary on a
+            // single axis; the other override stays 0. Windows crossing onto
+            // an adjacent display dissolve per-window: each window fades over
+            // its own boundary span inside the tray animation controller.
             double offsetX = 0;
             double offsetY = 0;
             switch (direction)
@@ -475,7 +484,6 @@ public sealed partial class WidgetManager
                     offsetY = workArea.Y + workArea.Height - groupTop + OffscreenAnimationPadding;
                     break;
 
-                case SettingsService.WidgetAnimationSlideDirectionRight:
                 default:
                     offsetX = workArea.X + workArea.Width - groupLeft + OffscreenAnimationPadding;
                     break;
@@ -496,11 +504,15 @@ public sealed partial class WidgetManager
 
     private static Windows.Graphics.RectInt32 GetAnimationWorkArea(IDesktopWidgetWindow window)
     {
+        return GetAnimationDisplayArea(window).WorkArea;
+    }
+
+    private static DisplayArea GetAnimationDisplayArea(IDesktopWidgetWindow window)
+    {
         var point = new Windows.Graphics.PointInt32(
             (int)Math.Round(window.RestingAnimationBounds.Left),
             (int)Math.Round(window.RestingAnimationBounds.Top));
-        var displayArea = DisplayArea.GetFromPoint(point, DisplayAreaFallback.Primary);
-        return displayArea.WorkArea;
+        return DisplayArea.GetFromPoint(point, DisplayAreaFallback.Primary);
     }
 
     private static void ActivateIdleHighestWindow(IReadOnlyList<IDesktopWidgetWindow> windows)

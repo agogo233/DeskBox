@@ -1,4 +1,4 @@
-namespace DeskBox.Tests;
+﻿namespace DeskBox.Tests;
 
 public sealed class AotStage5B4C1C1ContractTests
 {
@@ -20,17 +20,29 @@ public sealed class AotStage5B4C1C1ContractTests
     }
 
     [Fact]
-    public void ProductPicker_UsesModernWindowIdApiAndRejectsInvalidOwner()
+    public void ProductPicker_PinsNoDereferenceLinksAndRejectsInvalidOwner()
     {
         string service = ReadRepositoryFile(
             "src/DeskBox/Services/FileOpenPickerService.cs");
+        string nativeDialog = ReadRepositoryFile(
+            "src/DeskBox/Platform/NativeFileOpenDialog.cs");
 
+        // "Add file" must not follow shortcuts: neither picker stack can turn
+        // that shell-dialog default off, so the entrance uses the native
+        // common item dialog with FOS_NODEREFERENCELINKS pinned. Picking a
+        // shortcut then yields the .lnk itself instead of moving the target
+        // entity (issue 458).
+        Assert.Contains("NativeFileOpenDialog.ShowPickFiles(", service, StringComparison.Ordinal);
+        Assert.Contains("FosNoDereferenceLinks", nativeDialog, StringComparison.Ordinal);
+        Assert.Contains("FosAllowMultiSelect", nativeDialog, StringComparison.Ordinal);
+        Assert.Contains("HResultCancelled", nativeDialog, StringComparison.Ordinal);
+
+        // The filtered single/multiple entrances stay on the owner-aware
+        // WinAppSDK picker.
         Assert.Contains("Microsoft.Windows.Storage.Pickers", service, StringComparison.Ordinal);
         Assert.Contains("GetWindowIdFromWindow(", service, StringComparison.Ordinal);
         Assert.Contains("new FileOpenPicker(ownerWindowId)", service, StringComparison.Ordinal);
-        Assert.Contains("SuggestedStartLocation = PickerLocationId.Desktop", service, StringComparison.Ordinal);
-        Assert.Contains("picker.SuggestedFolder = normalizedFolder", service, StringComparison.Ordinal);
-        Assert.Contains("await picker.PickMultipleFilesAsync()", service, StringComparison.Ordinal);
+
         Assert.Contains("ownerHwnd == IntPtr.Zero", service, StringComparison.Ordinal);
         Assert.Contains("!Win32Helper.IsWindow(ownerHwnd)", service, StringComparison.Ordinal);
         Assert.DoesNotContain("InitializeWithWindow", service, StringComparison.Ordinal);

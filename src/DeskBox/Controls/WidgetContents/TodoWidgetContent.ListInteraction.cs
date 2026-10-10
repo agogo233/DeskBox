@@ -229,7 +229,6 @@ public sealed partial class TodoWidgetContent
                     checkBox.IsChecked = item.IsCompleted;
                 }
 
-                ApplyTodoItemTooltips(container, item);
                 SetTodoItemHoverState(container, false);
                 break;
             }
@@ -243,92 +242,6 @@ public sealed partial class TodoWidgetContent
         {
             checkBox.IsChecked = item.IsCompleted;
         }
-    }
-
-    private static void ApplyTodoItemTooltips(DependencyObject itemRoot, TodoItemViewModel item)
-    {
-        var localization = App.Current.LocalizationService;
-
-        _ = localization;
-    }
-
-        private void TodoItemContent_DoubleTapped(object sender, DoubleTappedRoutedEventArgs e)
-    {
-        // Single tap handles expand/edit; double tap just prevents default
-        e.Handled = true;
-    }
-
-        private async void TodoItemContent_Tapped(object sender, TappedRoutedEventArgs e)
-    {
-        if (sender is not FrameworkElement element ||
-            element.DataContext is not TodoItemViewModel item)
-        {
-            return;
-        }
-
-        TodoListView.Focus(FocusState.Programmatic);
-        bool isCtrlPressed = Win32Helper.IsKeyPressed(VirtualKey.Control);
-        bool isShiftPressed = Win32Helper.IsKeyPressed(VirtualKey.Shift);
-        if (isCtrlPressed || isShiftPressed)
-        {
-            _copyTapGeneration++;
-            if (isShiftPressed)
-            {
-                SelectTodoRange(item);
-            }
-            else
-            {
-                ToggleTodoSelection(item);
-            }
-
-            e.Handled = true;
-            return;
-        }
-
-        if (HasCopySelection())
-        {
-            ClearCopySelection();
-            e.Handled = true;
-            return;
-        }
-
-        if (ViewModel is null)
-        {
-            return;
-        }
-
-        if (!item.IsExpanded)
-        {
-            ViewModel.ToggleExpanded(item.Id);
-            TodoListView.ScrollIntoView(item);
-        }
-        else if (!item.IsEditing)
-        {
-            ViewModel.BeginEdit(item.Id);
-        }
-
-        e.Handled = true;
-    }
-
-    private async void TodoItemCard_Tapped(object sender, TappedRoutedEventArgs e)
-    {
-        if (sender is not FrameworkElement element ||
-            element.DataContext is not TodoItemViewModel item ||
-            ViewModel is null ||
-            IsInteractiveTodoSource(e.OriginalSource))
-        {
-            return;
-        }
-
-        ClearCopySelection();
-        ClearTodoListContainerSelection();
-        MarkDetailSelectionExplicit();
-        if (await OpenDetailItemAsync(item.Id) is null)
-        {
-            return;
-        }
-
-        e.Handled = true;
     }
 
     private async void TodoListView_ItemClick(object sender, ItemClickEventArgs e)

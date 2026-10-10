@@ -25,7 +25,7 @@ public sealed class WidgetManagerStorageCleanupTests : IDisposable
         _searchSettings = new SearchFeatureSettingsStub(_settingsService);
 
         var fileService = new FileService();
-        var organizerService = new OrganizerService(_settingsService, fileService);
+        var organizerService = TestOrganizerServices.Create(_settingsService, fileService);
         var themeService = new ThemeService(_settingsService);
         _widgetManager = new WidgetManager(
             _settingsService,
@@ -449,7 +449,7 @@ public sealed class WidgetManagerStorageCleanupTests : IDisposable
         var manager = new WidgetManager(
             _settingsService,
             fileService,
-            new OrganizerService(_settingsService, fileService),
+            TestOrganizerServices.Create(_settingsService, fileService),
             new ThemeService(_settingsService),
             new QuickCaptureService(new QuickCaptureStore(Path.Combine(_tempRoot, "todo-toggle-capture"))),
             localizationService: null,

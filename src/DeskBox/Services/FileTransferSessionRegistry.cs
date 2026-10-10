@@ -41,10 +41,6 @@ public readonly record struct FileTransferPathState(
         Kind == FileTransferPathKind.Source && IsMove;
 
     public bool IsSource => Kind == FileTransferPathKind.Source;
-
-    public bool IsDestination =>
-        Kind is FileTransferPathKind.Destination or
-            FileTransferPathKind.DestinationFolder;
 }
 
 /// <summary>

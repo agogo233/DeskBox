@@ -154,6 +154,15 @@ public sealed partial class DesktopOrganizationTaskView
             ResultInfo.IsOpen = true;
             ExecuteButton.IsEnabled = true;
         }
+        catch (DesktopOrganizationInvalidStorageRootException ex)
+        {
+            App.Log($"[DesktopOrganization] Execution failed: {ex}");
+            ResultInfo.Severity = InfoBarSeverity.Error;
+            ResultInfo.Title = T("DesktopOrganization.Result.FailedTitle");
+            ResultInfo.Message = T("DesktopOrganization.Error.StorageRootOnDesktop");
+            ResultInfo.IsOpen = true;
+            ExecuteButton.IsEnabled = true;
+        }
         catch (Exception ex)
         {
             App.Log($"[DesktopOrganization] Execution failed: {ex}");

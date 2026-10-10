@@ -24,15 +24,9 @@ public sealed class ContentDeletionDirectContractTests
     public void QuickCaptureDeletionEntryPoints_DoNotRouteThroughConfirmation()
     {
         string source = ReadRepositoryFiles(
-            "src/DeskBox/Controls/WidgetContents/QuickCaptureSurfaceContent.xaml.cs",
-            "src/DeskBox/Views/QuickCaptureWidgetWindow.Detail.cs",
-            "src/DeskBox/Views/QuickCaptureWidgetWindow.ItemActions.cs",
-            "src/DeskBox/Views/QuickCaptureWidgetWindow.Items.cs",
-            "src/DeskBox/Views/QuickCaptureWidgetWindow.Menus.cs",
-            "src/DeskBox/Views/QuickCaptureWidgetWindow.WindowInteraction.cs");
+            "src/DeskBox/Controls/WidgetContents/QuickCaptureSurfaceContent.xaml.cs");
 
         Assert.Contains("DeleteQuickCaptureItemAsync(", source, StringComparison.Ordinal);
-        Assert.Contains("DeleteItemWithUndoAsync(", source, StringComparison.Ordinal);
         Assert.Contains("DeleteSelectedQuickCaptureItemsAsync(", source, StringComparison.Ordinal);
         Assert.DoesNotContain("ConfirmDeleteItemAsync", source, StringComparison.Ordinal);
         Assert.DoesNotContain("ShowQuickCaptureDeleteConfirmFlyout", source, StringComparison.Ordinal);

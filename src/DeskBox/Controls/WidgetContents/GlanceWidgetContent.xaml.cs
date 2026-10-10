@@ -42,6 +42,7 @@ public sealed partial class GlanceWidgetContent : UserControl
     private bool _isCalendarWheelGestureActive;
     private bool _isCalendarWheelNavigationInProgress;
     private int _imageLoadVersion;
+    private bool _shellCustomBackgroundActive;
     private long? _calendarDisplayModeCallbackToken;
     private string? _calendarImagePalettePath;
     private GlanceImagePalette? _calendarImagePalette;
@@ -87,6 +88,31 @@ public sealed partial class GlanceWidgetContent : UserControl
         QueueCalendarImagePaletteUpdate(_viewModel.CurrentImagePath);
         BeginLoadImage(_viewModel.CurrentImagePath);
         UpdateLoadingIndicator();
+    }
+
+    /// <summary>
+    /// Toggles whether a user-set widget background (applied by the hosting
+    /// window) suppresses this surface's own background image.
+    /// </summary>
+    internal void SetShellCustomBackgroundActive(bool active)
+    {
+        if (_shellCustomBackgroundActive == active)
+        {
+            return;
+        }
+
+        _shellCustomBackgroundActive = active;
+        if (_isLoaded)
+        {
+            if (active)
+            {
+                ClearBackgroundImage();
+            }
+            else
+            {
+                BeginLoadImage(_viewModel.CurrentImagePath);
+            }
+        }
     }
 
     private void UserControl_Unloaded(object sender, RoutedEventArgs e)
@@ -812,6 +838,15 @@ public sealed partial class GlanceWidgetContent : UserControl
 
     private void BeginLoadImage(string? path, bool allowTransition = true)
     {
+        // A user-set widget background wins over this surface's own
+        // background image (per-widget customization rule): yield by keeping
+        // the layer clear; removing the override restores it.
+        if (_shellCustomBackgroundActive)
+        {
+            ClearBackgroundImage();
+            return;
+        }
+
         int version = ++_imageLoadVersion;
         if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
         {
@@ -858,7 +893,40 @@ public sealed partial class GlanceWidgetContent : UserControl
 
         ImageBrush brush = CreateImageBrush(bitmap);
         incoming.Background = brush;
-        bitmap.UriSource = new Uri(path, UriKind.Absolute);
+        if (!_viewModel.IsCurrentImageOnline &&
+            _viewModel.ImageCount > LargeLocalStreamingImageSetThreshold)
+        {
+            // The framework's URI-keyed image cache has no eviction API, so
+            // a large local rotation set would pin every decoded frame for
+            // the session. Streamed sources stay out of that cache and keep
+            // the live footprint at ~2 bitmaps; small sets keep URI reuse.
+            _ = LoadImageFromRandomAccessStreamAsync(bitmap, path);
+        }
+        else
+        {
+            bitmap.UriSource = new Uri(path, UriKind.Absolute);
+        }
+    }
+
+    private const int LargeLocalStreamingImageSetThreshold = 24;
+
+    private static async Task LoadImageFromRandomAccessStreamAsync(
+        BitmapImage bitmap,
+        string path)
+    {
+        try
+        {
+            using Windows.Storage.Streams.IRandomAccessStream stream =
+                await Windows.Storage.Streams.FileRandomAccessStream.OpenAsync(
+                    path,
+                    Windows.Storage.FileAccessMode.Read);
+            await bitmap.SetSourceAsync(stream);
+        }
+        catch (Exception ex)
+        {
+            App.Log(
+                $"[GlanceWidgetContent] Streamed image load failed for '{path}': {ex.Message}");
+        }
     }
 
     private void QueueImageQualityRefresh()

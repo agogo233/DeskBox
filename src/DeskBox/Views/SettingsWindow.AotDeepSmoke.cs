@@ -28,9 +28,6 @@ public sealed partial class SettingsWindow
             "AppearanceDensitySettings",
             "AppearanceWindowSettings",
             "AppearanceAnimationSettings",
-            "CapsuleBehaviorSettings",
-            "CapsuleArrangementSettings",
-            "CapsuleAnimationSettings",
             "CapsuleOverridesSettings",
             "BackupRestoreSettings",
             "DataHealthSettings",
@@ -62,7 +59,7 @@ public sealed partial class SettingsWindow
             match.IsPage &&
             string.Equals(
                 match.SectionTag,
-                deepSettingsRoutes[21],
+                deepSettingsRoutes[18],
                 StringComparison.Ordinal));
         if (exactNestedPage is null ||
             !SettingsSearchBox.IsSuggestionListOpen ||
@@ -74,7 +71,7 @@ public sealed partial class SettingsWindow
 
         ActivateSettingsSearchResult(exactNestedPage, SettingsSearchBox);
         AotDeepSettingsPageSnapshot activatedPage =
-            await WaitForAotDeepSettingsPageAsync(deepSettingsRoutes[21]);
+            await WaitForAotDeepSettingsPageAsync(deepSettingsRoutes[18]);
 
         var pageTransitions = new List<AotDeepSettingsPageSnapshot>(deepSettingsRoutes.Length);
         bool breadcrumbParentReturned = false;
@@ -93,7 +90,7 @@ public sealed partial class SettingsWindow
                 fileStackRuleCount = await WaitForAotFileStackRuleProjectionAsync();
             }
 
-            if (string.Equals(sectionTag, deepSettingsRoutes[21], StringComparison.Ordinal))
+            if (string.Equals(sectionTag, deepSettingsRoutes[18], StringComparison.Ordinal))
             {
                 backupSnapshotCount = await WaitForAotBackupSnapshotProjectionAsync();
             }
@@ -121,6 +118,19 @@ public sealed partial class SettingsWindow
             await Task.Delay(100);
             SettingsRoot.UpdateLayout();
             App.Log($"[AotManagedUiSmoke] DeepSettings route completed: {sectionTag}");
+        }
+
+        // P1-1 regression net (incident 2026-09-30 §4): on an unfixed NativeAOT
+        // retail build the cloud-backup password box's typed lookup throws
+        // InvalidCastException, and a wrongly-"fixed" build resolves it as a
+        // base class and yields null. With the DynamicDependency root the
+        // visited section must expose the typed element.
+        NavigateToSettingsSection("CloudBackupSettings");
+        await WaitForAotDeepSettingsPageAsync("CloudBackupSettings");
+        if (CloudBackupPasswordBox is null)
+        {
+            throw new InvalidOperationException(
+                "The cloud-backup password box did not resolve as a typed section element.");
         }
 
         return new AotDeepSettingsSnapshot(

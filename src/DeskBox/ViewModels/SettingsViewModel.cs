@@ -146,6 +146,7 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
             ? Visibility.Visible
             : Visibility.Collapsed;
     [ObservableProperty] public partial bool AutoCheckForUpdates { get; set; } = true;
+    [ObservableProperty] public partial bool SilentStartup { get; set; }
     [ObservableProperty] public partial bool ShowHoverButtons { get; set; } = true;
     [ObservableProperty] public partial bool ShowHoverActionLockPosition { get; set; }
     [ObservableProperty] public partial bool ShowHoverActionLockSize { get; set; }
@@ -219,6 +220,7 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
         if (StartupService.Current is DirectStartupService directStartup)
             SelectedAutoStartMode = directStartup.Mode.ToString();
         AutoCheckForUpdates = settings.AutoCheckForUpdates;
+        SilentStartup = settings.SilentStartup;
         ShowHoverButtons = settings.ShowHoverButtons;
         ApplyHoverButtonActionSelection(settings.WidgetHoverButtonActions);
         // The file-stack section's presentation (including the custom-rule
@@ -266,6 +268,13 @@ _ = RefreshQuickAccessStateAsync();
         // slider-drag suppression flags).
         _quickCaptureSettingsEditor.ListTextSizeCommitted += OnQuickCaptureListTextSizeCommitted;
         _quickCaptureSettingsEditor.ContentTextSizeCommitted += OnQuickCaptureContentTextSizeCommitted;
+
+        // Todo-section text-size commits follow the same contract as Quick
+        // Capture: the editor persists the raw override values and the shell
+        // answers with the shared appearance save pass so slider-drag
+        // suppression and per-widget previews keep their original timing.
+        _todoSettings.ListTextSizeCommitted += OnTodoListTextSizeCommitted;
+        _todoSettings.ContentTextSizeCommitted += OnTodoContentTextSizeCommitted;
 
         // Weather-section host linkage (batch 48): the editor owns the
         // section's binding surface and persisted writes; the shell answers
@@ -337,8 +346,10 @@ _ = RefreshQuickAccessStateAsync();
         _themeService.AppearanceChanged -= OnAppearanceChanged;
         _localizationService.LanguageChanged -= OnLanguageChanged;
         _weatherSettings.AutoLocationUserChanged -= OnWeatherAutoLocationUserChanged;
+        // Cancel the live city search; its owning invocation disposes the
+        // source in its own finally once it unwinds on the canceled token
+        // (the field is only non-null while a search invocation runs).
         _citySearchCts?.Cancel();
-        _citySearchCts?.Dispose();
         _citySearchService?.Dispose();
         _lifetimeCts.Dispose();
     }

@@ -55,6 +55,8 @@ public sealed partial class DesktopOrganizationSettingsSection : UserControl
         AutoToggleCard.Visibility = hasEffectiveRules
             ? Visibility.Visible
             : Visibility.Collapsed;
+        AutoIntervalCard.Visibility = AutoToggleCard.Visibility;
+        RefreshAutoIntervalOptions(settingsService);
         OrganizationSummaryCard.Header = settingsService.Settings.DesktopAutoOrganizationEnabled
             ? T("DesktopOrganization.Status.Running")
             : T("DesktopOrganization.Status.Ready");
@@ -166,6 +168,57 @@ public sealed partial class DesktopOrganizationSettingsSection : UserControl
             : string.Empty;
         RuleStatusInfo.IsOpen = true;
         Refresh();
+    }
+
+    private void RefreshAutoIntervalOptions(SettingsService settingsService)
+    {
+        AutoIntervalComboBox.Items.Clear();
+        int selected = DesktopAutoOrganizationPolicy.NormalizeDelaySeconds(
+            settingsService.Settings.DesktopOrganization.DesktopAutoOrganizationDelaySeconds);
+        int selectedIndex = 0;
+        for (int index = 0;
+             index < DesktopAutoOrganizationPolicy.SupportedDelaySeconds.Length;
+             index++)
+        {
+            int seconds = DesktopAutoOrganizationPolicy.SupportedDelaySeconds[index];
+            AutoIntervalComboBox.Items.Add(new ComboBoxItem
+            {
+                Content = GetAutoIntervalDisplayName(seconds),
+                Tag = seconds
+            });
+            if (seconds == selected)
+            {
+                selectedIndex = index;
+            }
+        }
+
+        AutoIntervalComboBox.SelectedIndex = selectedIndex;
+        AutoIntervalComboBox.IsEnabled = AutoOrganizationToggle.IsOn;
+    }
+
+    private static string GetAutoIntervalDisplayName(int seconds) => seconds switch
+    {
+        DesktopAutoOrganizationPolicy.DefaultDelaySeconds =>
+            T("DesktopOrganization.Auto.Interval.Realtime"),
+        60 => T("DesktopOrganization.Auto.Interval.Minute"),
+        12 * 60 * 60 => Format("DesktopOrganization.Auto.Interval.Hours", 12),
+        _ => Format("DesktopOrganization.Auto.Interval.Minutes", seconds / 60)
+    };
+
+    private async void AutoIntervalComboBox_SelectionChanged(
+        object sender,
+        SelectionChangedEventArgs e)
+    {
+        if (_isRefreshing ||
+            AutoIntervalComboBox.SelectedItem is not ComboBoxItem { Tag: int seconds })
+        {
+            return;
+        }
+
+        var service = global::DeskBox.App.Current.SettingsService;
+        service.Settings.DesktopOrganization.DesktopAutoOrganizationDelaySeconds =
+            DesktopAutoOrganizationPolicy.NormalizeDelaySeconds(seconds);
+        await service.SaveAsync();
     }
 
     private void OrganizeNowButton_Click(object sender, RoutedEventArgs e)

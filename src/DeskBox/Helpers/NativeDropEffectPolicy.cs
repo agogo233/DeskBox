@@ -88,6 +88,8 @@ internal static class NativeDropEffectPolicy
         bool defaultMove,
         bool followWindows = false,
         bool sameVolume = true,
+        bool canCopy = true,
+        bool canMove = true,
         bool shortcutOutsideDesktop = false,
         bool sourcesOnDesktop = true)
     {
@@ -97,6 +99,8 @@ internal static class NativeDropEffectPolicy
             controlDown: (keyState & ControlKeyState) != 0,
             shiftDown: (keyState & ShiftKeyState) != 0,
             defaultMove: defaultMove,
+            canCopy: canCopy,
+            canMove: canMove,
             altDown: (keyState & AltKeyState) != 0,
             followWindows: followWindows,
             sameVolume: sameVolume,

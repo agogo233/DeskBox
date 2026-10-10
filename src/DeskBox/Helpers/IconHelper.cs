@@ -1041,17 +1041,24 @@ public static class IconHelper
                 }
             }
 
-            if (!ShortcutHelper.IsShortcutPath(loadIconSource.Path))
+            // A resolved source with an explicit icon index (a custom icon
+            // location such as "shell32.dll,-238" or the Steam executable)
+            // names the exact frame the shortcut author picked. The Shell
+            // item pipeline ignores that index and answers with the file's
+            // default frame, so those sources must keep going to the indexed
+            // extraction below instead of taking this branch.
+            if (!ShortcutHelper.IsShortcutPath(loadIconSource.Path) &&
+                !loadIconSource.UsesExplicitIconIndex)
             {
                 // Ask the same isolated Shell-item pipeline used by Explorer for
                 // every real file and folder. This also covers a shortcut whose
-                // icon source resolved past the .lnk (target file or explicit
-                // icon location): the resolved source is an ordinary file, no
-                // shortcut overlay is involved, and skipping this pipeline is
-                // what made shortcut tiles render as pre-scaled 32/48 px
-                // image-list bitmaps. A source that still is the .lnk itself
-                // keeps the image-list path so the arrow-overlay rendering the
-                // user chose is preserved.
+                // icon source resolved past the .lnk (the target file): the
+                // resolved source is an ordinary file, no shortcut overlay is
+                // involved, and skipping this pipeline is what made shortcut
+                // tiles render as pre-scaled 32/48 px image-list bitmaps. A
+                // source that still is the .lnk itself keeps the image-list
+                // path so the arrow-overlay rendering the user chose is
+                // preserved.
                 bytes = await TryLoadFileShellItemIconAsync(loadIconSource.Path);
                 if (bytes is { Length: > 0 })
                 {
@@ -1191,6 +1198,28 @@ public static class IconHelper
             {
                 StoreCachedIconBytes(iconBytesCacheKey, bytes);
                 EvictIconCachesIfNeeded();
+            }
+
+            if (bytes is not { Length: > 0 } &&
+                loadIconSource.UsesExplicitIconIndex)
+            {
+                // An explicit icon index can name a resource no extractor can
+                // satisfy (a packed executable, a stripped resource section):
+                // both the Shell item route above and the indexed extraction
+                // answer null for the same source, and because null results
+                // are never cached the tile stays blank across restarts. The
+                // Shell item still resolves a default frame for such a file;
+                // a default icon beats a permanently blank tile, and only a
+                // successful recovery is cached.
+                bytes = await TryLoadFileShellItemIconAsync(loadIconSource.Path);
+                if (bytes is { Length: > 0 })
+                {
+                    StoreCachedIconBytes(iconBytesCacheKey, bytes);
+                    EvictIconCachesIfNeeded();
+                    App.LogVerbose(
+                        $"[IconHelper] Recovered explicit index icon through " +
+                        $"Shell item path={loadIconSource.Path}");
+                }
             }
 
             if (bytes is not { Length: > 0 } &&

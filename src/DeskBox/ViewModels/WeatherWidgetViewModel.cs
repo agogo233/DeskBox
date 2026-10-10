@@ -1,10 +1,13 @@
 using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
+using DeskBox.Contracts;
 using DeskBox.Helpers;
 using DeskBox.Models;
 using DeskBox.Services;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Media.Imaging;
 using Windows.UI;
 
 namespace DeskBox.ViewModels;
@@ -61,6 +64,7 @@ public sealed partial class WeatherWidgetViewModel : ObservableObject, IDisposab
     private string _temperatureUnit = SettingsService.WeatherTemperatureUnitCelsius;
     private string _windSpeedUnit = SettingsService.WeatherWindSpeedUnitKmh;
     private string _skin = SettingsService.WeatherSkinStandard;
+    private string _iconStyle = SettingsService.WeatherIconStyleFluent;
     private bool _showForecast = true;
     private bool _showSunrise = true;
     private bool _showUvIndex = true;
@@ -73,8 +77,12 @@ public sealed partial class WeatherWidgetViewModel : ObservableObject, IDisposab
     // Current weather display values
     private string _currentTemperatureText = "--\u00B0";
     private string _currentDescription = string.Empty;
-    private string _currentEmoji = "\u2600\uFE0F";
     private string _currentIconGlyph = "\uE706";
+    // Materialized lazily by the CurrentIcon getter: constructing an
+    // SvgImageSource needs a live XAML runtime, which headless test hosts
+    // do not have (the old eager field initializer made every view-model
+    // construction throw COMException there).
+    private ImageSource? _currentIcon;
     private string _apparentTemperatureText = string.Empty;
     private string _humidityText = string.Empty;
     private string _windText = string.Empty;
@@ -196,10 +204,13 @@ public sealed partial class WeatherWidgetViewModel : ObservableObject, IDisposab
         private set => SetProperty(ref _currentDescription, value);
     }
 
-    public string CurrentEmoji
+    /// <summary>Bundled SVG icon for the current condition.
+    /// Lazily materializes the placeholder from the last known code/day pair
+    /// so construction stays XAML-runtime-free.</summary>
+    public ImageSource? CurrentIcon
     {
-        get => _currentEmoji;
-        private set => SetProperty(ref _currentEmoji, value);
+        get => _currentIcon ??= CreateIcon(_currentWeatherCode, IsDay);
+        private set => SetProperty(ref _currentIcon, value);
     }
 
     /// <summary>Segoe Fluent Icons glyph for the current weather condition.</summary>
@@ -430,7 +441,7 @@ public sealed partial class WeatherWidgetViewModel : ObservableObject, IDisposab
         _ => Math.Min(32, TextSize + 18)
     };
 
-    // Emoji font size scales with layout
+    // Condition-icon size scales with layout
     public double CurrentEmojiSize => _layoutMode == "Mini" ? 30 : _layoutMode == "Compact" ? 36 : 48;
     public double ForecastEmojiSize => _layoutMode == "Expanded" ? 18 : 15;
     public double ForecastHourTextSize => CaptionTextSize;
@@ -453,7 +464,6 @@ public sealed partial class WeatherWidgetViewModel : ObservableObject, IDisposab
     // Rich skin gradient colors (updated based on weather condition)
     public Color RichBackdropTopColor { get; private set; } = Color.FromArgb(0xFF, 0x28, 0x5F, 0x8E);
     public Color RichBackdropBottomColor { get; private set; } = Color.FromArgb(0xFF, 0x3C, 0x76, 0x94);
-    public Color RichOverlayColor { get; private set; } = Color.FromArgb(0x20, 0xFF, 0xFF, 0xFF);
 
     // Visibility helpers for settings-driven content
     public Visibility ForecastVisibility => _showForecast && !_isWeekView ? Visibility.Visible : Visibility.Collapsed;
@@ -795,6 +805,18 @@ public sealed partial class WeatherWidgetViewModel : ObservableObject, IDisposab
             UpdateRichSkinColors();
         }
 
+        if (_iconStyle != settings.WeatherIconStyle)
+        {
+            _iconStyle = WeatherOptionKinds.NormalizeIconStyle(settings.WeatherIconStyle);
+            changed = true;
+            OnPropertyChanged(nameof(CurrentIcon));
+            if (_weatherData?.Current is not null)
+            {
+                CurrentIcon = CreateIcon(
+                    _weatherData.Current.WeatherCode, IsDay);
+            }
+        }
+
         OnPropertyChanged(nameof(WidgetCornerRadius));
 
         _showForecast = settings.WeatherShowForecast;
@@ -950,8 +972,9 @@ public sealed partial class WeatherWidgetViewModel : ObservableObject, IDisposab
 public sealed partial class WeatherDayViewModel : ObservableObject
 {
     public string DayLabel { get; set; } = string.Empty;
-    public string Emoji { get; set; } = "\u2600\uFE0F";
     public string IconGlyph { get; set; } = "\uE706";
+    public ImageSource? Icon { get; set; }
+
     public string Description { get; set; } = string.Empty;
     public string TempMaxText { get; set; } = string.Empty;
     public string TempMinText { get; set; } = string.Empty;
@@ -974,8 +997,8 @@ public sealed partial class WeatherHourViewModel : ObservableObject
     public string HourLabel { get; set; } = string.Empty;
     public string TemperatureText { get; set; } = string.Empty;
     public string PrecipitationText { get; set; } = string.Empty;
-    public string Emoji { get; set; } = "\u2600\uFE0F";
     public string IconGlyph { get; set; } = "\uE706";
+    public ImageSource? Icon { get; set; }
 
     /// <summary>Whether this is the current hour (used for highlight).</summary>
     public bool IsCurrentHour { get; set; }

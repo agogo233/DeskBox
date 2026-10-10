@@ -97,6 +97,9 @@ public sealed class SettingsService
     public const string WidgetAnimationEffectSlideLeftFade = Contracts.WidgetAnimationKinds.EffectSlideLeftFade;
     public const string WidgetAnimationEffectSlideRightFade = Contracts.WidgetAnimationKinds.EffectSlideRightFade;
     public const string WidgetAnimationEffectScaleSlide = Contracts.WidgetAnimationKinds.EffectScaleSlide;
+    public const string WidgetAnimationEffectEdgeScale = Contracts.WidgetAnimationKinds.EffectEdgeScale;
+    public const string WidgetAnimationEffectTilt = Contracts.WidgetAnimationKinds.EffectTilt;
+    public const string WidgetAnimationEffectWipe = Contracts.WidgetAnimationKinds.EffectWipe;
     public const string WidgetAnimationSpeedVeryFast = Contracts.WidgetAnimationKinds.SpeedVeryFast;
     public const string WidgetAnimationSpeedFast = Contracts.WidgetAnimationKinds.SpeedFast;
     public const string WidgetAnimationSpeedStandard = Contracts.WidgetAnimationKinds.SpeedStandard;
@@ -111,6 +114,7 @@ public sealed class SettingsService
     public const string WidgetAnimationEasingLight = Contracts.WidgetAnimationKinds.EasingLight;
     public const string WidgetAnimationEasingStandard = Contracts.WidgetAnimationKinds.EasingStandard;
     public const string WidgetAnimationEasingStrong = Contracts.WidgetAnimationKinds.EasingStrong;
+    public const string WidgetAnimationEasingSpring = Contracts.WidgetAnimationKinds.EasingSpring;
 
     public static bool IsMicaMaterial(string? materialType) =>
         materialType is WidgetMaterialTypeMica or WidgetMaterialTypeMicaAlt;
@@ -223,6 +227,9 @@ public sealed class SettingsService
     public const string ManagedDropActionFollowWindows = Contracts.ManagedDropActions.FollowWindows;
     public const string ManagedDropActionShortcutOutsideDesktop =
         "ShortcutOutsideDesktop";
+    public const string ManagedDragOutActionMove = Contracts.ManagedDropActions.Move;
+    public const string ManagedDragOutActionCopy = Contracts.ManagedDropActions.Copy;
+    public const string ManagedDragOutActionFollowWindows = Contracts.ManagedDropActions.FollowWindows;
 
     // Canonical attachment storage modes live in Contracts
     // (AttachmentStorageModes, batch 50); these historical constants are
@@ -256,8 +263,6 @@ public sealed class SettingsService
     public const int MaxFileStackExtensionsPerRule = FileStackOptionKinds.MaxExtensionsPerRule;
     public const int DefaultQuickCaptureItemPreviewLineCount = 3;
     public const int DefaultTodoItemPreviewLineCount = TodoOptionKinds.DefaultItemPreviewLineCount;
-    [Obsolete("Use the feature-specific preview line defaults.")]
-    public const int DefaultItemPreviewLineCount = DefaultQuickCaptureItemPreviewLineCount;
     public const int MinItemPreviewLineCount = QuickCaptureOptionKinds.MinItemPreviewLineCount;
     public const int MaxItemPreviewLineCount = QuickCaptureOptionKinds.MaxItemPreviewLineCount;
     public const string EditorEnterBehaviorCtrlEnterSaves = QuickCaptureOptionKinds.EnterBehaviorCtrlEnterSaves;
@@ -350,6 +355,10 @@ public const string WeatherDefaultViewToday = WeatherOptionKinds.DefaultViewToda
 public const string WeatherDefaultViewWeek = WeatherOptionKinds.DefaultViewWeek;
 public const string WeatherSkinStandard = WeatherOptionKinds.SkinStandard;
 public const string WeatherSkinRich = WeatherOptionKinds.SkinRich;
+public const string WeatherIconStyleDeskBox = WeatherOptionKinds.IconStyleDeskBox;
+public const string WeatherIconStyleFlat = WeatherOptionKinds.IconStyleFlat;
+public const string WeatherIconStyleLine = WeatherOptionKinds.IconStyleLine;
+public const string WeatherIconStyleFluent = WeatherOptionKinds.IconStyleFluent;
 public const string WeatherDataSourceMsn = WeatherOptionKinds.DataSourceMsn;
 public const string WeatherDataSourceOpenMeteo = WeatherOptionKinds.DataSourceOpenMeteo;
 public const int WeatherRefreshMinMinutes = WeatherOptionKinds.RefreshMinMinutes;
@@ -371,12 +380,18 @@ public const int DefaultSearchMaxResults = 100;
                 [nameof(AppSettings.WidgetGroups)] = DefaultPreferencePreservationReason.UserData,
                 [nameof(AppSettings.WidgetTopologyLayouts)] = DefaultPreferencePreservationReason.UserData,
                 [nameof(AppSettings.ActiveWidgetTopologyKey)] = DefaultPreferencePreservationReason.RuntimeState,
+                // Device-local monitor identity; the screen it names may not
+                // exist on the machine "reset defaults" runs on.
+                [nameof(AppSettings.WidgetDefaultBoundScreenId)] = DefaultPreferencePreservationReason.UserData,
+                [nameof(AppSettings.WidgetNewPlacementTarget)] = DefaultPreferencePreservationReason.UserChoice,
+                [nameof(AppSettings.WidgetDisplayDisconnectBehavior)] = DefaultPreferencePreservationReason.UserChoice,
                 [nameof(AppSettings.WidgetCapsuleBarOrder)] = DefaultPreferencePreservationReason.UserData,
                 [nameof(AppSettings.WidgetCapsuleFreePlacements)] = DefaultPreferencePreservationReason.UserData,
                 [nameof(AppSettings.DeletedWidgetIds)] = DefaultPreferencePreservationReason.UserData,
                 [nameof(AppSettings.RecentOrganizationHistory)] = DefaultPreferencePreservationReason.UserData,
                 [nameof(AppSettings.DesktopOrganizationRules)] = DefaultPreferencePreservationReason.UserData,
                 [nameof(AppSettings.DesktopAutoOrganizationEnabled)] = DefaultPreferencePreservationReason.UserChoice,
+                [nameof(AppSettings.DesktopAutoOrganizationDelaySeconds)] = DefaultPreferencePreservationReason.UserChoice,
                 [nameof(AppSettings.DesktopAutoOrganizationBaselineUtc)] = DefaultPreferencePreservationReason.RuntimeState,
                 [nameof(AppSettings.DefaultManagedStorageRootPath)] = DefaultPreferencePreservationReason.Storage,
                 [nameof(AppSettings.AutomaticBackupDirectory)] = DefaultPreferencePreservationReason.Storage,
@@ -403,6 +418,9 @@ public const int DefaultSearchMaxResults = 100;
 
     private readonly string _settingsPath;
     private AppSettings _settings = new();
+    // Set at load when the on-disk settings.json carries a schema version
+    // from a newer build; every save is refused for the session.
+    private bool _settingsSchemaNewerThanBuild;
     private readonly object _lock = new();
 
     // The settings.json / widget-layout.json commit pair is protected by a
@@ -497,10 +515,20 @@ public const int DefaultSearchMaxResults = 100;
         settings.WidgetForegroundColor = WidgetForegroundSettings.DefaultCustomColorHex;
         settings.WidgetBorderColorMode = WidgetBorderColorModeNeutral;
         settings.WidgetBorderStyle = WidgetBorderStyleThin;
+        // Schema-v10 background fields reset through the slice so the
+        // facade-access ratchet stays untouched.
+        WidgetShellSettingsSlice backgroundShell = settings.WidgetShell;
+        backgroundShell.WidgetBackgroundMode = null;
+        backgroundShell.WidgetBackgroundUnifiedImage = null;
+        backgroundShell.WidgetBackgroundPanoramaImage = null;
+        backgroundShell.WidgetBackgroundDim = null;
+        backgroundShell.WidgetBackgroundUnifiedFit = null;
+        backgroundShell.WidgetTextShadowEnabled = false;
         settings.WidgetAnimationEffect = WidgetAnimationEffectSlideFade;
         settings.WidgetAnimationSpeed = WidgetAnimationSpeedStandard;
         settings.WidgetAnimationSlideDirection = WidgetAnimationSlideDirectionRight;
         settings.WidgetAnimationEasingIntensity = WidgetAnimationEasingStandard;
+        settings.WidgetAnimationStaggerEnabled = false;
         settings.WidgetLayerMode = WidgetLayerModeDynamic;
         settings.KeepWidgetsVisibleOnShowDesktop = true;
         settings.DisplayWidgetChromeMode = WidgetChromeModeOverlay;
@@ -512,6 +540,9 @@ public const int DefaultSearchMaxResults = 100;
             WidgetGroupTitleDisplayModes.IconAndText;
         settings.WidgetGroupWheelSwitchEnabled = true;
         settings.WidgetGroupHoverSwitchEnabled = false;
+        // Reset through the slice so the facade-access ratchet stays untouched.
+        settings.WidgetLayout.WidgetGroupSwitchAnimationStyle =
+            WidgetGroupSwitchAnimationStyles.Auto;
         settings.WidgetGroupsEnabled = true;
         settings.LegacyWidgetCapsuleModeEnabled = null;
         settings.WidgetCompactWidthMode = WidgetCompactWidthModeAligned;
@@ -555,6 +586,7 @@ public const int DefaultSearchMaxResults = 100;
         settings.ShowHoverButtons = true;
         settings.WidgetHoverButtonActions = DefaultWidgetHoverButtonActions;
         settings.AutoCheckForUpdates = true;
+        settings.SilentStartup = false;
         settings.QuickCaptureClipboardEnabled = false;
         settings.QuickCaptureImageClipboardEnabled = false;
         settings.QuickCaptureRecentLimit = QuickCaptureService.DefaultRecentLimit;
@@ -597,6 +629,7 @@ settings.WeatherTemperatureUnit = WeatherTemperatureUnitCelsius;
 settings.WeatherWindSpeedUnit = WeatherWindSpeedUnitKmh;
 settings.WeatherDefaultView = WeatherDefaultViewToday;
 settings.WeatherSkin = WeatherSkinStandard;
+settings.WeatherIconStyle = WeatherIconStyleFluent;
 settings.WeatherDataSource = WeatherDataSourceMsn;
 settings.WeatherShowForecast = true;
 settings.WeatherShowSunrise = true;
@@ -635,6 +668,9 @@ settings.WeatherRefreshIntervalMinutes = 60;
         settings.TodoShowImportantTab = true;
         settings.TodoShowCompletedTab = true;
         settings.ManagedDropAction = ManagedDropActionMove;
+        settings.ManagedDragOutAction = ManagedDragOutActionFollowWindows;
+        settings.DragOutModifierTipEnabled = true;
+        settings.DragOutResultHintEnabled = true;
         settings.AutomaticBackupEnabled = DataBackupSettingsPolicy.DefaultEnabled;
         settings.AutomaticBackupIntervalMinutes = DataBackupSettingsPolicy.DefaultIntervalMinutes;
         settings.AutomaticBackupRetentionCount = DataBackupSettingsPolicy.DefaultRetentionCount;
@@ -697,6 +733,9 @@ settings.FocusClickedWidgetOnRaise = false;
     /// </summary>
     public WidgetLayoutStore Layout { get; }
 
+    internal string ManagedStorageMigrationDirectory =>
+        Path.Combine(Path.GetDirectoryName(_settingsPath)!, "managed-storage-migrations");
+
     private static string InitializeSettingsPath(string dataDir)
     {
         Directory.CreateDirectory(dataDir);
@@ -734,6 +773,20 @@ settings.FocusClickedWidgetOnRaise = false;
             lock (_lock)
             {
                 _settings = loadResult.Value;
+                // A settings.json stamped by a NEWER build must never be
+                // overwritten by this one: the typed model silently drops its
+                // unknown fields, so a save would strip them irreversibly
+                // (and the stripped file would never re-migrate). Same stance
+                // the widget-layout store takes via Layout.CanWrite.
+                _settingsSchemaNewerThanBuild = loadedFromDisk &&
+                    _settings.SchemaVersion > SettingsMigrationPipeline.CurrentSchemaVersion;
+                if (_settingsSchemaNewerThanBuild)
+                {
+                    App.Log(
+                        $"[SettingsService] settings.json schema {_settings.SchemaVersion} is newer " +
+                        $"than this build ({SettingsMigrationPipeline.CurrentSchemaVersion}); " +
+                        "this session's changes cannot persist");
+                }
             }
 
             bool changed;
@@ -944,6 +997,15 @@ settings.FocusClickedWidgetOnRaise = false;
 
     private async Task<bool> SaveToFileOnlyAsync()
     {
+        if (_settingsSchemaNewerThanBuild)
+        {
+            App.Log(
+                "[SettingsService] Save refused: settings.json schema " +
+                $"{_settings.SchemaVersion} is newer than this build understands; " +
+                "settings changes cannot persist");
+            return false;
+        }
+
         await FileWriteLock.WaitAsync();
         try
         {
@@ -1385,6 +1447,63 @@ settings.FocusClickedWidgetOnRaise = false;
         }
     }
 
+    /// <summary>
+    /// Downgrades pins that lost their bound monitor id (hand-edited settings,
+    /// partial migration) back to the legacy unbound chain so resolution can
+    /// never dead-end on an empty reference. Internal for direct policy tests.
+    /// </summary>
+    internal static void NormalizeScreenBindings(AppSettings settings)
+    {
+        foreach (WidgetConfig widget in settings.Widgets)
+        {
+            if (widget.ScreenBindingMode == WidgetScreenBindingMode.Pinned &&
+                string.IsNullOrWhiteSpace(widget.BoundScreenId))
+            {
+                widget.ScreenBindingMode = WidgetScreenBindingMode.Unbound;
+                widget.BoundScreenId = null;
+            }
+        }
+
+        foreach (WidgetGroupConfig group in settings.WidgetGroups)
+        {
+            if (group.ScreenBindingMode == WidgetScreenBindingMode.Pinned &&
+                string.IsNullOrWhiteSpace(group.BoundScreenId))
+            {
+                group.ScreenBindingMode = WidgetScreenBindingMode.Unbound;
+                group.BoundScreenId = null;
+            }
+        }
+
+        settings.WidgetNewPlacementTarget = NormalizeWidgetNewPlacementTarget(
+            settings.WidgetNewPlacementTarget);
+        settings.WidgetDisplayDisconnectBehavior = NormalizeWidgetDisplayDisconnectBehavior(
+            settings.WidgetDisplayDisconnectBehavior);
+    }
+
+    public const string WidgetNewPlacementCursorDisplay = "CursorDisplay";
+    public const string WidgetNewPlacementMainDisplay = "MainDisplay";
+    public const string WidgetNewPlacementSpecificDisplay = "SpecificDisplay";
+
+    public static string NormalizeWidgetNewPlacementTarget(string? value)
+    {
+        return value switch
+        {
+            WidgetNewPlacementMainDisplay => WidgetNewPlacementMainDisplay,
+            WidgetNewPlacementSpecificDisplay => WidgetNewPlacementSpecificDisplay,
+            _ => WidgetNewPlacementCursorDisplay
+        };
+    }
+
+    public const string WidgetDisplayDisconnectMoveToRemaining = "MoveToRemaining";
+    public const string WidgetDisplayDisconnectCollapseToCapsule = "CollapseToCapsule";
+
+    public static string NormalizeWidgetDisplayDisconnectBehavior(string? value)
+    {
+        return string.Equals(value, WidgetDisplayDisconnectCollapseToCapsule)
+            ? WidgetDisplayDisconnectCollapseToCapsule
+            : WidgetDisplayDisconnectMoveToRemaining;
+    }
+
     private static bool NormalizeWidgetTopologyLayouts(AppSettings settings)
     {
         bool changed = false;
@@ -1392,9 +1511,11 @@ settings.FocusClickedWidgetOnRaise = false;
         {
             settings.WidgetTopologyLayouts = [];
             settings.ActiveWidgetTopologyKey = null;
+            NormalizeScreenBindings(settings);
             return true;
         }
 
+        NormalizeScreenBindings(settings);
         foreach (string invalidKey in settings.WidgetTopologyLayouts
                      .Where(pair => string.IsNullOrWhiteSpace(pair.Key) || pair.Value is null)
                      .Select(pair => pair.Key)
@@ -1514,6 +1635,7 @@ settings.FocusClickedWidgetOnRaise = false;
         }
 
         changed |= WidgetForegroundSettings.NormalizeGlobal(settings);
+        changed |= WidgetBackgroundCustomization.NormalizeGlobal(settings);
 
         if (settings.WidgetBorderColorMode is not (
             WidgetBorderColorModeNeutral or
@@ -1574,7 +1696,10 @@ settings.FocusClickedWidgetOnRaise = false;
             WidgetAnimationEffectFade or
             WidgetAnimationEffectScaleFade or
             WidgetAnimationEffectSlideFade or
-            WidgetAnimationEffectZoom))
+            WidgetAnimationEffectZoom or
+            WidgetAnimationEffectEdgeScale or
+            WidgetAnimationEffectTilt or
+            WidgetAnimationEffectWipe))
         {
             settings.WidgetAnimationEffect = WidgetAnimationEffectSlideFade;
             changed = true;
@@ -1613,14 +1738,15 @@ settings.FocusClickedWidgetOnRaise = false;
             WidgetAnimationEasingNone or
             WidgetAnimationEasingLight or
             WidgetAnimationEasingStandard or
-            WidgetAnimationEasingStrong))
+            WidgetAnimationEasingStrong or
+            WidgetAnimationEasingSpring))
         {
             settings.WidgetAnimationEasingIntensity = WidgetAnimationEasingStandard;
             changed = true;
         }
 
-        if (settings.WidgetAnimationEffect != WidgetAnimationEffectSlideFade &&
-                 settings.WidgetAnimationSlideDirection != WidgetAnimationSlideDirectionNone)
+        if (!Contracts.WidgetAnimationKinds.UsesSlideDirection(settings.WidgetAnimationEffect) &&
+            settings.WidgetAnimationSlideDirection != WidgetAnimationSlideDirectionNone)
         {
             settings.WidgetAnimationSlideDirection = WidgetAnimationSlideDirectionNone;
             changed = true;
@@ -2450,6 +2576,21 @@ settings.FocusClickedWidgetOnRaise = false;
                 changed = true;
             }
 
+            if (WidgetTitleIconCustomization.NormalizeOverrides(widget))
+            {
+                changed = true;
+            }
+
+            if (WidgetBackgroundCustomization.NormalizeOverrides(widget))
+            {
+                changed = true;
+            }
+
+            if (WidgetBorderCustomization.NormalizeOverrides(widget))
+            {
+                changed = true;
+            }
+
             if (widget.IsDisabled && widget.WidgetKind != WidgetKind.Glance)
             {
                 widget.IsDisabled = false;
@@ -2622,6 +2763,14 @@ settings.FocusClickedWidgetOnRaise = false;
             changed = true;
         }
 
+        if (!string.Equals(settings.ManagedDragOutAction, ManagedDragOutActionFollowWindows, StringComparison.Ordinal) &&
+            !string.Equals(settings.ManagedDragOutAction, ManagedDragOutActionMove, StringComparison.Ordinal) &&
+            !string.Equals(settings.ManagedDragOutAction, ManagedDragOutActionCopy, StringComparison.Ordinal))
+        {
+            settings.ManagedDragOutAction = ManagedDragOutActionFollowWindows;
+            changed = true;
+        }
+
         string normalizedRootPath = NormalizeManagedStorageRootPath(settings.DefaultManagedStorageRootPath);
         if (!string.Equals(settings.DefaultManagedStorageRootPath, normalizedRootPath, StringComparison.OrdinalIgnoreCase))
         {
@@ -2686,6 +2835,13 @@ settings.FocusClickedWidgetOnRaise = false;
         {
             settings.DesktopAutoOrganizationEnabled = false;
             settings.DesktopAutoOrganizationBaselineUtc = null;
+            changed = true;
+        }
+        int normalizedAutoOrganizationDelay = DesktopAutoOrganizationPolicy.NormalizeDelaySeconds(
+            settings.DesktopOrganization.DesktopAutoOrganizationDelaySeconds);
+        if (settings.DesktopOrganization.DesktopAutoOrganizationDelaySeconds != normalizedAutoOrganizationDelay)
+        {
+            settings.DesktopOrganization.DesktopAutoOrganizationDelaySeconds = normalizedAutoOrganizationDelay;
             changed = true;
         }
 
@@ -3218,6 +3374,13 @@ settings.FocusClickedWidgetOnRaise = false;
         if (!string.Equals(settings.WeatherSkin, normalizedSkin, StringComparison.Ordinal))
         {
             settings.WeatherSkin = normalizedSkin;
+            changed = true;
+        }
+
+        string normalizedIconStyle = WeatherOptionKinds.NormalizeIconStyle(settings.WeatherIconStyle);
+        if (!string.Equals(settings.WeatherIconStyle, normalizedIconStyle, StringComparison.Ordinal))
+        {
+            settings.WeatherIconStyle = normalizedIconStyle;
             changed = true;
         }
 

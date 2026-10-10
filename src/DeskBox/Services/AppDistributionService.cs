@@ -19,7 +19,6 @@ public sealed class AppDistributionService
 
     public AppDistributionChannel CurrentChannel { get; }
     public bool IsPackaged { get; }
-    public bool IsDirect => CurrentChannel == AppDistributionChannel.Direct;
     public bool IsMicrosoftStore => CurrentChannel == AppDistributionChannel.MicrosoftStore;
     public string ChannelName => IsMicrosoftStore ? "Microsoft Store" : "Direct";
 

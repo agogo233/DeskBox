@@ -1,5 +1,7 @@
 // Copyright (c) DeskBox. All rights reserved.
 
+using System.Diagnostics;
+
 namespace DeskBox.Services;
 
 internal sealed record TrayToggleQueueSnapshot(
@@ -8,6 +10,7 @@ internal sealed record TrayToggleQueueSnapshot(
     long TotalRequests,
     long EffectiveToggles,
     long FoldedNoOpBatches,
+    long SuppressedTrayIconDoubleClicks,
     string? LastSource,
     string? LastError);
 
@@ -19,21 +22,39 @@ internal sealed record TrayToggleQueueSnapshot(
 /// </summary>
 internal sealed class TrayToggleRequestQueue
 {
+    /// <summary>Source tag used by the tray icon's left-click command.</summary>
+    internal const string TrayIconSource = "tray-icon";
+
+    /// <summary>
+    /// A second tray-icon click within this window of the previous one is a
+    /// double-click: it completes without toggling instead of waiting for the
+    /// queue and playing hide right after the reveal animation finished
+    /// (feedback 237). The first click still toggles immediately.
+    /// </summary>
+    internal static readonly TimeSpan DefaultTrayIconDoubleClickWindow =
+        TimeSpan.FromMilliseconds(350);
+
     private sealed record Request(string Source, TaskCompletionSource Completion);
 
     private readonly object _sync = new();
     private readonly Queue<Request> _pending = new();
     private readonly Func<string, Task> _toggleAsync;
+    private readonly TimeSpan _trayIconDoubleClickWindow;
     private bool _workerRunning;
     private long _totalRequests;
     private long _effectiveToggles;
     private long _foldedNoOpBatches;
+    private long _suppressedTrayIconDoubleClicks;
+    private long _lastTrayIconArrivalTimestamp;
     private string? _lastSource;
     private string? _lastError;
 
-    public TrayToggleRequestQueue(Func<string, Task> toggleAsync)
+    public TrayToggleRequestQueue(
+        Func<string, Task> toggleAsync,
+        TimeSpan? trayIconDoubleClickWindow = null)
     {
         _toggleAsync = toggleAsync ?? throw new ArgumentNullException(nameof(toggleAsync));
+        _trayIconDoubleClickWindow = trayIconDoubleClickWindow ?? DefaultTrayIconDoubleClickWindow;
     }
 
     public Task EnqueueAsync(string source)
@@ -45,9 +66,27 @@ internal sealed class TrayToggleRequestQueue
 
         lock (_sync)
         {
-            _pending.Enqueue(new Request(source, completion));
             _totalRequests++;
             _lastSource = source;
+
+            if (source == TrayIconSource && _trayIconDoubleClickWindow > TimeSpan.Zero)
+            {
+                long now = Stopwatch.GetTimestamp();
+                bool isDoubleClick = _lastTrayIconArrivalTimestamp != 0 &&
+                    Stopwatch.GetElapsedTime(_lastTrayIconArrivalTimestamp, now) <
+                        _trayIconDoubleClickWindow;
+                _lastTrayIconArrivalTimestamp = now;
+                if (isDoubleClick)
+                {
+                    _suppressedTrayIconDoubleClicks++;
+                    App.LogVerbose(
+                        "[TrayToggle] suppressed tray-icon double-click click");
+                    completion.TrySetResult();
+                    return completion.Task;
+                }
+            }
+
+            _pending.Enqueue(new Request(source, completion));
             pendingCount = _pending.Count;
             startWorker = !_workerRunning;
             _workerRunning = true;
@@ -75,6 +114,7 @@ internal sealed class TrayToggleRequestQueue
                 _totalRequests,
                 _effectiveToggles,
                 _foldedNoOpBatches,
+                _suppressedTrayIconDoubleClicks,
                 _lastSource,
                 _lastError);
         }

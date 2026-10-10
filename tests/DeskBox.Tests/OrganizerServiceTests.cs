@@ -19,7 +19,7 @@ public sealed class OrganizerServiceTests : IDisposable
 
         _settingsService = new SettingsService(Path.Combine(_tempRoot, "settings"));
         _fileService = new FileService();
-        _organizerService = new OrganizerService(_settingsService, _fileService, () => _desktopRoot);
+        _organizerService = TestOrganizerServices.Create(_settingsService, _fileService, () => _desktopRoot);
     }
 
     [Fact]
@@ -146,13 +146,58 @@ public sealed class OrganizerServiceTests : IDisposable
         File.WriteAllText(sourcePath, "content");
         WidgetConfig widget = CreateWidget(mappedRoot);
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        await Assert.ThrowsAsync<
+            OrganizerService.DestinationOutsideMappedRootException>(() =>
             _organizerService.OrganizeDropAsync(
                 widget,
                 "Widget",
                 [sourcePath],
                 move: false,
                 destinationFolderPath: outsideFolder));
+    }
+
+    [Fact]
+    public async Task OrganizeDropAsync_MappedRootUnavailable_ThrowsMappedFolderUnavailableException()
+    {
+        string sourceDirectory = Directory.CreateDirectory(
+            Path.Combine(_tempRoot, "source-unavailable-root")).FullName;
+        string sourcePath = Path.Combine(sourceDirectory, "note.txt");
+        File.WriteAllText(sourcePath, "content");
+        WidgetConfig widget = CreateWidget(
+            Path.Combine(_tempRoot, "widget-missing-root"));
+
+        var exception = await Assert.ThrowsAsync<
+            OrganizerService.MappedFolderUnavailableException>(
+            () => _organizerService.OrganizeDropAsync(
+                widget,
+                "Widget",
+                [sourcePath],
+                move: false));
+
+        // DirectoryNotFoundException is an IOException: the auto-organization
+        // watcher's storage-recovery catch must stay on this path instead of
+        // spending finite retry budget on a recoverable drive outage.
+        Assert.IsAssignableFrom<DirectoryNotFoundException>(exception);
+    }
+
+    [Fact]
+    public async Task OrganizeDropAsync_DeletedDestinationInsideRoot_ThrowsMappedFolderUnavailableException()
+    {
+        string sourceDirectory = Directory.CreateDirectory(
+            Path.Combine(_tempRoot, "source-deleted-child")).FullName;
+        string mappedRoot = Directory.CreateDirectory(
+            Path.Combine(_tempRoot, "widget-deleted-child")).FullName;
+        string sourcePath = Path.Combine(sourceDirectory, "note.txt");
+        File.WriteAllText(sourcePath, "content");
+        WidgetConfig widget = CreateWidget(mappedRoot);
+
+        await Assert.ThrowsAsync<OrganizerService.MappedFolderUnavailableException>(
+            () => _organizerService.OrganizeDropAsync(
+                widget,
+                "Widget",
+                [sourcePath],
+                move: false,
+                destinationFolderPath: Path.Combine(mappedRoot, "removed")));
     }
 
     [Fact]

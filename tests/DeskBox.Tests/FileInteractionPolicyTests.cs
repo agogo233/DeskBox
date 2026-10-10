@@ -7,16 +7,74 @@ namespace DeskBox.Tests;
 public sealed class FileInteractionPolicyTests
 {
     [Fact]
-    public void DropIntent_ReferenceGridNeverTurnsIntoAFileTransfer()
+    public void DropIntent_UnmappedGridStaysReferenceWithoutModifiers()
     {
+        // No modifier: defer to the settings-backed reference decision —
+        // the import still creates the managed folder on demand.
         Assert.Equal(
             FileDropIntent.Reference,
             FileDropIntentPolicy.ResolveMappedTransfer(
                 hasMappedFolder: false,
                 forceCopy: false,
                 controlDown: false,
+                shiftDown: false,
+                defaultMove: true));
+    }
+
+    [Theory]
+    [InlineData(false, true, false, "Copy")]
+    [InlineData(false, false, true, "Move")]
+    [InlineData(true, false, false, "Shortcut")]
+    [InlineData(true, true, false, "Shortcut")]
+    public void DropIntent_UnmappedGridHonorsExplicitModifiers(
+        bool altDown,
+        bool controlDown,
+        bool shiftDown,
+        string expected)
+    {
+        // Ctrl must copy and Shift must move even before the widget has a
+        // managed folder: swallowing the modifier would let a Ctrl gesture
+        // run the default move and delete the source against the user's
+        // explicit intent.
+        Assert.Equal(
+            expected,
+            FileDropIntentPolicy.ResolveMappedTransfer(
+                hasMappedFolder: false,
+                forceCopy: false,
+                controlDown,
+                shiftDown,
+                defaultMove: true,
+                altDown: altDown).ToString());
+    }
+
+    [Fact]
+    public void DropIntent_UnmappedGridCopiesProviderTemporaryPayloads()
+    {
+        // Temporary/virtual payloads must never move from their provider
+        // staging directory, mapped or not.
+        Assert.Equal(
+            FileDropIntent.Copy,
+            FileDropIntentPolicy.ResolveMappedTransfer(
+                hasMappedFolder: false,
+                forceCopy: true,
+                controlDown: false,
                 shiftDown: true,
                 defaultMove: true));
+    }
+
+    [Fact]
+    public void DropIntent_UnmappedGridRefusesUnauthorizedModifierEffect()
+    {
+        // Ctrl on a source that never announced Copy must not silently move.
+        Assert.Equal(
+            FileDropIntent.None,
+            FileDropIntentPolicy.ResolveMappedTransfer(
+                hasMappedFolder: false,
+                forceCopy: false,
+                controlDown: true,
+                shiftDown: false,
+                defaultMove: true,
+                canCopy: false));
     }
 
     [Fact]

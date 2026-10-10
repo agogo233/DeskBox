@@ -4,13 +4,8 @@ using Xunit.Abstractions;
 namespace DeskBox.Tests;
 
 /// <summary>
-/// Pins the undocumented case of CoGetCallerTID: what it returns on a thread
-/// that is not servicing any COM call. PreferredDropEffectFilterDataObject
-/// treats S_FALSE as "caller in another process"; if a no-context call ever
-/// returned S_FALSE, WinUI's in-process mask derivation would read
-/// DV_E_FORMATETC and external drags would silently change behavior. The OS
-/// docs cover only the in-call cases (S_OK = same-process caller, S_FALSE =
-/// different-process caller); these probes lock the remaining case.
+/// Records the no-active-call behavior of CoGetCallerTID for diagnostics.
+/// File drag safety no longer depends on caller detection.
 /// </summary>
 public sealed class CoGetCallerTidProbeTests
 {

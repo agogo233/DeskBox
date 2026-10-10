@@ -276,6 +276,226 @@ public class IconHelperTests
         }
     }
 
+    [Fact]
+    public void ExplicitIconIndexGate_DefersToTheIndexedExtractionChannel()
+    {
+        string normalized = File.ReadAllText(TestPaths.FromRepository(
+            "src/DeskBox/Helpers/IconHelper.cs"))
+            .Replace("\r\n", "\n", StringComparison.Ordinal);
+
+        int gateIndex = normalized.IndexOf(
+            "if (!ShortcutHelper.IsShortcutPath(loadIconSource.Path) &&\n" +
+            "                !loadIconSource.UsesExplicitIconIndex)",
+            StringComparison.Ordinal);
+        Assert.True(gateIndex >= 0, "The Shell item gate must skip explicit icon index sources.");
+
+        int indexedChannelIndex = normalized.IndexOf(
+            ": LoadIconBytes(",
+            gateIndex,
+            StringComparison.Ordinal);
+        Assert.True(
+            indexedChannelIndex > gateIndex,
+            "Explicit icon index sources must fall through to the indexed extraction channel.");
+
+        int fallbackIndex = normalized.IndexOf(
+            "Recovered explicit index icon through",
+            indexedChannelIndex,
+            StringComparison.Ordinal);
+        int recoveryIndex = normalized.IndexOf(
+            "Recovered shortcut icon through Shell proxy",
+            StringComparison.Ordinal);
+        Assert.True(fallbackIndex > indexedChannelIndex);
+        Assert.True(
+            recoveryIndex > fallbackIndex,
+            "The explicit index fallback must run before the Shell proxy restore block.");
+    }
+
+    [Fact]
+    public void ExplicitIconIndexFallback_RecoversThroughShellItemOnlyForEmptyBytes()
+    {
+        string normalized = File.ReadAllText(TestPaths.FromRepository(
+            "src/DeskBox/Helpers/IconHelper.cs"))
+            .Replace("\r\n", "\n", StringComparison.Ordinal);
+
+        int fallbackConditionIndex = normalized.IndexOf(
+            "if (bytes is not { Length: > 0 } &&\n" +
+            "                loadIconSource.UsesExplicitIconIndex)",
+            StringComparison.Ordinal);
+        Assert.True(
+            fallbackConditionIndex >= 0,
+            "The explicit index fallback must be gated on empty bytes.");
+
+        string fallbackBlock = normalized[fallbackConditionIndex..];
+        int recoveryIndex = fallbackBlock.IndexOf(
+            "Recovered shortcut icon through Shell proxy",
+            StringComparison.Ordinal);
+        Assert.True(recoveryIndex > 0);
+        fallbackBlock = fallbackBlock[..recoveryIndex];
+
+        Assert.Contains(
+            "bytes = await TryLoadFileShellItemIconAsync(loadIconSource.Path);",
+            fallbackBlock,
+            StringComparison.Ordinal);
+        int guardIndex = fallbackBlock.IndexOf(
+            "if (bytes is { Length: > 0 })",
+            StringComparison.Ordinal);
+        int storeIndex = fallbackBlock.IndexOf(
+            "StoreCachedIconBytes(iconBytesCacheKey, bytes);",
+            StringComparison.Ordinal);
+        Assert.True(
+            guardIndex >= 0 && storeIndex > guardIndex,
+            "Only a successful explicit index fallback may write the byte cache.");
+    }
+
+    [Fact]
+    public void ExplicitIconIndexSource_ExtractsTheRequestedFrameInsteadOfTheDefaultOne()
+    {
+        string iconLibraryPath = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.System),
+            "imageres.dll");
+        Assert.True(
+            File.Exists(iconLibraryPath),
+            "imageres.dll is required to exercise the indexed icon channel.");
+
+        byte[]? defaultFrame = InvokeIconBytesMethod(
+            "LoadIconBytes",
+            CreateExplicitIconSource(iconLibraryPath, 0));
+        Assert.NotNull(defaultFrame);
+
+        byte[]? requestedFrame = null;
+        int requestedIndex = -1;
+        for (int candidate = 1;
+             candidate <= 12 && requestedFrame is null;
+             candidate++)
+        {
+            byte[]? candidateFrame = InvokeIconBytesMethod(
+                "LoadIconBytes",
+                CreateExplicitIconSource(iconLibraryPath, candidate));
+            if (candidateFrame is not null &&
+                !candidateFrame.AsSpan().SequenceEqual(defaultFrame))
+            {
+                requestedFrame = candidateFrame;
+                requestedIndex = candidate;
+            }
+        }
+
+        Assert.True(
+            requestedIndex > 0,
+            "No imageres.dll frame between index 1 and 12 differed from the index 0 frame.");
+        byte[]? indexedFrame = InvokeIconBytesMethod(
+            "LoadIndexedIconBytes",
+            CreateExplicitIconSource(iconLibraryPath, requestedIndex));
+        Assert.NotNull(indexedFrame);
+        Assert.True(
+            requestedFrame!.AsSpan().SequenceEqual(indexedFrame),
+            $"The explicit-index channel must return frame {requestedIndex} exactly " +
+            "as LoadIndexedIconBytes extracts it.");
+    }
+
+    [Fact]
+    public void ExplicitIconLocationPointingAtIcoFile_ExtractsVisibleBytes()
+    {
+        string temporaryDirectory = Path.Combine(
+            Path.GetTempPath(),
+            $"DeskBox-explicit-ico-icon-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(temporaryDirectory);
+        try
+        {
+            string iconPath = Path.Combine(temporaryDirectory, "explicit.ico");
+            File.WriteAllBytes(iconPath, CreateOpaqueIconFileBytes());
+
+            byte[]? iconBytes = InvokeIconBytesMethod(
+                "LoadIconBytes",
+                CreateExplicitIconSource(iconPath, 0));
+            Assert.NotNull(iconBytes);
+
+            using var stream = new MemoryStream(iconBytes);
+            using var bitmap = new Bitmap(stream);
+            Assert.True(
+                HasVisiblePixels(bitmap),
+                "A standalone .ico icon location must decode into visible pixels.");
+        }
+        finally
+        {
+            Directory.Delete(temporaryDirectory, recursive: true);
+        }
+    }
+
+    private static object CreateExplicitIconSource(string path, int iconIndex)
+    {
+        Type? iconSourceType = typeof(IconHelper).GetNestedType(
+            "IconSource",
+            BindingFlags.NonPublic | BindingFlags.Instance);
+        Assert.NotNull(iconSourceType);
+        return Activator.CreateInstance(
+            iconSourceType!,
+            path,
+            iconIndex,
+            true,   // UsesExplicitIconIndex
+            false)  // UsesShellItemIcon
+            ?? throw new InvalidOperationException(
+                "The icon source could not be created.");
+    }
+
+    private static byte[]? InvokeIconBytesMethod(string methodName, object iconSource)
+    {
+        MethodInfo method = typeof(IconHelper)
+            .GetMethods(BindingFlags.NonPublic | BindingFlags.Static)
+            .Single(method =>
+                method.Name == methodName &&
+                method.GetParameters().Length == 2);
+        return (byte[]?)method.Invoke(null, [iconSource, false]);
+    }
+
+    private static byte[] CreateOpaqueIconFileBytes()
+    {
+        const int Size = 16;
+        const int AndStride = 4; // 16 mask bits padded to a 32-bit row.
+        int xorSize = Size * Size * 4;
+        int andSize = AndStride * Size;
+        int imageSize = 40 + xorSize + andSize;
+
+        using var stream = new MemoryStream();
+        using var writer = new BinaryWriter(stream);
+        // ICONDIR
+        writer.Write((ushort)0);
+        writer.Write((ushort)1);
+        writer.Write((ushort)1);
+        // ICONDIRENTRY
+        writer.Write((byte)Size);
+        writer.Write((byte)Size);
+        writer.Write((byte)0);
+        writer.Write((byte)0);
+        writer.Write((ushort)1);
+        writer.Write((ushort)32);
+        writer.Write(imageSize);
+        writer.Write(22); // image offset: ICONDIR (6) + ICONDIRENTRY (16)
+        // BITMAPINFOHEADER
+        writer.Write(40);
+        writer.Write(Size);
+        writer.Write(Size * 2); // XOR mask + AND mask
+        writer.Write((ushort)1);
+        writer.Write((ushort)32);
+        writer.Write(0);
+        writer.Write(imageSize);
+        writer.Write(0);
+        writer.Write(0);
+        writer.Write(0);
+        writer.Write(0);
+        // XOR mask: opaque teal pixels, bottom-up.
+        for (int i = 0; i < Size * Size; i++)
+        {
+            writer.Write((byte)128);
+            writer.Write((byte)216);
+            writer.Write((byte)226);
+            writer.Write((byte)255);
+        }
+        // AND mask: unused once alpha is present.
+        writer.Write(new byte[andSize]);
+        writer.Flush();
+        return stream.ToArray();
+    }
+
     private static bool HasVisiblePixels(Bitmap bitmap)
     {
         for (int y = 0; y < bitmap.Height; y++)

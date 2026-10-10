@@ -93,7 +93,10 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
         WidgetAnimationKinds.EffectSlideFade,
         WidgetAnimationKinds.EffectFade,
         WidgetAnimationKinds.EffectScaleFade,
-        WidgetAnimationKinds.EffectZoom
+        WidgetAnimationKinds.EffectZoom,
+        WidgetAnimationKinds.EffectEdgeScale,
+        WidgetAnimationKinds.EffectTilt,
+        WidgetAnimationKinds.EffectWipe
     ];
     private static readonly string[] AnimationSpeeds =
     [
@@ -115,7 +118,8 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
         WidgetAnimationKinds.EasingNone,
         WidgetAnimationKinds.EasingLight,
         WidgetAnimationKinds.EasingStandard,
-        WidgetAnimationKinds.EasingStrong
+        WidgetAnimationKinds.EasingStrong,
+        WidgetAnimationKinds.EasingSpring
     ];
     private static readonly string[] TitleIconModes =
     [
@@ -183,6 +187,12 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
     private string _borderStyle = WidgetBorderKinds.StyleThin;
     private string _foregroundMode = WidgetForegroundKinds.FollowTheme;
     private string _foregroundColorHex = WidgetForegroundKinds.DefaultCustomColorHex;
+    private string _widgetBackgroundMode = WidgetBackgroundModeKinds.Material;
+    private string _widgetBackgroundUnifiedFit = WidgetBackgroundKinds.FitFill;
+    private double _widgetBackgroundDimPercent = WidgetBackgroundKinds.DefaultDimPercent;
+    private bool _widgetTextShadowEnabled;
+    private string[]? _cachedWidgetBackgroundModeNames;
+    private string[]? _cachedWidgetBackgroundUnifiedFitNames;
 
     // Density state.
     private string _layoutDensity = LayoutDensityKinds.Standard;
@@ -205,6 +215,7 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
     private string _animationEffect = WidgetAnimationKinds.EffectSlideFade;
     private string _animationSpeed = WidgetAnimationKinds.SpeedStandard;
     private string _animationSlideDirection = WidgetAnimationKinds.DirectionRight;
+    private bool _animationStaggerEnabled;
     private string _animationEasingIntensity = WidgetAnimationKinds.EasingStandard;
     private string _animationPreset = WidgetAnimationKinds.PresetStandard;
 
@@ -378,12 +389,12 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
     }
 
     public bool CanEditCustomAccent =>
-        !string.Equals(AccentColorSource, AccentSourceCustom, StringComparison.OrdinalIgnoreCase);
+        string.Equals(AccentColorSource, AccentSourceCustom, StringComparison.OrdinalIgnoreCase);
 
     public string AccentColorDescription =>
         CanEditCustomAccent
-            ? _localize("Settings.Accent.SystemDescription")
-            : _localize("Settings.Accent.CustomDescription");
+            ? _localize("Settings.Accent.CustomDescription")
+            : _localize("Settings.Accent.SystemDescription");
 
     /// <summary>
     /// Pushed by the shell: the effective accent color as <c>#RRGGBB</c>.
@@ -464,6 +475,52 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
 
     public string Windows10CompatibilityMessage =>
         _localize("Settings.Windows10VisualCompatibility.Message");
+
+    // Read-only projections of the Windows-wide shadow/transparency switches
+    // mirrored by the material section's bottom system cards. Like the
+    // compatibility flag above, the Win32 probes stay on the shell and push
+    // their results in — the cards deep-link into the OS settings surfaces
+    // rather than writing (an in-app write would be swallowed by MSIX
+    // copy-on-write HKCU virtualization). The raw states are stored instead
+    // of localized strings so RefreshLocalization can re-project the text
+    // without a shell round-trip.
+    private bool? _windowShadowEnabled;
+    private bool? _transparencyEffectsEnabled;
+
+    public string SystemShadowStatusText =>
+        LocalizeSystemEffectState(_windowShadowEnabled);
+
+    public string SystemTransparencyStatusText =>
+        LocalizeSystemEffectState(_transparencyEffectsEnabled);
+
+    /// <summary>
+    /// Pushed by the shell: re-projects the Windows-wide visual-effect
+    /// switches. A null probe result means "unknown" and leaves the status
+    /// blank instead of showing a state the OS may not actually have.
+    /// </summary>
+    public void UpdateSystemEffectStates(
+        bool? windowShadowEnabled,
+        bool? transparencyEffectsEnabled)
+    {
+        if (_windowShadowEnabled != windowShadowEnabled)
+        {
+            _windowShadowEnabled = windowShadowEnabled;
+            OnPropertyChanged(nameof(SystemShadowStatusText));
+        }
+
+        if (_transparencyEffectsEnabled != transparencyEffectsEnabled)
+        {
+            _transparencyEffectsEnabled = transparencyEffectsEnabled;
+            OnPropertyChanged(nameof(SystemTransparencyStatusText));
+        }
+    }
+
+    private string LocalizeSystemEffectState(bool? enabled) =>
+        enabled is null
+            ? string.Empty
+            : _localize(enabled.Value
+                ? "Settings.SystemEffect.StateOn"
+                : "Settings.SystemEffect.StateOff");
 
     /// <summary>Whether the opacity slider applies to the current material.</summary>
     public bool ShowOpacitySlider => WidgetMaterialKinds.SupportsOpacity(MaterialType);
@@ -588,6 +645,229 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
     /// <summary>Whether the custom foreground color picker applies.</summary>
     public bool ShowForegroundCustomColor =>
         ForegroundMode == WidgetForegroundKinds.Custom;
+
+    private static readonly string[] WidgetBackgroundModes =
+    [
+        WidgetBackgroundModeKinds.Material,
+        WidgetBackgroundModeKinds.UnifiedImage,
+        WidgetBackgroundModeKinds.Panorama
+    ];
+
+    private static readonly string[] WidgetBackgroundUnifiedFits =
+    [
+        WidgetBackgroundKinds.FitFill,
+        WidgetBackgroundKinds.FitContain
+    ];
+
+    public string WidgetBackgroundMode
+    {
+        get => _widgetBackgroundMode;
+        set
+        {
+            string normalized = WidgetBackgroundModeKinds.Normalize(value);
+            if (!SetProperty(ref _widgetBackgroundMode, normalized))
+            {
+                return;
+            }
+
+            OnPropertyChanged(nameof(ShowUnifiedBackgroundOptions));
+            OnPropertyChanged(nameof(ShowPanoramaBackgroundOptions));
+            OnPropertyChanged(nameof(ShowImageBackgroundOptions));
+            if (_isSyncingPresentation)
+            {
+                return;
+            }
+
+            _settings.SetWidgetBackgroundMode(normalized);
+            AppearanceValueCommitted?.Invoke();
+        }
+    }
+
+    public IReadOnlyList<SettingsOption> AvailableWidgetBackgroundModeOptions
+    {
+        get
+        {
+            string[] keys =
+            [
+                "Settings.WidgetBackground.Mode.Material",
+                "Settings.WidgetBackground.Mode.UnifiedImage",
+                "Settings.WidgetBackground.Mode.Panorama"
+            ];
+            _cachedWidgetBackgroundModeNames ??= keys.Select(key => _localize(key)).ToArray();
+            var options = new SettingsOption[WidgetBackgroundModes.Length];
+            for (int index = 0; index < WidgetBackgroundModes.Length; index++)
+            {
+                options[index] = new SettingsOption(
+                    WidgetBackgroundModes[index],
+                    _cachedWidgetBackgroundModeNames[index]);
+            }
+
+            return options;
+        }
+    }
+
+    public string WidgetBackgroundUnifiedFit
+    {
+        get => _widgetBackgroundUnifiedFit;
+        set
+        {
+            string normalized = WidgetBackgroundKinds.NormalizeFit(value);
+            if (!SetProperty(ref _widgetBackgroundUnifiedFit, normalized))
+            {
+                return;
+            }
+
+            if (_isSyncingPresentation)
+            {
+                return;
+            }
+
+            _settings.SetWidgetBackgroundUnifiedFit(normalized);
+            AppearanceValueCommitted?.Invoke();
+        }
+    }
+
+    public IReadOnlyList<SettingsOption> AvailableWidgetBackgroundUnifiedFitOptions
+    {
+        get
+        {
+            string[] keys =
+            [
+                "Settings.WidgetBackground.FitFill",
+                "Settings.WidgetBackground.FitContain"
+            ];
+            _cachedWidgetBackgroundUnifiedFitNames ??= keys.Select(key => _localize(key)).ToArray();
+            var options = new SettingsOption[WidgetBackgroundUnifiedFits.Length];
+            for (int index = 0; index < WidgetBackgroundUnifiedFits.Length; index++)
+            {
+                options[index] = new SettingsOption(
+                    WidgetBackgroundUnifiedFits[index],
+                    _cachedWidgetBackgroundUnifiedFitNames[index]);
+            }
+
+            return options;
+        }
+    }
+
+    /// <summary>Scrim strength over image backgrounds, 0-100.</summary>
+    public double WidgetBackgroundDimPercent
+    {
+        get => _widgetBackgroundDimPercent;
+        set
+        {
+            double clamped = Math.Clamp(
+                double.IsFinite(value) ? value : WidgetBackgroundKinds.DefaultDimPercent,
+                WidgetBackgroundKinds.MinDimPercent,
+                WidgetBackgroundKinds.MaxDimPercent);
+            if (!SetProperty(ref _widgetBackgroundDimPercent, clamped))
+            {
+                return;
+            }
+
+            OnPropertyChanged(nameof(WidgetBackgroundDimValueText));
+            if (_isSyncingPresentation)
+            {
+                return;
+            }
+
+            AppearanceValueUpdate update = _settings.UpdateWidgetBackgroundDim(clamped);
+            if (!update.Committed)
+            {
+                WidgetBackgroundDimPercent = update.Value;
+                return;
+            }
+
+            AppearanceValueCommitted?.Invoke();
+        }
+    }
+
+    public string WidgetBackgroundDimValueText =>
+        ((int)Math.Round(WidgetBackgroundDimPercent)).ToString();
+
+    /// <summary>Unified-image options only apply in UnifiedImage mode.</summary>
+    public bool ShowUnifiedBackgroundOptions =>
+        WidgetBackgroundMode == WidgetBackgroundModeKinds.UnifiedImage;
+
+    /// <summary>Panorama options only apply in Panorama mode.</summary>
+    public bool ShowPanoramaBackgroundOptions =>
+        WidgetBackgroundMode == WidgetBackgroundModeKinds.Panorama;
+
+    /// <summary>The dim slider applies to any image background mode.</summary>
+    public bool ShowImageBackgroundOptions =>
+        WidgetBackgroundMode != WidgetBackgroundModeKinds.Material;
+
+    /// <summary>
+    /// Dual-layer text shadow behind widget titles and file names — the
+    /// Windows-native icon-label shadow look. Default off.
+    /// </summary>
+    public bool WidgetTextShadowEnabled
+    {
+        get => _widgetTextShadowEnabled;
+        set
+        {
+            if (!SetProperty(ref _widgetTextShadowEnabled, value))
+            {
+                return;
+            }
+
+            if (_isSyncingPresentation)
+            {
+                return;
+            }
+
+            _settings.SetWidgetTextShadowEnabled(value);
+            AppearanceValueCommitted?.Invoke();
+        }
+    }
+
+    /// <summary>
+    /// Removes every per-widget background override; the settings page's
+    /// batch-reset button calls this after picking a new image.
+    /// </summary>
+    public int ClearPerWidgetBackgrounds()
+    {
+        int cleared = _settings.ClearPerWidgetBackgrounds();
+        AppearanceValueCommitted?.Invoke();
+        return cleared;
+    }
+
+    /// <summary>
+    /// Called by the settings shell after a unified/panorama image pick so
+    /// dependent option visibility can re-evaluate.
+    /// </summary>
+    public void NotifyWidgetBackgroundImageChanged()
+    {
+        OnPropertyChanged(nameof(ShowUnifiedBackgroundOptions));
+        OnPropertyChanged(nameof(ShowPanoramaBackgroundOptions));
+        AppearanceValueCommitted?.Invoke();
+    }
+
+    /// <summary>
+    /// Stores a freshly picked unified image; picking an image also selects
+    /// the unified mode so the result is visible immediately.
+    /// </summary>
+    public void SetUnifiedBackgroundImage(string fileName)
+    {
+        _settings.SetWidgetBackgroundUnifiedImage(fileName);
+        if (WidgetBackgroundMode != WidgetBackgroundModeKinds.UnifiedImage)
+        {
+            WidgetBackgroundMode = WidgetBackgroundModeKinds.UnifiedImage;
+        }
+
+        NotifyWidgetBackgroundImageChanged();
+    }
+
+    /// <summary>Stores a picked panorama image and selects panorama mode.</summary>
+    public void SetPanoramaBackgroundImage(string fileName)
+    {
+        _settings.SetWidgetBackgroundPanoramaImage(fileName);
+        if (WidgetBackgroundMode != WidgetBackgroundModeKinds.Panorama)
+        {
+            WidgetBackgroundMode = WidgetBackgroundModeKinds.Panorama;
+        }
+
+        NotifyWidgetBackgroundImageChanged();
+    }
 
     /// <summary>
     /// The custom widget foreground color as <c>#RRGGBB</c>; the color picker
@@ -723,9 +1003,9 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
         {
             string[] keys =
             [
-                "Settings.Corner.Square",
+                "Settings.Corner.Round",
                 "Settings.Corner.Small",
-                "Settings.Corner.Round"
+                "Settings.Corner.Square"
             ];
             _cachedCornerPreferenceNames ??= keys.Select(key => _localize(key)).ToArray();
             var options = new SettingsOption[CornerPreferences.Length];
@@ -1235,6 +1515,7 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
             OnPropertyChanged(nameof(IsDirectionEnabled));
             OnPropertyChanged(nameof(IsEasingEnabled));
             OnPropertyChanged(nameof(IsSpeedEnabled));
+            OnPropertyChanged(nameof(IsStaggerEnabled));
             SyncAnimationPresetSelection();
         }
     }
@@ -1248,7 +1529,10 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
                 "Settings.Animation.Effect.SlideFade",
                 "Settings.Animation.Effect.Fade",
                 "Settings.Animation.Effect.ScaleFade",
-                "Settings.Animation.Effect.Zoom"
+                "Settings.Animation.Effect.Zoom",
+                "Settings.Animation.Effect.EdgeScale",
+                "Settings.Animation.Effect.Tilt",
+                "Settings.Animation.Effect.Wipe"
             ];
             _cachedAnimationEffectNames ??= keys.Select(key => _localize(key)).ToArray();
             var options = new SettingsOption[AnimationEffects.Length];
@@ -1263,7 +1547,15 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
 
     public bool IsSpeedEnabled => AnimationEffect != WidgetAnimationKinds.EffectNone;
 
-    public bool IsDirectionEnabled => AnimationEffect is
+    public bool IsDirectionEnabled =>
+        WidgetAnimationKinds.UsesSlideDirection(AnimationEffect);
+
+    /// <summary>
+    /// Staggering delays each window's HWND travel inside the batch driver;
+    /// stationary effects (fade/scale/tilt/wipe family) never move windows,
+    /// so the toggle does nothing for them and must not present as usable.
+    /// </summary>
+    public bool IsStaggerEnabled => AnimationEffect is
         WidgetAnimationKinds.EffectSlideFade or
         WidgetAnimationKinds.EffectScaleSlide;
 
@@ -1394,6 +1686,23 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
         }
     }
 
+    public bool AnimationStaggerEnabled
+    {
+        get => _animationStaggerEnabled;
+        set
+        {
+            if (!SetProperty(ref _animationStaggerEnabled, value))
+            {
+                return;
+            }
+
+            if (!_isSyncingPresentation)
+            {
+                _settings.SetAnimationStaggerEnabled(value);
+            }
+        }
+    }
+
     public IReadOnlyList<SettingsOption> AvailableAnimationEasingIntensityOptions
     {
         get
@@ -1403,7 +1712,8 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
                 "Settings.Animation.Easing.None",
                 "Settings.Animation.Easing.Light",
                 "Settings.Animation.Easing.Strong",
-                "Settings.Animation.Easing.Standard"
+                "Settings.Animation.Easing.Standard",
+                "Settings.Animation.Easing.Spring"
             ];
             var names = new Dictionary<string, string>(StringComparer.Ordinal);
             foreach (string key in keys)
@@ -1417,6 +1727,7 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
                     WidgetAnimationKinds.EasingNone => names["Settings.Animation.Easing.None"],
                     WidgetAnimationKinds.EasingLight => names["Settings.Animation.Easing.Light"],
                     WidgetAnimationKinds.EasingStrong => names["Settings.Animation.Easing.Strong"],
+                    WidgetAnimationKinds.EasingSpring => names["Settings.Animation.Easing.Spring"],
                     _ => names["Settings.Animation.Easing.Standard"]
                 })
                 .ToArray();
@@ -1642,6 +1953,12 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
             BorderStyle = material.BorderStyle;
             ForegroundMode = foreground.ForegroundMode;
             ForegroundColorHex = NormalizeHexColor(foreground.ForegroundColor);
+            AppearanceWidgetBackgroundSettings widgetBackground =
+                _settings.ReadWidgetBackground();
+            WidgetBackgroundMode = widgetBackground.Mode;
+            WidgetBackgroundUnifiedFit = widgetBackground.UnifiedFit;
+            WidgetBackgroundDimPercent = widgetBackground.DimPercent;
+            WidgetTextShadowEnabled = _settings.ReadWidgetTextShadowEnabled();
 
             LayoutDensity = density.LayoutDensity;
             IconSize = density.IconSize;
@@ -1662,6 +1979,7 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
             AnimationSpeed = animation.Speed;
             AnimationSlideDirection = animation.SlideDirection;
             AnimationEasingIntensity = animation.EasingIntensity;
+            AnimationStaggerEnabled = animation.StaggerEnabled;
             AnimationPreset = WidgetAnimationKinds.ResolvePreset(
                 animation.Effect,
                 animation.Speed,
@@ -1751,16 +2069,28 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
         _cachedTrayIconStyleNames = null;
         _cachedMaterialTypeNames = null;
         _cachedForegroundModeNames = null;
+        _cachedWidgetBackgroundModeNames = null;
+        _cachedWidgetBackgroundUnifiedFitNames = null;
         _cachedBorderColorModeNames = null;
         _cachedBorderStyleNames = null;
         _cachedCornerPreferenceNames = null;
         _cachedFileNameLineCountNames = null;
         _cachedTitleIconModeNames = null;
+        _cachedLayoutDensityNames = null;
+        _cachedAnimationPresetNames = null;
+        _cachedAnimationEffectNames = null;
+        _cachedAnimationSpeedNames = null;
+        _cachedAnimationSlideDirectionNames = null;
+        _cachedAnimationEasingIntensityNames = null;
+        _cachedChromeModeNames = null;
         OnPropertyChanged(nameof(AvailableThemeOptions));
         OnPropertyChanged(nameof(AvailableTrayIconStyleOptions));
         OnPropertyChanged(nameof(AvailableAccentColorSourceOptions));
         OnPropertyChanged(nameof(AvailableMaterialTypeOptions));
         OnPropertyChanged(nameof(AvailableForegroundModeOptions));
+        OnPropertyChanged(nameof(AvailableWidgetBackgroundModeOptions));
+        OnPropertyChanged(nameof(AvailableWidgetBackgroundUnifiedFitOptions));
+        OnPropertyChanged(nameof(WidgetBackgroundDimValueText));
         OnPropertyChanged(nameof(AvailableBorderColorModeOptions));
         OnPropertyChanged(nameof(AvailableBorderStyleOptions));
         OnPropertyChanged(nameof(AvailableCornerPreferenceOptions));
@@ -1777,6 +2107,8 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
         OnPropertyChanged(nameof(MaterialTypeText));
         OnPropertyChanged(nameof(Windows10CompatibilityTitle));
         OnPropertyChanged(nameof(Windows10CompatibilityMessage));
+        OnPropertyChanged(nameof(SystemShadowStatusText));
+        OnPropertyChanged(nameof(SystemTransparencyStatusText));
         OnPropertyChanged(nameof(AccentColorDescription));
         OnPropertyChanged(nameof(LayoutDensityText));
         OnPropertyChanged(nameof(AnimationPresetText));

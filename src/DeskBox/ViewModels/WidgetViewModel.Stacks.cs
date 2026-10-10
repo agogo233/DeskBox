@@ -209,8 +209,6 @@ public partial class WidgetViewModel
         SettingsService.FileStackOpenModePopover,
         StringComparison.Ordinal);
 
-    public bool IsStackDisabled(string stackKey) => _disabledStacks.Contains(stackKey);
-
     public bool HasDisabledStacks => _disabledStacks.Count > 0;
 
     public bool HasExpandedStack => !string.IsNullOrWhiteSpace(

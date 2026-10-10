@@ -1,4 +1,4 @@
-namespace DeskBox.Tests;
+﻿namespace DeskBox.Tests;
 
 public sealed class AotStage4E5ContractTests
 {
@@ -154,7 +154,7 @@ public sealed class AotStage4E5ContractTests
         string app = ReadRepositoryFile("src/DeskBox/App.xaml");
         string contentWindow = ReadRepositoryFile("src/DeskBox/Views/ContentWidgetWindow.xaml");
 
-        Assert.Equal(2, CountOccurrences(app, "{Binding "));
+        Assert.Equal(0, CountOccurrences(app, "{Binding "));
         Assert.Equal(1, CountOccurrences(contentWindow, "{Binding "));
     }
 

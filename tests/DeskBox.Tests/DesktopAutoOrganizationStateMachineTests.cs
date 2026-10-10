@@ -329,6 +329,27 @@ public sealed class DesktopAutoOrganizationStateMachineTests
     }
 
     [Fact]
+    public void InitialWaitDefer_DoesNotConsumeTheTransientRetryBudget()
+    {
+        var stateMachine = new DesktopAutoOrganizationStateMachine();
+        const string path = @"C:\Desktop\waited-out.txt";
+        DateTimeOffset due = new(2020, 1, 1, 0, 0, 10, TimeSpan.Zero);
+
+        DesktopAutoOrganizationWorkItem item = stateMachine.BeginPending(path);
+        Assert.True(stateMachine.MarkDeferred(item, due, countAttempt: false));
+        Assert.Equal(
+            DesktopAutoOrganizationItemState.Deferred,
+            stateMachine.GetSnapshot(path)?.State);
+        Assert.Equal(0, stateMachine.GetSnapshot(path)?.RetryAttempts);
+
+        // A transient failure after the wait still owns the full budget.
+        DesktopAutoOrganizationWorkItem dueItem = Assert.Single(
+            stateMachine.TakeDueDeferred(due));
+        Assert.True(stateMachine.MarkDeferred(dueItem, due.AddMinutes(2)));
+        Assert.Equal(1, stateMachine.GetSnapshot(path)?.RetryAttempts);
+    }
+
+    [Fact]
     public void ActivityTracker_RecognizesDownloadOrExtractionBursts()
     {
         var tracker = new DesktopAutoOrganizationActivityTracker(

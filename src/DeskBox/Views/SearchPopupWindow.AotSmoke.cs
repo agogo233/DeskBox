@@ -30,14 +30,6 @@ public sealed partial class SearchPopupWindow
             _viewModel.CurrentResults.Any(item => item.ActionId == "open-settings"));
     }
 
-    internal bool HasAotResultPath(string expectedPath) =>
-        _viewModel.CurrentResults.Any(item =>
-            !string.IsNullOrWhiteSpace(item.DetailPath) &&
-            string.Equals(
-                item.DetailPath,
-                expectedPath,
-                StringComparison.OrdinalIgnoreCase));
-
     internal AotSearchControlExercise ExerciseAotReadOnlyControls()
     {
         var filterItems = new (string Name, ComboBoxItem Item)[]

@@ -52,7 +52,6 @@ public sealed class DeskBoxDataPathIsolationTests
     [InlineData("src/DeskBox/Services/SearchHistoryService.cs")]
     [InlineData("src/DeskBox/Services/LegacySearchIndexCleanupService.cs")]
     [InlineData("src/DeskBox/Services/DesktopOrganizationRecoveryStore.cs")]
-    [InlineData("src/DeskBox/Views/QuickCaptureWidgetWindow.xaml.cs")]
     public void AppOwnedStorage_UsesSharedDataRoot(string relativePath)
     {
         string source = File.ReadAllText(TestPaths.FromRepository(relativePath));
@@ -70,5 +69,39 @@ public sealed class DeskBoxDataPathIsolationTests
         Assert.Contains("DESKBOX_DEV_DATA_ROOT", source, StringComparison.Ordinal);
         Assert.Contains("UseProductionData", source, StringComparison.Ordinal);
         Assert.Contains("ExecutablePath.StartsWith($repoRootPath", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TestHosts_NeverConstructTheProductionPathOrganizerService()
+    {
+        // The public OrganizerService ctor hardcodes the production
+        // suppression ledger and recovery journal; a test using it silently
+        // reads and rewrites the real data directory and races the running
+        // app. History: unisolated tests once grew the ledger to 8.4 MB and
+        // left 27 quarantined corrupt backups. Every test must go through
+        // TestOrganizerServices (or the internal ctor with injected paths).
+        string testsRoot = TestPaths.FromRepository("tests/DeskBox.Tests");
+        // Assembled from fragments so this test's own source does not carry
+        // the literal it bans.
+        string bannedConstruction = "new " + "OrganizerService(";
+        foreach (string file in Directory.EnumerateFiles(
+                     testsRoot,
+                     "*.cs",
+                     SearchOption.AllDirectories))
+        {
+            if (file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}") ||
+                file.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}") ||
+                Path.GetFileName(file) is "TestOrganizerServices.cs")
+            {
+                continue;
+            }
+
+            string source = File.ReadAllText(file);
+            Assert.False(
+                source.Contains(bannedConstruction, StringComparison.Ordinal),
+                $"{file} constructs OrganizerService directly; use " +
+                "TestOrganizerServices.Create so the suppression ledger and " +
+                "recovery journal stay off the real data directory.");
+        }
     }
 }

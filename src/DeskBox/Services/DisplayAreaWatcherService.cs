@@ -53,11 +53,6 @@ public sealed class DisplayAreaWatcherService : IDisposable
     /// </summary>
     public event Action? DisplaysChanged;
 
-    /// <summary>
-    /// The current number of displays.
-    /// </summary>
-    public int DisplayCount => _displayCount;
-
     public DisplayAreaWatcherService(DispatcherQueue dispatcherQueue)
     {
         _dispatcherQueue = dispatcherQueue;

@@ -230,7 +230,7 @@ public sealed class OrganizationHistoryPolicyTests : IDisposable
         settings.OrganizationHistory.Entries.Add(entry);
         OrganizationHistoryPolicy.ApplyRetentionPolicy(settings.OrganizationHistory.Entries);
 
-        var organizer = new OrganizerService(settings, new FileService(), () => desktopRoot);
+        var organizer = TestOrganizerServices.Create(settings, new FileService(), () => desktopRoot);
 
         Assert.Null(organizer.GetLatestUndoableEntry());
         await Assert.ThrowsAsync<InvalidOperationException>(
@@ -436,7 +436,7 @@ public sealed class OrganizationHistoryPolicyTests : IDisposable
         }
 
         var settings = new SettingsService(Path.Combine(_tempRoot, "settings"));
-        var organizer = new OrganizerService(
+        var organizer = TestOrganizerServices.Create(
             settings,
             new FileService(),
             () => Path.Combine(_tempRoot, "desktop"));
@@ -469,7 +469,7 @@ public sealed class OrganizationHistoryPolicyTests : IDisposable
         }
 
         var settings = new SettingsService(Path.Combine(_tempRoot, "settings"));
-        var organizer = new OrganizerService(
+        var organizer = TestOrganizerServices.Create(
             settings,
             new FileService(),
             () => desktopDirectory);
@@ -719,7 +719,7 @@ public sealed class OrganizationHistoryPolicyTests : IDisposable
         var settings = new SettingsService(Path.Combine(_tempRoot, "settings"));
         settings.OrganizationHistory.Entries.AddRange(Enumerable.Range(0, 6).Select(i =>
             CreateEntry(500, timestampUtc: DateTime.UtcNow.AddMinutes(-i))));
-        var organizer = new OrganizerService(
+        var organizer = TestOrganizerServices.Create(
             settings,
             new FileService(),
             () => Path.Combine(_tempRoot, "desktop"));
@@ -836,11 +836,10 @@ public sealed class OrganizationHistoryPolicyTests : IDisposable
             "{ not valid json");
 
         var settings = new SettingsService(Path.Combine(_tempRoot, "settings"));
-        var organizer = new OrganizerService(
+        var organizer = TestOrganizerServices.Create(
             settings,
             new FileService(),
             () => Path.Combine(_tempRoot, "desktop"),
-            new DesktopAutoOrganizationSuppressionRegistry(),
             Path.Combine(dataDir, "desktop-organization-recovery.json"));
 
         OrganizerOperationResult operation = await organizer.OrganizeDropAsync(

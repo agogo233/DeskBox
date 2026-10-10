@@ -108,7 +108,6 @@ public sealed partial class LocalizationResourceContractTests
             "src/DeskBox/Controls/DesktopOrganizationTaskView.Actions.cs",
             "src/DeskBox/Controls/DesktopOrganizationTaskView.xaml.cs",
             "src/DeskBox/Controls/WidgetContents/QuickCaptureSurfaceContent.xaml.cs",
-            "src/DeskBox/Views/QuickCaptureWidgetWindow.Editing.cs",
             "src/DeskBox/Views/SettingsSections/DesktopOrganizationSettingsSection.xaml.cs",
             "src/DeskBox/Views/SettingsWindow.StorageAndUpdates.cs"
         ];

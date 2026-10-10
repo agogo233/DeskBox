@@ -35,10 +35,11 @@ public partial class App
             Icon = new FontIcon { Glyph = "\uE74C" }
         };
         organizeDesktopItem.Loaded += OnTrayMenuVisualLoaded;
-        organizeDesktopItem.Click += async (_, _) =>
-            await RunTraySettingsActionAsync(
+        AttachTrayMenuItemInteraction(
+            organizeDesktopItem,
+            () => RunTraySettingsActionAsync(
                 contextMenu,
-                OpenDesktopOrganizationFromTray);
+                OpenDesktopOrganizationFromTray));
 
         var mapFolderItem = new MenuFlyoutItem
         {
@@ -46,7 +47,9 @@ public partial class App
             Width = TrayMenuItemWidth,
             Icon = new SymbolIcon(Symbol.OpenFile)
         };
-        mapFolderItem.Click += async (_, _) => await RunTrayMenuActionAsync(contextMenu, CreateFolderWidgetFromPickerAsync);
+        AttachTrayMenuItemInteraction(
+            mapFolderItem,
+            () => RunTrayMenuActionAsync(contextMenu, CreateFolderWidgetFromPickerAsync));
 
         var addFeatureWidgetItem = new MenuFlyoutItem
         {
@@ -54,10 +57,11 @@ public partial class App
             Width = TrayMenuItemWidth,
             Icon = new FontIcon { Glyph = "\uE710" }
         };
-        addFeatureWidgetItem.Click += async (_, _) =>
-            await RunTraySettingsActionAsync(
+        AttachTrayMenuItemInteraction(
+            addFeatureWidgetItem,
+            () => RunTraySettingsActionAsync(
                 contextMenu,
-                OpenFeatureWidgetsFromTray);
+                OpenFeatureWidgetsFromTray));
 
         var settingsItem = new MenuFlyoutItem
         {
@@ -65,7 +69,9 @@ public partial class App
             Width = TrayMenuItemWidth,
             Icon = new SymbolIcon(Symbol.Setting)
         };
-        settingsItem.Click += async (_, _) => await RunTraySettingsActionAsync(contextMenu, OpenSettingsFromTray);
+        AttachTrayMenuItemInteraction(
+            settingsItem,
+            () => RunTraySettingsActionAsync(contextMenu, OpenSettingsFromTray));
 
         var openManagedStorageItem = new MenuFlyoutItem
         {
@@ -73,7 +79,9 @@ public partial class App
             Width = TrayMenuItemWidth,
             Icon = new SymbolIcon(Symbol.Folder)
         };
-        openManagedStorageItem.Click += async (_, _) => await RunTrayMenuActionAsync(contextMenu, OpenManagedStorageFromTray);
+        AttachTrayMenuItemInteraction(
+            openManagedStorageItem,
+            () => RunTrayMenuActionAsync(contextMenu, OpenManagedStorageFromTray));
 
         var updateItem = new MenuFlyoutItem
         {
@@ -82,7 +90,9 @@ public partial class App
             Icon = new SymbolIcon(Symbol.Download),
             Visibility = Visibility.Collapsed
         };
-        updateItem.Click += async (_, _) => await RunTraySettingsActionAsync(contextMenu, OpenAboutSettingsFromTray);
+        AttachTrayMenuItemInteraction(
+            updateItem,
+            () => RunTraySettingsActionAsync(contextMenu, OpenAboutSettingsFromTray));
 
         var exitItem = new MenuFlyoutItem
         {
@@ -90,7 +100,9 @@ public partial class App
             Width = TrayMenuItemWidth,
             Icon = new SymbolIcon(Symbol.Cancel)
         };
-        exitItem.Click += async (_, _) => await RunTrayMenuActionAsync(contextMenu, ExitApplication);
+        AttachTrayMenuItemInteraction(
+            exitItem,
+            () => RunTrayMenuActionAsync(contextMenu, ExitApplication));
 
         _trayCreateWidgetItems.Clear();
         contextMenu.Items.Add(organizeDesktopItem);
@@ -122,7 +134,7 @@ public partial class App
         _trayContextMenu = contextMenu;
         PrepareTrayContextMenu(contextMenu);
 
-        _trayWindow = new Window();
+        _trayWindow = new Window { Title = "DeskBox Tray Host" };
         AppBranding.ApplyWindowIcon(_trayWindow.AppWindow);
         // Early-logon sessions can reject these windowing calls (E_NOTIMPL is
         // observed on IsShownInSwitchers); a 1x1 host window that leaks into
@@ -149,12 +161,20 @@ public partial class App
             {
                 if (WidgetManager is not null)
                 {
-                    SafeFireAndForget(() => ToggleTrayWidgetsAsync("tray-icon"));
+                    SafeFireAndForget(() => ToggleTrayWidgetsAsync(
+                        DeskBox.Services.TrayToggleRequestQueue.TrayIconSource));
                 }
             })
         };
         _trayIcon.SecondWindowContextMenuOpened += OnSecondWindowTrayContextMenuOpened;
-        _trayIcon.ContextFlyout = contextMenu;
+        // The flyout setter synchronously builds H.NotifyIcon's second window,
+        // which early-logon sessions can reject with E_NOTIMPL before the
+        // shell desktop is ready. Retry on the tray creation cadence and fall
+        // back to the native menu instead of failing startup (feedback 343).
+        if (!TryAssignTrayContextFlyout())
+        {
+            SafeFireAndForget(() => RetryTrayContextFlyoutAssignmentAsync());
+        }
 
         if (_trayWindow.Content is null)
         {
@@ -312,6 +332,59 @@ public partial class App
         }
     }
 
+    private bool TryAssignTrayContextFlyout()
+    {
+        try
+        {
+            if (_trayIcon is null)
+            {
+                return false;
+            }
+
+            _trayIcon.ContextFlyout = _trayContextMenu;
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Log($"[Tray] Tray context flyout assignment failed: {ex.Message}");
+            _trayContextMenuModePolicy.RecordFailure();
+            return false;
+        }
+    }
+
+    private async Task RetryTrayContextFlyoutAssignmentAsync()
+    {
+        for (int attempt = 2; attempt <= TrayCreationMaxAttempts; attempt++)
+        {
+            await Task.Delay(TrayCreationRetryDelay);
+            if (_trayIcon is not { } trayIcon)
+            {
+                return;
+            }
+
+            if (TryAssignTrayContextFlyout())
+            {
+                Log($"[Tray] Tray context flyout assigned on retry attempt {attempt}");
+                _trayContextMenuModePolicy.RecordSuccess();
+                return;
+            }
+
+            if (_trayContextMenuModePolicy.IsDegradedToPopupMenu)
+            {
+                try
+                {
+                    SwitchTrayContextMenuToNativeMode(trayIcon);
+                }
+                catch (Exception ex)
+                {
+                    Log($"[Tray] Failed to degrade tray context menu to native PopupMenu mode: {ex.Message}");
+                }
+
+                return;
+            }
+        }
+    }
+
     private MenuFlyoutItem CreateTrayCreateWidgetItem(
         MenuFlyout contextMenu,
         WidgetContentDescriptor descriptor,
@@ -323,14 +396,38 @@ public partial class App
             Width = TrayMenuItemWidth,
             Icon = new FontIcon { Glyph = descriptor.DefaultGlyph }
         };
-        item.Click += async (_, _) => await RunTrayMenuActionAsync(contextMenu, async () =>
+        AttachTrayMenuItemInteraction(item, () => RunTrayMenuActionAsync(contextMenu, async () =>
         {
             if (WidgetManager is not null)
             {
                 await WidgetManager.CreateWidgetOfKindAsync(descriptor.WidgetKind);
             }
-        });
+        }));
         return item;
+    }
+
+    /// <summary>
+    /// Wires one tray menu item so both invocation paths work: the XAML click
+    /// path (SecondWindow flyout mode) and the command path (the library's
+    /// native PopupMenu fallback only executes Command, never Click). WinUI
+    /// raises Click and executes the command back-to-back on the same
+    /// dispatch, so a per-item gate keeps each interaction single-shot.
+    /// </summary>
+    private static void AttachTrayMenuItemInteraction(MenuFlyoutItem item, Func<Task> interaction)
+    {
+        var gate = new TrayMenuInteractionGate(action => UiDispatcherQueue.TryEnqueue(() => action()));
+        async Task RunInteractionOnceAsync()
+        {
+            if (!gate.TryEnter())
+            {
+                return;
+            }
+
+            await interaction();
+        }
+
+        item.Click += async (_, _) => await RunInteractionOnceAsync();
+        item.Command = new RelayCommand(async () => await RunInteractionOnceAsync());
     }
 
     private void PrepareTrayContextMenu(MenuFlyout contextMenu)
@@ -461,6 +558,8 @@ public partial class App
         return false;
     }
 
+    private readonly TrayContextMenuModePolicy _trayContextMenuModePolicy = new();
+
     private void ShowTrayContextMenuFromTray()
     {
         if (_trayIcon is null ||
@@ -484,14 +583,125 @@ public partial class App
             Log($"[Tray] Failed to calculate tray context menu anchor: {ex}");
         }
 
+        if (_trayContextMenuModePolicy.IsDegradedToPopupMenu)
+        {
+            ShowTrayContextMenuInNativeMode(point);
+            return;
+        }
+
         try
         {
             _trayIcon.ShowContextMenu(point);
+            _trayContextMenuModePolicy.RecordSuccess();
+        }
+        catch (Exception ex) when (IsSecondWindowHostFailure(ex))
+        {
+            Log($"[Tray] Tray context menu SecondWindow host failed: {ex.Message}");
+            RecoverTrayContextMenuAfterSecondWindowFailure(point);
         }
         catch (Exception ex)
         {
             Log($"[Tray] Failed to show tray context menu: {ex}");
         }
+    }
+
+    private static bool IsSecondWindowHostFailure(Exception exception)
+    {
+        // H.NotifyIcon 2.5.0-beta.1's second window can fail its prewarm race
+        // (Activate is synchronously followed by SW_HIDE, so Loaded never
+        // fires), leaving the host frame without a XamlRoot; every flyout
+        // ShowAt then throws this ArgumentException.
+        return exception is ArgumentException &&
+            exception.Message.Contains("XamlRoot", StringComparison.Ordinal);
+    }
+
+    private void ShowTrayContextMenuInNativeMode(DrawingPoint point)
+    {
+        if (_trayIcon is not { } trayIcon)
+        {
+            return;
+        }
+
+        // ContextMenuMode is already PopupMenu, so the same public call routes
+        // to the library's native menu without touching the second-window host.
+        try
+        {
+            trayIcon.ShowContextMenu(point);
+        }
+        catch (Exception ex)
+        {
+            Log($"[Tray] Failed to show native tray context menu: {ex.Message}");
+        }
+    }
+
+    private void RecoverTrayContextMenuAfterSecondWindowFailure(DrawingPoint point)
+    {
+        if (_trayIcon is not { } trayIcon)
+        {
+            return;
+        }
+
+        if (_trayContextMenuModePolicy.RecordFailure())
+        {
+            DegradeTrayContextMenuToNativeMode(trayIcon, point);
+            return;
+        }
+
+        try
+        {
+            // Re-assigning the flyout makes the library rebuild its hidden
+            // second window from scratch; the replaced window leaks once,
+            // which beta.1 makes unavoidable for this one-shot retry.
+            trayIcon.ContextFlyout = null;
+            trayIcon.ContextFlyout = _trayContextMenu;
+        }
+        catch (Exception ex)
+        {
+            Log($"[Tray] Failed to rebuild tray context menu SecondWindow host: {ex.Message}");
+            if (_trayContextMenuModePolicy.RecordFailure())
+            {
+                DegradeTrayContextMenuToNativeMode(trayIcon, point);
+            }
+
+            return;
+        }
+
+        try
+        {
+            trayIcon.ShowContextMenu(point);
+            _trayContextMenuModePolicy.RecordSuccess();
+        }
+        catch (Exception ex) when (IsSecondWindowHostFailure(ex))
+        {
+            Log($"[Tray] Tray context menu SecondWindow host failed after rebuild: {ex.Message}");
+            if (_trayContextMenuModePolicy.RecordFailure())
+            {
+                DegradeTrayContextMenuToNativeMode(trayIcon, point);
+            }
+        }
+        catch (Exception ex)
+        {
+            Log($"[Tray] Failed to show tray context menu after host rebuild: {ex.Message}");
+        }
+    }
+
+    private void DegradeTrayContextMenuToNativeMode(TaskbarIcon trayIcon, DrawingPoint point)
+    {
+        try
+        {
+            SwitchTrayContextMenuToNativeMode(trayIcon);
+            ShowTrayContextMenuInNativeMode(point);
+        }
+        catch (Exception ex)
+        {
+            Log($"[Tray] Failed to degrade tray context menu to native PopupMenu mode: {ex.Message}");
+        }
+    }
+
+    private void SwitchTrayContextMenuToNativeMode(TaskbarIcon trayIcon)
+    {
+        trayIcon.ContextMenuMode = ContextMenuMode.PopupMenu;
+        Log("[Tray] Tray context menu degraded to native PopupMenu mode (SecondWindow host failed to initialize)");
     }
 
     internal void ShowTrayContextMenuForOnboarding()
@@ -848,7 +1058,12 @@ public partial class App
             await RunTrayMenuActionAsync(contextMenu, action);
             // The tray flyout is hosted by a helper window. Keep the raised-widget
             // session stable while that window closes and Settings takes foreground.
-            await Task.Delay(300);
+            // In degraded PopupMenu mode the menu is a native modal, so there is
+            // no helper window to wait for.
+            if (!_trayContextMenuModePolicy.IsDegradedToPopupMenu)
+            {
+                await Task.Delay(300);
+            }
         }
         finally
         {
@@ -949,18 +1164,75 @@ public partial class App
 
     internal IntPtr GetFolderPickerOwnerWindowHandle()
     {
-        if (_trayWindow is null)
+        // A picker dialog follows its owner's virtual desktop and DWM cloak
+        // state: when the tray host stays behind on a desktop the user has
+        // switched away from, it is shell-cloaked and a dialog owned by it
+        // never composes (issue 489). Prefer the tray host while it is
+        // usable, then a window that is demonstrably on the active desktop,
+        // and recreate the hidden helper as a last resort — a fresh window
+        // always lands on the active desktop.
+        IntPtr trayHwnd = _trayWindow is null
+            ? IntPtr.Zero
+            : WindowNative.GetWindowHandle(_trayWindow);
+        IntPtr settingsHwnd = _settingsWindow is null
+            ? IntPtr.Zero
+            : WindowNative.GetWindowHandle(_settingsWindow);
+        IntPtr helperHwnd = _folderPickerHelperWindow is null
+            ? IntPtr.Zero
+            : WindowNative.GetWindowHandle(_folderPickerHelperWindow);
+
+        return PickerOwnerResolutionPolicy.Resolve(
+            IsUsablePickerOwner(trayHwnd),
+            IsUsablePickerOwner(settingsHwnd) &&
+                Win32Helper.IsWindowVisible(settingsHwnd),
+            IsUsablePickerOwner(helperHwnd)) switch
         {
-            throw new InvalidOperationException("The tray owner window has not been created.");
+            PickerOwnerSource.TrayWindow => trayHwnd,
+            PickerOwnerSource.SettingsWindow => settingsHwnd,
+            PickerOwnerSource.CachedHelperWindow => helperHwnd,
+            _ => RecreateFolderPickerHelperWindow()
+        };
+    }
+
+    private static bool IsUsablePickerOwner(IntPtr ownerHwnd)
+    {
+        return ownerHwnd != IntPtr.Zero &&
+            Win32Helper.IsWindow(ownerHwnd) &&
+            !Win32Helper.IsWindowCloaked(ownerHwnd);
+    }
+
+    private IntPtr RecreateFolderPickerHelperWindow()
+    {
+        if (_folderPickerHelperWindow is not null)
+        {
+            try
+            {
+                _folderPickerHelperWindow.Close();
+            }
+            catch (Exception ex)
+            {
+                Log($"[FolderPicker] Stale helper window close failed: {ex.Message}");
+            }
+
+            _folderPickerHelperWindow = null;
         }
 
-        IntPtr ownerHwnd = WindowNative.GetWindowHandle(_trayWindow);
-        if (ownerHwnd == IntPtr.Zero || !Win32Helper.IsWindow(ownerHwnd))
+        // Same shape as the tray host (1x1, out of the switcher), never
+        // activated: the native hwnd exists from construction, and creating
+        // the window now assigns it to the active virtual desktop.
+        var helper = new Window { Title = "DeskBox Picker Host" };
+        WindowShellState.TryHideFromSwitchers(helper.AppWindow);
+        try
         {
-            throw new InvalidOperationException("The tray owner window handle is unavailable.");
+            helper.AppWindow.Resize(new Windows.Graphics.SizeInt32(1, 1));
+        }
+        catch (Exception ex)
+        {
+            Log($"[FolderPicker] Helper window resize not applied: {ex.Message}");
         }
 
-        return ownerHwnd;
+        _folderPickerHelperWindow = helper;
+        return WindowNative.GetWindowHandle(helper);
     }
 
     private void OpenSettingsFromTray()
@@ -1016,5 +1288,82 @@ public partial class App
     public void UpdateTrayIcon()
     {
         UpdateTrayIconAppearance();
+    }
+}
+
+/// <summary>
+/// Session state for the tray context menu's SecondWindow-to-PopupMenu
+/// fallback: consecutive host failures are counted across right-clicks, a
+/// successful open resets the count, and reaching the threshold degrades the
+/// session permanently — the native menu is the terminal escape hatch.
+/// </summary>
+internal sealed class TrayContextMenuModePolicy
+{
+    internal const int DegradationFailureThreshold = 2;
+
+    private int _consecutiveSecondWindowFailures;
+    private bool _degradedToPopupMenu;
+
+    internal int ConsecutiveSecondWindowFailures => _consecutiveSecondWindowFailures;
+
+    internal bool IsDegradedToPopupMenu => _degradedToPopupMenu;
+
+    /// <summary>Resets the failure count after a successful open. Degradation
+    /// itself is terminal for the session.</summary>
+    internal void RecordSuccess()
+    {
+        _consecutiveSecondWindowFailures = 0;
+    }
+
+    /// <summary>
+    /// Records a second-window host failure and reports whether this call
+    /// crossed the degradation threshold.
+    /// </summary>
+    internal bool RecordFailure()
+    {
+        _consecutiveSecondWindowFailures++;
+        if (_degradedToPopupMenu ||
+            _consecutiveSecondWindowFailures < DegradationFailureThreshold)
+        {
+            return false;
+        }
+
+        _degradedToPopupMenu = true;
+        return true;
+    }
+}
+
+/// <summary>
+/// Single-shot gate for one tray menu item interaction. In SecondWindow mode
+/// WinUI raises the item's Click event and executes its command back-to-back
+/// on the same dispatch, while the native PopupMenu fallback only executes
+/// the command. The gate lets the first path win and re-arms on the next
+/// dispatcher pass so the next interaction works again.
+/// </summary>
+internal sealed class TrayMenuInteractionGate
+{
+    private readonly Action<Action> _scheduleReset;
+    private int _entered;
+
+    internal TrayMenuInteractionGate(Action<Action> scheduleReset)
+    {
+        _scheduleReset = scheduleReset;
+    }
+
+    /// <summary>true for the first caller of the current interaction.</summary>
+    internal bool TryEnter()
+    {
+        if (Interlocked.Exchange(ref _entered, 1) != 0)
+        {
+            return false;
+        }
+
+        _scheduleReset(Reset);
+        return true;
+    }
+
+    internal void Reset()
+    {
+        _entered = 0;
     }
 }

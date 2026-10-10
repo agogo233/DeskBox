@@ -30,17 +30,6 @@ public partial class WidgetViewModel
     private Dictionary<string, WidgetItem>? _batchItemsByPath;
 
     /// <summary>
-    /// True while a bulk mutation is in flight. Watcher events that land
-    /// inside the window fold into the open batch — their derived work is
-    /// deferred and covered by the same finalization — instead of paying
-    /// their own per-item costs mid-import. Full watcher reloads are the
-    /// exception: they bypass every per-item gate (and a large import
-    /// reliably trips the watcher's reload threshold), so they are deferred
-    /// to one authoritative refresh after the batch.
-    /// </summary>
-    internal bool IsItemMutationBatchActive => _itemMutationBatchDepth > 0;
-
-    /// <summary>
     /// Opens a batch mutation scope. Disposing it finalizes: one sort-order
     /// normalization pass, one manual-order persistence check, one AddedAt
     /// persistence, one stack-display rebuild, one render-window reconcile

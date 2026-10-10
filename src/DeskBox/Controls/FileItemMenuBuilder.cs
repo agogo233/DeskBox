@@ -109,6 +109,16 @@ public static class FileItemMenuBuilder
         };
         flyout.Items.Add(copyPath);
 
+        MenuFlyoutItem showInExplorer = actions.CreateMenuItem(
+            "Widget.ShowInExplorer",
+            "\uE838");
+        showInExplorer.Click += (_, _) =>
+        {
+            flyout.Hide();
+            actions.ShowInExplorer(item);
+        };
+        flyout.Items.Add(showInExplorer);
+
         MenuFlyoutItem properties = actions.CreateMenuItem(
             "Common.Properties",
             "\uE946");
@@ -119,19 +129,6 @@ public static class FileItemMenuBuilder
             actions.ShowProperties(item);
         };
         flyout.Items.Add(properties);
-
-        if (actions.ShowSystemContextMenuAsync is not null)
-        {
-            MenuFlyoutItem moreSystemOperations = actions.CreateMenuItem(
-                "Widget.MoreSystemOperations",
-                "\uE712");
-            moreSystemOperations.Click += async (_, _) =>
-            {
-                flyout.Hide();
-                await actions.ShowSystemContextMenuAsync(item);
-            };
-            flyout.Items.Add(moreSystemOperations);
-        }
 
         if (actions.CanRemoveFromStack(item))
         {
@@ -147,16 +144,6 @@ public static class FileItemMenuBuilder
             flyout.Items.Add(removeFromStack);
         }
 
-        MenuFlyoutItem showInExplorer = actions.CreateMenuItem(
-            "Widget.ShowInExplorer",
-            "\uE838");
-        showInExplorer.Click += (_, _) =>
-        {
-            flyout.Hide();
-            actions.ShowInExplorer(item);
-        };
-        flyout.Items.Add(showInExplorer);
-
         if (actions.CanMoveItemsBackToDesktop())
         {
             flyout.Items.Add(new MenuFlyoutSeparator());
@@ -170,6 +157,20 @@ public static class FileItemMenuBuilder
                     actions.GetSelectedItems());
             };
             flyout.Items.Add(moveBack);
+        }
+
+        if (actions.ShowSystemContextMenuAsync is not null)
+        {
+            flyout.Items.Add(new MenuFlyoutSeparator());
+            MenuFlyoutItem moreSystemOperations = actions.CreateMenuItem(
+                "Widget.MoreSystemOperations",
+                "\uE712");
+            moreSystemOperations.Click += async (_, _) =>
+            {
+                flyout.Hide();
+                await actions.ShowSystemContextMenuAsync(item);
+            };
+            flyout.Items.Add(moreSystemOperations);
         }
 
         flyout.Items.Add(new MenuFlyoutSeparator());

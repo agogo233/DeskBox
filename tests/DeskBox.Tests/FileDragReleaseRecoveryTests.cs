@@ -85,7 +85,7 @@ public sealed class FileDragReleaseRecoveryTests
             "internal bool TryEndShellDragSessionAfterNativePointerExit()");
         AssertBefore(shell, "ShouldDeferReleasedDragSessionRecovery()", "_isShellDragActive = false;");
 
-        string completed = Section(surface, "private void Items_DragItemsCompleted(",
+        string completed = Section(surface, "private void CompleteDragItemsSession(",
             "internal static bool ShouldRecoverUnhandledSourceDrop(");
         AssertBefore(completed, "_sourceDragSession.Complete(dragSessionId);",
             "TryCompleteReleasedStackPopoverReorder(");

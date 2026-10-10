@@ -53,16 +53,6 @@ public sealed partial class DesktopOrganizationTaskView
         }
     }
 
-    private IReadOnlyList<DesktopOrganizationFileSnapshot> GetSourceExcludedItems()
-    {
-        if (_hasCompletedExecution && _lastExecutionPlan is not null)
-            return _lastExecutionPlan.ExcludedItems.Where(item =>
-                item.ExclusionReason != DesktopOrganizationExclusionReason.SourceNotSelected).ToList();
-        if (_basePlan is null || _plan is null) return [];
-        return _basePlan.SourceItems.Where(item => !item.IsEligible &&
-            (item.SourceScope == DesktopOrganizationSourceScope.Public ? _plan.IncludePublicDesktop : _plan.IncludePersonalDesktop)).ToList();
-    }
-
     private string BuildSourceResult(IReadOnlyList<OrganizationHistoryItem> completedItems, DesktopOrganizationSourceScope scope)
     {
         string name = T(scope == DesktopOrganizationSourceScope.Public

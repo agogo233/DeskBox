@@ -86,6 +86,10 @@ public partial class SettingsViewModel
 
     private void OnAppearanceAccentColorSourceUserChanged(bool useSystem)
     {
+        // Keep the shell's accent-mode flag in step with the editor write:
+        // RefreshAccentPreview pushes this flag back into the editor, so a
+        // stale value here would bounce the combo selection right back.
+        UseSystemAccentColor = useSystem;
         _themeService.SetAccentMode(
             useSystem ? ThemeService.AccentModeSystem : ThemeService.AccentModeCustom);
         RefreshAccentPreview();
@@ -148,7 +152,19 @@ public partial class SettingsViewModel
 
     private void PushAppearanceHostEnvironment()
     {
-        string[] materialKinds = WindowsCompatibilityService.IsWindows11OrLater
+        _appearanceSettings.UpdateHostEnvironment(
+            !WindowsCompatibilityService.IsWindows11OrLater,
+            WindowsCompatibilityService.SupportsNativeWindowCorners,
+            ResolveSupportedMaterialKinds(WindowsCompatibilityService.IsWindows11OrLater));
+    }
+
+    /// <summary>
+    /// The OS filter behind the material picker: the Mica kinds are never
+    /// offered below Windows 11 — their effective value degrades to acrylic
+    /// there anyway (<see cref="WindowsCompatibilityService.ResolveWidgetMaterialTypeForBuild"/>).
+    /// </summary>
+    internal static string[] ResolveSupportedMaterialKinds(bool isWindows11OrLater) =>
+        isWindows11OrLater
             ?
             [
                 SettingsService.WidgetMaterialTypeAcrylic,
@@ -163,11 +179,6 @@ public partial class SettingsViewModel
                 SettingsService.WidgetMaterialTypeAcrylicBase,
                 SettingsService.WidgetMaterialTypeSolid
             ];
-        _appearanceSettings.UpdateHostEnvironment(
-            !WindowsCompatibilityService.IsWindows11OrLater,
-            WindowsCompatibilityService.SupportsNativeWindowCorners,
-            materialKinds);
-    }
 
     [RelayCommand]
     public void ResetDisplayWidgetChromeOverrides()

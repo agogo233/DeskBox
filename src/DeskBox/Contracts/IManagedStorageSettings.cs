@@ -24,6 +24,9 @@ public static class ManagedDropActions
 /// </summary>
 public sealed record ManagedStoragePresentationSettings(
     string DropAction,
+    string DragOutAction,
+    bool DragOutModifierTipEnabled,
+    bool DragOutResultHintEnabled,
     string RootPath);
 
 /// <summary>
@@ -69,4 +72,20 @@ public interface IManagedStorageSettings
     string SetDefaultRootPath(string path);
 
     bool SetManagedDropAction(string? action);
+
+    /// <summary>
+    /// Writes the drag-out action (the preferred drop effect advertised to
+    /// external targets when dragging files out of a file widget).
+    /// </summary>
+    bool SetManagedDragOutAction(string? action);
+
+    /// <summary>
+    /// Writes whether the in-drag modifier tip is surfaced at drag start.
+    /// </summary>
+    bool SetDragOutModifierTipEnabled(bool enabled);
+
+    /// <summary>
+    /// Writes whether the post-drop receipt hint is shown.
+    /// </summary>
+    bool SetDragOutResultHintEnabled(bool enabled);
 }

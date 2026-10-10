@@ -1,3 +1,4 @@
+using DeskBox.Contracts;
 using DeskBox.Models;
 
 namespace DeskBox.Services;
@@ -82,6 +83,12 @@ internal static class WeatherSettingsPolicy
         settings.WeatherSkin = value == SettingsService.WeatherSkinRich
             ? SettingsService.WeatherSkinRich
             : SettingsService.WeatherSkinStandard;
+    }
+
+    internal static void SetIconStyle(AppSettings settings, string value)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        settings.WeatherIconStyle = WeatherOptionKinds.NormalizeIconStyle(value);
     }
 
     internal static void SetRefreshInterval(AppSettings settings, int minutes)

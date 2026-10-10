@@ -333,24 +333,6 @@ public sealed partial class TodoWidgetViewModel
         return addedCount;
     }
 
-    public async Task<TodoAttachmentViewModel?> AddAttachmentStreamAsync(
-        string itemId,
-        Stream stream,
-        string? fileName)
-    {
-        TodoItemViewModel? item = FindItem(itemId);
-        if (item is null)
-        {
-            return null;
-        }
-
-        TodoAttachment? attachment = await AttachmentStorageService.SaveStreamAsync(
-            stream,
-            fileName,
-            GetManagedAttachmentDirectory(itemId));
-        return attachment is null ? null : await AddAttachmentAsync(item, attachment);
-    }
-
     private async Task<TodoAttachmentViewModel?> AddAttachmentAsync(
         TodoItemViewModel item,
         TodoAttachment attachment)

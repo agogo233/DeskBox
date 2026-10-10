@@ -1,4 +1,4 @@
-﻿using System.Text.RegularExpressions;
+using System.Text.RegularExpressions;
 using System.Xml.Linq;
 
 namespace DeskBox.Tests;
@@ -1352,7 +1352,7 @@ public sealed class FileSurfaceParityContractTests
     }
 
     [Fact]
-    public void ManagedShortcutDrag_PrefersMoveButAllowsSafeInternalLink()
+    public void FileDrag_UsesStartDragAsyncWithUnpreferredCopyMove()
     {
         string root = FindRepositoryRoot();
         XDocument document = XDocument.Load(Path.Combine(
@@ -1361,25 +1361,68 @@ public sealed class FileSurfaceParityContractTests
         string source = File.ReadAllText(Path.Combine(
             root,
             "src/DeskBox/Controls/WidgetContents/FileSurfaceContent.xaml.cs"));
+        string packageSource = File.ReadAllText(Path.Combine(
+            root,
+            "src/DeskBox/Controls/FileItemDragPackage.cs"));
 
+        // ListViewBase.CanDragItems is intentionally off: it never publishes
+        // AllowedOperations, so the external mask and the preferred operation
+        // stay glued to RequestedOperation — the coupling that made Windows 10
+        // Explorer ask which operation to run. Container-level CanDrag starts
+        // StartDragAsync, which carries both settings separately.
         XElement[] itemViews = document
             .Descendants()
             .Where(element =>
                 element.Name.LocalName is "GridView" or "ListView" &&
-                (string?)element.Attribute("CanDragItems") == "True")
+                (string?)element.Attribute("ContainerContentChanging") ==
+                    "ItemsView_ContainerContentChanging")
             .ToArray();
-
         Assert.Equal(2, itemViews.Length);
-        Assert.All(itemViews, view => Assert.Equal(
-            "Items_DragStarting",
-            (string?)view.Attribute("DragStarting")));
+        Assert.All(itemViews, view =>
+        {
+            Assert.Null(view.Attribute("CanDragItems"));
+            // DragStarting/DropCompleted are not routed events in WinUI 3:
+            // they must be wired per item container, not on the view.
+            Assert.Null(view.Attribute("DragStarting"));
+            Assert.Null(view.Attribute("DropCompleted"));
+        });
+
+        XNamespace xamlNs = "http://schemas.microsoft.com/winfx/2006/xaml";
+        foreach (string styleKey in
+                 new[] { "SurfaceGridViewItemStyle", "SurfaceListViewItemStyle" })
+        {
+            XElement style = document
+                .Descendants()
+                .Single(element =>
+                    element.Name.LocalName == "Style" &&
+                    (string?)element.Attribute(xamlNs + "Key") == styleKey);
+            Assert.Contains(
+                style.Elements().Where(element =>
+                    element.Name.LocalName == "Setter"),
+                setter =>
+                    (string?)setter.Attribute("Property") == "CanDrag" &&
+                    (string?)setter.Attribute("Value") == "True");
+        }
+
         Assert.Contains(
-            "FileItemDragPackage.SupportedOperations",
+            "args.ItemContainer.DragStarting += Items_DragStarting;",
             source,
             StringComparison.Ordinal);
         Assert.Contains(
-            "FileItemDragPackage.ResolveSupportedOperations(",
+            "args.ItemContainer.DropCompleted += Items_DropCompleted;",
             source,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "e.AllowedOperations = FileItemDragPackage.ResolveDragOutAllowedOperations(",
+            source,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "DataPackageOperation.Copy | DataPackageOperation.Move",
+            packageSource,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "RequestedOperation = DataPackageOperation.None",
+            packageSource,
             StringComparison.Ordinal);
         Assert.Contains(
             "DeskBoxDragData.DragSessionIdProperty",
@@ -1389,15 +1432,6 @@ public sealed class FileSurfaceParityContractTests
             "CanReuseDragPayloadSnapshot(",
             source,
             StringComparison.Ordinal);
-        int allowedOperationsIndex = source.IndexOf(
-            "e.AllowedOperations = FileItemDragPackage.SupportedOperations;",
-            StringComparison.Ordinal);
-        Assert.True(allowedOperationsIndex >= 0);
-        int sourcePathGuardIndex = source.IndexOf(
-            "if (sourcePaths.Length > 0)",
-            allowedOperationsIndex,
-            StringComparison.Ordinal);
-        Assert.True(sourcePathGuardIndex > allowedOperationsIndex);
         Assert.DoesNotContain(
             "CompleteVirtualShortcutDesktopMoveAsync",
             source,
@@ -1406,16 +1440,24 @@ public sealed class FileSurfaceParityContractTests
             "MoveRejectedManagedDragToDesktopAsync",
             source,
             StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "ExplorerDropTargetResolver",
+            source,
+            StringComparison.Ordinal);
         Assert.Contains(
             "ObserveExternalDragOutAsync",
             source,
             StringComparison.Ordinal);
         Assert.Contains(
-            "ShouldObserveExternalDragOut(",
+            "ResolveExternalDragObservation(",
             source,
             StringComparison.Ordinal);
         Assert.Contains(
-            "return !fromStackPopover &&",
+            "ExternalDragObservation.Brief",
+            source,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "SuppressDraggedArrivals",
             source,
             StringComparison.Ordinal);
     }
@@ -1912,7 +1954,7 @@ public sealed class FileSurfaceParityContractTests
         // widget must open the file with the linked application, exactly like
         // an Explorer drag does. WinUI does not deliver the routed Drop for a
         // drag that started from the same ListView, so the release is resolved
-        // from DragItemsCompleted through the shared policy - and the accepted
+        // from DropCompleted through the shared policy - and the accepted
         // link result is what makes the source keep its files.
         string root = FindRepositoryRoot();
         string visuals = File.ReadAllText(Path.Combine(

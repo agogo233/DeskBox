@@ -15,10 +15,9 @@ using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
 using Windows.ApplicationModel.DataTransfer;
+using Microsoft.Windows.Storage.Pickers;
 using Windows.Storage;
-using Windows.Storage.Pickers;
 using Windows.UI;
-using WinRT.Interop;
 
 namespace DeskBox.Controls.WidgetContents;
 
@@ -1601,20 +1600,19 @@ public sealed partial class QuickCaptureSurfaceContent :
 
         try
         {
-            var picker = new FileOpenPicker
-            {
-                SuggestedStartLocation = PickerLocationId.Desktop
-            };
-            picker.FileTypeFilter.Add("*");
             IntPtr foreground = Win32Helper.GetForegroundWindow();
             IntPtr owner = Win32Helper.GetAncestor(foreground, Win32Helper.GA_ROOT);
-            InitializeWithWindow.Initialize(
-                picker,
-                owner == IntPtr.Zero ? foreground : owner);
-            IReadOnlyList<StorageFile> files = await picker.PickMultipleFilesAsync();
+            IReadOnlyList<string> files =
+                await FileOpenPickerService.PickMultipleFilesAsync(
+                    owner == IntPtr.Zero ? foreground : owner,
+                    [],
+                    PickerLocationId.Desktop);
             DroppedFilePath[] paths = files
-                .Where(file => !string.IsNullOrWhiteSpace(file.Path) && File.Exists(file.Path))
-                .Select(file => new DroppedFilePath(file.Path, file.Name, ForceManagedCopy: false))
+                .Where(path => !string.IsNullOrWhiteSpace(path) && File.Exists(path))
+                .Select(path => new DroppedFilePath(
+                    path,
+                    Path.GetFileName(path),
+                    ForceManagedCopy: false))
                 .ToArray();
             if (paths.Length == 0)
             {
@@ -2228,9 +2226,10 @@ public sealed partial class QuickCaptureSurfaceContent :
         // fixed-size array before DragItemsCompleted is raised. Item-row drop
         // handlers persist the requested position instead.
         ItemsList.CanReorderItems = false;
-        e.Data.RequestedOperation =
-            DataPackageOperation.Copy |
-            DataPackageOperation.Move;
+        // Export drags are copy-only: advertising Move would let a Win10
+        // Explorer drop physically move the backing attachment file out of
+        // quick-capture storage, and multi-effect offers prompt the picker.
+        e.Data.RequestedOperation = DataPackageOperation.Copy;
     }
 
     private void ItemsList_DragItemsCompleted(
@@ -2252,7 +2251,9 @@ public sealed partial class QuickCaptureSurfaceContent :
         }
 
         e.Handled = true;
-        e.AcceptedOperation = DataPackageOperation.Move;
+        e.AcceptedOperation =
+            DeskBoxDragData.ResolveInternalMetadataOperation(
+                e.AllowedOperations);
         e.DragUIOverride.IsGlyphVisible = true;
     }
 
@@ -2485,7 +2486,9 @@ public sealed partial class QuickCaptureSurfaceContent :
         {
             bool hasFiles = DeskBoxDragData.HasDroppedFiles(e.DataView);
             e.AcceptedOperation = hasFiles
-                ? DeskBoxDragData.GetFileAssociationOperation(e.DataView)
+                ? DeskBoxDragData.GetFileAssociationOperation(
+                    e.DataView,
+                    e.AllowedOperations)
                 : DataPackageOperation.Copy;
             if (hasFiles)
             {
@@ -2575,7 +2578,9 @@ public sealed partial class QuickCaptureSurfaceContent :
 
             bool insertAfter = e.GetPosition(border).Y >= border.ActualHeight / 2;
             e.Handled = true;
-            e.AcceptedOperation = DataPackageOperation.Move;
+            e.AcceptedOperation =
+                DeskBoxDragData.ResolveInternalMetadataOperation(
+                    e.AllowedOperations);
             e.DragUIOverride.IsGlyphVisible = true;
             ApplyQuickCaptureReorderDropState(border, active: true, insertAfter);
             return;
@@ -2588,7 +2593,9 @@ public sealed partial class QuickCaptureSurfaceContent :
 
         e.Handled = true;
         e.AcceptedOperation =
-            DeskBoxDragData.GetFileAssociationOperation(e.DataView);
+            DeskBoxDragData.GetFileAssociationOperation(
+                e.DataView,
+                e.AllowedOperations);
         ApplyFileAssociationDragFeedback(e);
         ApplyQuickCaptureItemDropState(border, active: true);
     }

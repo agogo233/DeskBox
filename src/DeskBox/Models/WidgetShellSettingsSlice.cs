@@ -72,9 +72,16 @@ public sealed class WidgetShellSettingsSlice
 
     /// <summary>
     /// Easing intensity for animations.
-    /// Valid values: <c>"None"</c>, <c>"Light"</c>, <c>"Standard"</c>, <c>"Strong"</c>.
+    /// Valid values: <c>"None"</c>, <c>"Light"</c>, <c>"Standard"</c>, <c>"Strong"</c>, <c>"Spring"</c>.
     /// </summary>
     public string WidgetAnimationEasingIntensity { get; set; } = "Standard";
+
+    /// <summary>
+    /// When enabled, batch show/hide animations stagger each widget window
+    /// with a short per-window delay (top-left first) instead of moving the
+    /// whole group in lockstep.
+    /// </summary>
+    public bool WidgetAnimationStaggerEnabled { get; set; }
 
     /// <summary>
     /// Window layer behavior for desktop widgets.
@@ -260,4 +267,42 @@ public sealed class WidgetShellSettingsSlice
     /// Smaller values place items closer together vertically.
     /// </summary>
     public double VerticalSpacingScale { get; set; } = 0.60;
+
+    /// <summary>
+    /// Global widget background mode.
+    /// Valid values: <c>"Material"</c>, <c>"UnifiedImage"</c>, <c>"Panorama"</c>.
+    /// Null follows <c>"Material"</c>; per-widget background images always win
+    /// over the global mode.
+    /// </summary>
+    public string? WidgetBackgroundMode { get; set; }
+
+    /// <summary>
+    /// File name of the shared unified background image inside
+    /// <c>data/widget-assets/shared/</c>; only used in UnifiedImage mode.
+    /// </summary>
+    public string? WidgetBackgroundUnifiedImage { get; set; }
+
+    /// <summary>
+    /// File name of the shared panorama image inside
+    /// <c>data/widget-assets/shared/</c>; only used in Panorama mode.
+    /// </summary>
+    public string? WidgetBackgroundPanoramaImage { get; set; }
+
+    /// <summary>
+    /// Global scrim strength over image backgrounds, 0-100. Null follows the
+    /// 35 default; per-widget dim overrides win.
+    /// </summary>
+    public double? WidgetBackgroundDim { get; set; }
+
+    /// <summary>
+    /// Fit for the unified background image.
+    /// Valid values: <c>"Fill"</c>, <c>"Contain"</c>. Null follows Fill.
+    /// </summary>
+    public string? WidgetBackgroundUnifiedFit { get; set; }
+
+    /// <summary>
+    /// Dual-layer text shadow behind widget titles and file names (the
+    /// Windows-native DrawShadowText look). Default off.
+    /// </summary>
+    public bool WidgetTextShadowEnabled { get; set; }
 }

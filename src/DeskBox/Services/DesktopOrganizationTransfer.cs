@@ -48,3 +48,7 @@ public sealed class DesktopOrganizationInsufficientSpaceException(string driveNa
 {
     public string DriveName { get; } = driveName;
 }
+
+/// <summary>Surfaced verbatim in the UI; the generic failure text would hide the cause.</summary>
+public sealed class DesktopOrganizationInvalidStorageRootException(string message)
+    : InvalidOperationException(message);

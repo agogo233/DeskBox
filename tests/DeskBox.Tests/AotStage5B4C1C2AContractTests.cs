@@ -49,7 +49,9 @@ public sealed class AotStage5B4C1C2AContractTests
         Assert.Contains("bool? copyWhenMapped = null", surface, StringComparison.Ordinal);
         Assert.Contains("copyWhenMapped switch", surface, StringComparison.Ordinal);
         Assert.Contains("FileDropIntentPolicy.ResolveMappedTransfer(", surface, StringComparison.Ordinal);
-        Assert.Contains("bool? moveWhenMapped = mapped", surface, StringComparison.Ordinal);
+        // The move/copy decision honors explicit modifiers even before the
+        // widget has a managed folder (the import creates one on demand).
+        Assert.Contains("ResolveMoveWhenMapped(", surface, StringComparison.Ordinal);
     }
 
     [Fact]

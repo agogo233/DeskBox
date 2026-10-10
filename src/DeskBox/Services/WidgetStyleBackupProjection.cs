@@ -56,6 +56,7 @@ internal static class WidgetStyleBackupProjection
         "widgetCornerPreference",
         "widgetAnimationEffect", "widgetAnimationSpeed",
         "widgetAnimationSlideDirection", "widgetAnimationEasingIntensity",
+        "widgetAnimationStaggerEnabled",
         "displayWidgetChromeMode", "interactiveWidgetChromeMode",
         "widgetTitleIconMode", "showHoverButtons", "widgetHoverButtonActions",
         // Compact-state appearance only — never its geometry or triggers.

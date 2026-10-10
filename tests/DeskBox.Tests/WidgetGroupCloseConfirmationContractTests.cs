@@ -9,10 +9,14 @@ public sealed class WidgetGroupCloseConfirmationContractTests
             "src/DeskBox/Views/ContentWidgetWindow.Commands.cs"));
 
         Assert.Equal(
-            3,
+            6,
             CountOccurrences(
                 source,
                 "AcquireCloseWidgetFlyoutHandoff();"));
+        // The fourth acquire is the foreground color picker chain, the fifth
+        // is the title-icon customizer chain, and the sixth is the background
+        // customizer chain; all hold the same handoff across the
+        // menu-to-flyout transition.
         Assert.Equal(
             2,
             CountOccurrences(

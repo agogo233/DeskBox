@@ -117,12 +117,12 @@
             </InfoBar>
             <InfoBar x:Name="ResultInfo" IsClosable="True" IsOpen="False" />
             <InfoBar x:Name="RecoveryInfo" IsClosable="False" Severity="Warning" IsOpen="False">
+                <!-- A single inline hyperlink stays on one line in the content
+                     region, so it cannot collide with the action slot; the
+                     ActionButton slot itself only accepts one ButtonBase. -->
                 <InfoBar.Content>
-                    <StackPanel Orientation="Horizontal" Spacing="16">
-                        <TextBlock x:Name="RecoveryInfoText" TextWrapping="Wrap" VerticalAlignment="Center" />
-                        <HyperlinkButton x:Name="AbandonRecoveryButton" Click="AbandonRecoveryButton_Click"
-                                         VerticalAlignment="Center" Padding="0" />
-                    </StackPanel>
+                    <HyperlinkButton x:Name="AbandonRecoveryButton" Click="AbandonRecoveryButton_Click"
+                                     VerticalAlignment="Center" Padding="0" />
                 </InfoBar.Content>
                 <InfoBar.ActionButton>
                     <Button x:Name="RecoverButton" Click="RecoverButton_Click" />

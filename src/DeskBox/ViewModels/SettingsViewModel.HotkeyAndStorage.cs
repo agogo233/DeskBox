@@ -15,12 +15,6 @@ namespace DeskBox.ViewModels;
 
 public partial class SettingsViewModel
 {
-    public GlobalHotkeyGesture GetCurrentGlobalHotkeyGesture()
-    {
-        var settings = _settingsService.Settings;
-        return GlobalHotkeyService.NormalizeGesture(settings.GlobalHotkeyModifiers, settings.GlobalHotkeyKey);
-    }
-
     public GlobalHotkeyActivation GetCurrentGlobalHotkeyActivation()
     {
         var settings = _settingsService.Settings;

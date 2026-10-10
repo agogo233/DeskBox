@@ -31,27 +31,6 @@ public sealed class QuickCaptureMaterialRefreshContractTests
             StringComparison.Ordinal);
     }
 
-    [Fact]
-    public void LegacyWindow_RefreshesMaterialAfterModelRefresh()
-    {
-        string root = FindRepositoryRoot();
-        string windowCode = File.ReadAllText(Path.Combine(
-            root,
-            "src/DeskBox/Views/QuickCaptureWidgetWindow.xaml.cs"));
-        string menuCode = File.ReadAllText(Path.Combine(
-            root,
-            "src/DeskBox/Views/QuickCaptureWidgetWindow.Menus.cs"));
-
-        Assert.Contains(
-            "DispatcherQueue.TryEnqueue(RefreshItemMaterialSurfaces)",
-            windowCode,
-            StringComparison.Ordinal);
-        Assert.Contains(
-            "await ViewModel.RefreshItemsAsync()",
-            menuCode,
-            StringComparison.Ordinal);
-    }
-
     private static string FindRepositoryRoot()
     {
         DirectoryInfo? current = new(AppContext.BaseDirectory);

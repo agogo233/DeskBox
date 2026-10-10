@@ -50,12 +50,12 @@ public sealed class WidgetMetadataKeysContractTests
     public void QuickCaptureMasterPaneWidth_DeclaredExactlyOnce()
     {
         // The literal used to be declared privately in both
-        // QuickCaptureSurfaceContent and the dead QuickCaptureWidgetWindow;
-        // both now consume the registry constant.
+        // QuickCaptureSurfaceContent and the now-deleted standalone
+        // QuickCaptureWidgetWindow; the surviving surface consumes the
+        // registry constant.
         string[] consumers =
         [
             "src/DeskBox/Controls/WidgetContents/QuickCaptureSurfaceContent.xaml.cs",
-            "src/DeskBox/Views/QuickCaptureWidgetWindow.ResponsiveDetail.cs",
         ];
 
         foreach (string consumer in consumers)

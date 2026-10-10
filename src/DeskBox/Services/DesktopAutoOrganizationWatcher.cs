@@ -6,7 +6,6 @@ namespace DeskBox.Services;
 
 public sealed class DesktopAutoOrganizationWatcher : IDisposable
 {
-    private static readonly TimeSpan SettleDelay = TimeSpan.FromSeconds(3);
     private static readonly TimeSpan StabilityProbeDelay = TimeSpan.FromMilliseconds(800);
     private static readonly TimeSpan ActivityBurstWindow = TimeSpan.FromSeconds(8);
     private static readonly TimeSpan ActivityQuietDelay = TimeSpan.FromSeconds(4);
@@ -482,7 +481,17 @@ public sealed class DesktopAutoOrganizationWatcher : IDisposable
             return;
         }
 
-        StartProcessing(_states.BeginPending(fullPath, preserveRetryAttempts));
+        DesktopAutoOrganizationWorkItem workItem =
+            _states.BeginPending(fullPath, preserveRetryAttempts);
+        // The configured wait replaces the old settle grace, so it must not
+        // consume the transient-failure retry budget.
+        if (_states.MarkDeferred(
+                workItem,
+                _utcNow().Add(DesktopAutoOrganizationPolicy.GetDelay(_settingsService.Settings)),
+                countAttempt: false))
+        {
+            SignalRetryPump();
+        }
     }
 
     private void StartProcessing(DesktopAutoOrganizationWorkItem workItem)
@@ -506,7 +515,6 @@ public sealed class DesktopAutoOrganizationWatcher : IDisposable
         bool moveSucceeded = false;
         try
         {
-            await _delayAsync(SettleDelay, cancellationToken);
             await WaitForDirectoryQuietAsync(workItem.Path, cancellationToken);
             if (_disposed ||
                 !_settingsService.Settings.DesktopAutoOrganizationEnabled ||

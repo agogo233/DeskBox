@@ -138,18 +138,19 @@ internal static class ShortcutLaunchPolicy
     /// launch. WinUI does not deliver the routed <c>Drop</c> event to the item
     /// surface for a drag that started from the same ListView - measured
     /// 2026-09-12: the pointer hovers a shortcut tile with the drop accepted,
-    /// then the release only raises <c>DragItemsCompleted</c> on the source.
+    /// then the release only raises <c>DropCompleted</c> on the source.
     /// The release therefore falls back to that completion: the drop stays a
     /// launch when the surface did not take the gesture and the pointer was
     /// still inside the shortcut tile's icon (live geometry, not a recorded
     /// point - the reorder preview can recycle containers under the pointer).
     ///
     /// <paramref name="dropResult"/> is deliberately not compared against a
-    /// single value: a tile that accepted an internal drag reports whatever the
-    /// source's operation set allowed (Move here), while a surface that took the
-    /// drag itself reports its own reorder operation. The hovered-tile and
-    /// pointer facts are what decide, because the hover is only ever recorded
-    /// while a shortcut tile is the active child drop target.
+    /// single value: an in-app report for an internal file drag is normalized
+    /// to Copy (<c>ResolveFileDragFeedbackOperation</c>) while a surface that
+    /// took the drag itself reports its own reorder operation. The
+    /// hovered-tile and pointer facts are what decide, because the hover is
+    /// only ever recorded while a shortcut tile is the active child drop
+    /// target.
     /// </summary>
     internal static bool ShouldLaunchFromCompletedInternalDrag(
         DataPackageOperation dropResult,

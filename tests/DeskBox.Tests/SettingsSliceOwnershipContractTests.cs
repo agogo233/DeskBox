@@ -39,7 +39,9 @@ public sealed class SettingsSliceOwnershipContractTests
     [Fact]
     public void EveryFacadeProperty_MapsToExactlyOneSliceProperty()
     {
-        Assert.Equal(220, FacadeProperties.Length);
+        // 237 = batch-51 level (236) plus widgetGroupSwitchAnimationStyle
+        // (group member-switch transition style).
+        Assert.Equal(237, FacadeProperties.Length);
 
         foreach (PropertyInfo facade in FacadeProperties)
         {
@@ -162,6 +164,8 @@ public sealed class SettingsSliceOwnershipContractTests
             return 17;
         if (type == typeof(double))
             return 0.137;
+        if (type == typeof(double?))
+            return 0.137;
         if (type == typeof(long))
             return 638000000000000000L;
         if (type == typeof(DateTimeOffset?))
@@ -268,28 +272,33 @@ public sealed class SettingsSliceOwnershipContractTests
         ["src/DeskBox/Services/SearchEngineService.cs"] = 7,
         ["src/DeskBox/Services/SearchHotkeyService.cs"] = 12,
         ["src/DeskBox/Services/SearchResultActionService.cs"] = 2,
-        ["src/DeskBox/Services/SettingsMigrationService.cs"] = 35,
-        ["src/DeskBox/Services/SettingsSearchCatalog.cs"] = 20,
-        ["src/DeskBox/Services/SettingsService.cs"] = 594,
+        ["src/DeskBox/Services/SettingsMigrationService.cs"] = 55,
+        ["src/DeskBox/Services/SettingsSearchCatalog.cs"] = 23,
+        ["src/DeskBox/Services/SettingsService.cs"] = 613,
         ["src/DeskBox/Services/ThemeService.cs"] = 11,
+        ["src/DeskBox/Views/SettingsSections/DisplaySettingsSection.xaml.cs"] = 14,
         ["src/DeskBox/Services/TodoReminderService.cs"] = 8,
         ["src/DeskBox/Services/WeatherService.cs"] = 1,
-        ["src/DeskBox/Services/WeatherSettingsPolicy.cs"] = 17,
+        ["src/DeskBox/Services/WeatherSettingsPolicy.cs"] = 18,
         ["src/DeskBox/Services/WidgetAnimationSettings.cs"] = 4,
         ["src/DeskBox/Services/WidgetChromeMenuBuilder.cs"] = 5,
         ["src/DeskBox/Services/WidgetChromeModeResolver.cs"] = 2,
         ["src/DeskBox/Services/WidgetForegroundSettings.cs"] = 8,
         ["src/DeskBox/Services/WidgetGroupMenuBuilder.cs"] = 1,
         ["src/DeskBox/Services/WidgetGroupSettings.cs"] = 19,
+        ["src/DeskBox/Services/WidgetManager.NewWidgetPlacement.cs"] = 4,
+        ["src/DeskBox/Services/DisplayIdentityTokens.cs"] = 2,
+        ["src/DeskBox/Services/WidgetManager.MoveAll.cs"] = 9,
+        ["src/DeskBox/Services/WidgetManager.ScreenHome.cs"] = 2,
         ["src/DeskBox/Services/WidgetManager.CapsuleArrangement.cs"] = 45,
         ["src/DeskBox/Services/WidgetManager.FeatureWidgets.cs"] = 50,
         ["src/DeskBox/Services/WidgetManager.Groups.cs"] = 55,
         ["src/DeskBox/Services/WidgetManager.Storage.cs"] = 20,
         ["src/DeskBox/Services/WidgetManager.Surfaces.cs"] = 1,
-        ["src/DeskBox/Services/WidgetManager.TrayAnimation.cs"] = 3,
-        ["src/DeskBox/Services/WidgetManager.cs"] = 27,
+        ["src/DeskBox/Services/WidgetManager.TrayAnimation.cs"] = 4,
+        ["src/DeskBox/Services/WidgetManager.cs"] = 31,
         ["src/DeskBox/Services/WidgetStartupRestorePolicy.cs"] = 2,
-        ["src/DeskBox/Services/WidgetTopologyLayoutService.cs"] = 22,
+        ["src/DeskBox/Services/WidgetTopologyLayoutService.cs"] = 23,
         ["src/DeskBox/ViewModels/GlanceWidgetViewModel.cs"] = 4,
         ["src/DeskBox/ViewModels/MusicWidgetViewModel.Lifecycle.cs"] = 1,
         ["src/DeskBox/ViewModels/MusicWidgetViewModel.cs"] = 5,
@@ -351,14 +360,14 @@ public sealed class SettingsSliceOwnershipContractTests
         ["src/DeskBox/ViewModels/SettingsViewModel.GroupNavigation.cs"] = 15,
         ["src/DeskBox/ViewModels/SettingsViewModel.HotkeyAndStorage.cs"] = 6,
         ["src/DeskBox/ViewModels/SettingsViewModel.RuntimeDiagnostics.cs"] = 1,
-        ["src/DeskBox/ViewModels/SettingsViewModel.SettingsSync.cs"] = 6,
-        ["src/DeskBox/ViewModels/SettingsViewModel.cs"] = 14,
+        ["src/DeskBox/ViewModels/SettingsViewModel.SettingsSync.cs"] = 7,
+        ["src/DeskBox/ViewModels/SettingsViewModel.cs"] = 15,
         ["src/DeskBox/ViewModels/TodoWidgetViewModel.DetailAndAttachments.cs"] = 1,
         ["src/DeskBox/ViewModels/TodoWidgetViewModel.FilteringAndAppearance.cs"] = 21,
         ["src/DeskBox/ViewModels/TodoWidgetViewModel.cs"] = 12,
         ["src/DeskBox/ViewModels/WeatherWidgetViewModel.DataProcessing.cs"] = 21,
         ["src/DeskBox/ViewModels/WeatherWidgetViewModel.RefreshAndLayout.cs"] = 1,
-        ["src/DeskBox/ViewModels/WeatherWidgetViewModel.cs"] = 22,
+        ["src/DeskBox/ViewModels/WeatherWidgetViewModel.cs"] = 24,
         ["src/DeskBox/ViewModels/WidgetViewModel.ItemHydration.cs"] = 3,
         ["src/DeskBox/ViewModels/WidgetViewModel.LayoutAndSettings.cs"] = 17,
         ["src/DeskBox/ViewModels/WidgetViewModel.Operations.cs"] = 2,
@@ -370,20 +379,8 @@ public sealed class SettingsSliceOwnershipContractTests
         ["src/DeskBox/Views/ContentWidgetWindow.QuickCapture.cs"] = 1,
         ["src/DeskBox/Views/ContentWidgetWindow.TrayAnimations.cs"] = 4,
         ["src/DeskBox/Views/ContentWidgetWindow.xaml.cs"] = 16,
-        ["src/DeskBox/Views/OnboardingWindow.Appearance.cs"] = 10,
-        ["src/DeskBox/Views/OnboardingWindow.Completion.cs"] = 5,
-        ["src/DeskBox/Views/OnboardingWindow.DesktopOrganization.cs"] = 1,
-        ["src/DeskBox/Views/OnboardingWindow.Features.cs"] = 1,
-        ["src/DeskBox/Views/OnboardingWindow.Hotkey.cs"] = 15,
-        ["src/DeskBox/Views/OnboardingWindow.Storage.cs"] = 5,
-        ["src/DeskBox/Views/OnboardingWindow.TaskFlow.cs"] = 5,
+        ["src/DeskBox/Views/OnboardingWindow.Steps.cs"] = 3,
         ["src/DeskBox/Views/OnboardingWindow.xaml.cs"] = 4,
-        ["src/DeskBox/Views/QuickCaptureWidgetWindow.Appearance.cs"] = 3,
-        ["src/DeskBox/Views/QuickCaptureWidgetWindow.Detail.cs"] = 2,
-        ["src/DeskBox/Views/QuickCaptureWidgetWindow.Editing.cs"] = 1,
-        ["src/DeskBox/Views/QuickCaptureWidgetWindow.Menus.cs"] = 2,
-        ["src/DeskBox/Views/QuickCaptureWidgetWindow.ResponsiveDetail.cs"] = 2,
-        ["src/DeskBox/Views/QuickCaptureWidgetWindow.xaml.cs"] = 12,
         ["src/DeskBox/Views/SearchPopupWindow.xaml.cs"] = 22,
         ["src/DeskBox/Views/SettingsSections/DesktopOrganizationSettingsSection.xaml.cs"] = 22,
         ["src/DeskBox/Views/SettingsWindow.HotkeyAndAppearance.cs"] = 4,

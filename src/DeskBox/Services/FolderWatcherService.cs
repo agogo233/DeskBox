@@ -143,7 +143,6 @@ public sealed class FolderWatcherService : IDisposable
         ReconnectCount,
         LastEventAt,
         _lastError);
-    public FolderWatcherHealthSnapshot HealthSnapshot => Health;
 
     public FolderWatcherService(DispatcherQueue dispatcherQueue)
     {

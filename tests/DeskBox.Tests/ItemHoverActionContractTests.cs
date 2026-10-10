@@ -44,18 +44,9 @@ public sealed class ItemHoverActionContractTests
         string surfaceXaml = File.ReadAllText(Path.Combine(
             root,
             "src/DeskBox/Controls/WidgetContents/QuickCaptureSurfaceContent.xaml"));
-        string legacyXaml = File.ReadAllText(Path.Combine(
-            root,
-            "src/DeskBox/Views/QuickCaptureWidgetWindow.xaml"));
         string surfaceCode = File.ReadAllText(Path.Combine(
             root,
             "src/DeskBox/Controls/WidgetContents/QuickCaptureSurfaceContent.xaml.cs"));
-        string legacyCode = string.Join(
-            Environment.NewLine,
-            "Detail.cs ItemActions.cs Menus.cs ResponsiveDetail.cs".Split(' ')
-                .Select(file => File.ReadAllText(Path.Combine(
-                    root,
-                    "src/DeskBox/Views/QuickCaptureWidgetWindow." + file))));
 
         Assert.Contains("x:Class=\"DeskBox.Controls.PinStateIcon\"", pinControlXaml, StringComparison.Ordinal);
         Assert.Contains("L8.4,15.5 L7.6,15.5", pinControlXaml, StringComparison.Ordinal);
@@ -64,15 +55,11 @@ public sealed class ItemHoverActionContractTests
         Assert.Contains("public bool IsPinned", pinControlCode, StringComparison.Ordinal);
         Assert.Contains("controls:PinStateIcon", surfaceXaml, StringComparison.Ordinal);
         Assert.Contains("IsPinned=\"{Binding IsPinned}\"", surfaceXaml, StringComparison.Ordinal);
-        Assert.Contains("controls:PinStateIcon", legacyXaml, StringComparison.Ordinal);
         Assert.DoesNotContain("E841", surfaceCode, StringComparison.Ordinal);
-        Assert.DoesNotContain("E841", legacyCode, StringComparison.Ordinal);
         Assert.Contains("QuickCapture.PinnedSuccess", surfaceCode, StringComparison.Ordinal);
         Assert.Contains("QuickCapture.UnpinnedSuccess", surfaceCode, StringComparison.Ordinal);
         Assert.Contains("QuickCapture.Copied", surfaceCode, StringComparison.Ordinal);
         Assert.Contains("QuickCapture.Saved", surfaceCode, StringComparison.Ordinal);
-        Assert.Contains("QuickCapture.UnpinnedSuccess", legacyCode, StringComparison.Ordinal);
-        Assert.Contains("QuickCapture.Saved", legacyCode, StringComparison.Ordinal);
     }
 
     [Fact]

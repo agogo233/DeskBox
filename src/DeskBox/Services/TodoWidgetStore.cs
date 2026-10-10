@@ -60,13 +60,25 @@ public sealed class TodoWidgetStore
             nameof(TodoWidgetStore));
     }
 
-    public async Task SaveAsync(TodoWidgetData data)
+    public Task SaveAsync(TodoWidgetData data)
     {
         data = Normalize(data);
-        string json = JsonSerializer.Serialize(
-            data,
-            TodoJsonContext.Default.StoreData);
-        await ResilientJsonStore.SaveAsync(_storePath, json);
+        // Stream the UTF-8 directly into the temp file instead of paying the
+        // transient whole-document string on every save.
+        return ResilientJsonStore.SaveAsync(
+            _storePath,
+            async tempPath =>
+            {
+                await using var stream = new FileStream(
+                    tempPath,
+                    FileMode.Create,
+                    FileAccess.Write,
+                    FileShare.None);
+                await JsonSerializer.SerializeAsync(
+                    stream,
+                    data,
+                    TodoJsonContext.Default.StoreData);
+            });
     }
 
     private static TodoWidgetData Normalize(TodoWidgetData? data)

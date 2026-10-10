@@ -18,7 +18,8 @@ internal enum ShortcutTargetStatus
 
 internal readonly record struct ShortcutTargetProbeResult(
     ShortcutTargetKind Kind,
-    ShortcutTargetStatus Status)
+    ShortcutTargetStatus Status,
+    bool TargetIsDirectory)
 {
     internal bool IsBroken => Status == ShortcutTargetStatus.Missing;
 }
@@ -38,14 +39,16 @@ internal static class ShortcutTargetProbe
         {
             return new(
                 ShortcutTargetKind.Unknown,
-                ShortcutTargetStatus.Missing);
+                ShortcutTargetStatus.Missing,
+                TargetIsDirectory: false);
         }
 
         if (string.IsNullOrWhiteSpace(targetPath))
         {
             return new(
                 ShortcutTargetKind.UriOrShellNamespace,
-                ShortcutTargetStatus.Unverifiable);
+                ShortcutTargetStatus.Unverifiable,
+                TargetIsDirectory: false);
         }
 
         string expandedTarget;
@@ -58,27 +61,32 @@ internal static class ShortcutTargetProbe
         {
             return new(
                 ShortcutTargetKind.Unknown,
-                ShortcutTargetStatus.Unverifiable);
+                ShortcutTargetStatus.Unverifiable,
+                TargetIsDirectory: false);
         }
 
         ShortcutTargetKind kind = Classify(expandedTarget);
         if (kind is ShortcutTargetKind.Unc or ShortcutTargetKind.NetworkDrive or
             ShortcutTargetKind.UriOrShellNamespace or ShortcutTargetKind.Unknown)
         {
-            return new(kind, ShortcutTargetStatus.Unverifiable);
+            return new(kind, ShortcutTargetStatus.Unverifiable, TargetIsDirectory: false);
         }
 
         try
         {
+            // Directory existence doubles as the dispatch hint (#459): a
+            // shortcut to a local folder must use the default verb.
+            bool targetIsDirectory = Directory.Exists(expandedTarget);
             return new(
                 kind,
-                File.Exists(expandedTarget) || Directory.Exists(expandedTarget)
+                File.Exists(expandedTarget) || targetIsDirectory
                     ? ShortcutTargetStatus.Existing
-                    : ShortcutTargetStatus.Missing);
+                    : ShortcutTargetStatus.Missing,
+                targetIsDirectory);
         }
         catch
         {
-            return new(kind, ShortcutTargetStatus.Unverifiable);
+            return new(kind, ShortcutTargetStatus.Unverifiable, TargetIsDirectory: false);
         }
     }
 

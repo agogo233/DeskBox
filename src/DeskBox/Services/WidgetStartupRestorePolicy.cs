@@ -9,6 +9,25 @@ namespace DeskBox.Services;
 /// </summary>
 internal static class WidgetStartupRestorePolicy
 {
+    /// <summary>
+    /// Decides whether the restored widgets stay hidden once startup has
+    /// created them. The quick-reveal layer already keeps the desktop clean
+    /// until the first reveal; the silent-startup preference opts every
+    /// layer mode into that same behavior. Returns the diagnostics reason
+    /// for the hide, or null when the widgets should show immediately.
+    /// </summary>
+    public static string? GetStartupHideReason(bool usesQuickRevealLayer, AppSettings settings)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+
+        if (usesQuickRevealLayer)
+        {
+            return "quick-reveal-layer";
+        }
+
+        return settings.Core.SilentStartup ? "silent-startup" : null;
+    }
+
     public static IReadOnlyList<WidgetConfig> SelectEnabledWidgets(
         AppSettings settings,
         Func<string, bool> isDeleted)

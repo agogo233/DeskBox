@@ -1,4 +1,3 @@
-using DeskBox.Helpers;
 using DeskBox.Services;
 using DeskBox.ViewModels;
 using System.Globalization;
@@ -8,19 +7,6 @@ namespace DeskBox.Tests;
 
 public sealed class WeatherWidgetViewModelTests
 {
-    [Theory]
-    [InlineData(0, true, "\u2600\uFE0F")]
-    [InlineData(0, false, "\U0001F319")]
-    [InlineData(45, true, "\u2601\uFE0F")]
-    [InlineData(48, true, "\u2601\uFE0F")]
-    public void WeatherEmoji_UsesUnboxedIcons(
-        int weatherCode,
-        bool isDay,
-        string expectedEmoji)
-    {
-        Assert.Equal(expectedEmoji, WeatherCodeMapper.GetEmoji(weatherCode, isDay));
-    }
-
     [Fact]
     public void WeatherTextBlocks_DoNotUseUnreadableFixedFontSizes()
     {

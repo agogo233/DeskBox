@@ -468,21 +468,6 @@ public sealed partial class GlanceWidgetViewModel : ObservableObject, IDisposabl
         }
     }
 
-    public async Task OpenCurrentImageContextAsync()
-    {
-        GlanceImageInfo? image = CurrentImage;
-        if (Uri.TryCreate(image?.SourcePageUrl, UriKind.Absolute, out Uri? uri))
-        {
-            await Launcher.LaunchUriAsync(uri);
-            return;
-        }
-
-        if (!string.IsNullOrWhiteSpace(image?.LocalPath) && File.Exists(image.LocalPath))
-        {
-            Win32Helper.ShowInExplorer(image.LocalPath);
-        }
-    }
-
     public Task SetDisplayElementAsync(
         GlanceDisplayElement element,
         bool isVisible)

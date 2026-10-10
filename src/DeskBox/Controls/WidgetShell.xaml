@@ -5,6 +5,7 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:controls="using:DeskBox.Controls"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:helpers="using:DeskBox.Helpers"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     xmlns:widgetContents="using:DeskBox.Controls.WidgetContents"
     Foreground="{ThemeResource TextFillColorPrimaryBrush}"
@@ -42,7 +43,33 @@
             x:Name="BackgroundPlate"
             Grid.RowSpan="2"
             BorderThickness="0"
-            CornerRadius="0" />
+            CornerRadius="0">
+            <Grid IsHitTestVisible="False">
+                <!-- Solid per-widget color sits at the bottom of the custom
+                     stack (above the material, below any image); the scrim
+                     only tames photos, never the user's chosen color. -->
+                <Border
+                    x:Name="CustomBackgroundColorLayer"
+                    Visibility="Collapsed" />
+                <Grid x:Name="CustomBackgroundPanoramaHost" Visibility="Collapsed">
+                    <Image
+                        x:Name="CustomBackgroundPanoramaImage"
+                        HorizontalAlignment="Left"
+                        VerticalAlignment="Top"
+                        Stretch="Fill" />
+                </Grid>
+                <Image
+                    x:Name="CustomBackgroundImage"
+                    Stretch="UniformToFill"
+                    Visibility="Collapsed" />
+                <!-- Theme-aware scrim (dark/light from code) keeps the widget
+                     content readable over the user's image. -->
+                <Border
+                    x:Name="CustomBackgroundScrim"
+                    Background="Black"
+                    Visibility="Collapsed" />
+            </Grid>
+        </Border>
 
         <Grid
             x:Name="TitleBarGrid"
@@ -78,17 +105,21 @@
                     <controls:WidgetTitleIcon
                         x:Name="TitleIcon"
                         AccentColor="{x:Bind TitleIconAccentColor, Mode=OneWay}"
+                        CustomEmoji="{x:Bind TitleIconCustomEmoji, Mode=OneWay}"
+                        CustomImageSource="{x:Bind TitleIconCustomSource, Mode=OneWay}"
                         Glyph="{x:Bind TitleGlyph, Mode=OneWay}"
                         IconSize="{Binding TitleIconSize}"
                         IconKind="{x:Bind TitleIconKind, Mode=OneWay}"
                         LabelText="{Binding DisplayName}"
                         Mode="{x:Bind TitleIconMode, Mode=OneWay}" />
-                    <TextBlock
-                        x:Name="TitleText"
-                        FontSize="{Binding TitleTextSize}"
-                        Text="{Binding DisplayName}"
-                        TextTrimming="CharacterEllipsis"
-                        VerticalAlignment="Center" />
+                    <Grid>
+                        <TextBlock
+                            x:Name="TitleText"
+                            FontSize="{Binding TitleTextSize}"
+                            Text="{Binding DisplayName}"
+                            TextTrimming="CharacterEllipsis"
+                            VerticalAlignment="Center" />
+                    </Grid>
                     <ContentPresenter
                         x:Name="TitleEditorPresenter"
                         Content="{x:Bind TitleEditorContent, Mode=OneWay}"
@@ -379,17 +410,21 @@
                         HorizontalAlignment="Center"
                         VerticalAlignment="Center"
                         AccentColor="{x:Bind TitleIconAccentColor, Mode=OneWay}"
+                        CustomEmoji="{x:Bind TitleIconCustomEmoji, Mode=OneWay}"
+                        CustomImageSource="{x:Bind TitleIconCustomSource, Mode=OneWay}"
                         Glyph="{x:Bind TitleGlyph, Mode=OneWay}"
                         IconSize="14"
                         IconKind="{x:Bind TitleIconKind, Mode=OneWay}"
                         LabelText="{x:Bind OverlayTitle, Mode=OneWay}" />
-                    <TextBlock
-                        x:Name="CompactEmojiIcon"
+                    <Image
+                        x:Name="CompactIconImage"
+                        Width="22"
+                        Height="22"
                         HorizontalAlignment="Center"
                         VerticalAlignment="Center"
-                        FontSize="15"
                         Visibility="Collapsed"
-                        IsHitTestVisible="False" />
+                        IsHitTestVisible="False"
+                        Stretch="Uniform" />
                     <Border
                         x:Name="CompactThumbnailHost"
                         Width="28"
@@ -790,6 +825,8 @@
                     <controls:WidgetTitleIcon
                         x:Name="OverlayTitleIcon"
                         AccentColor="{x:Bind TitleIconAccentColor, Mode=OneWay}"
+                        CustomEmoji="{x:Bind TitleIconCustomEmoji, Mode=OneWay}"
+                        CustomImageSource="{x:Bind TitleIconCustomSource, Mode=OneWay}"
                         Glyph="{x:Bind TitleGlyph, Mode=OneWay}"
                         IconSize="12"
                         IconKind="{x:Bind TitleIconKind, Mode=OneWay}"
@@ -819,7 +856,6 @@
                 Opacity="0"
                 PointerCaptureLost="OverlayDragHandle_PointerCaptureLost"
                 PointerEntered="OverlayDragHandle_PointerEntered"
-                PointerExited="OverlayDragHandle_PointerExited"
                 PointerMoved="OverlayDragHandle_PointerMoved"
                 PointerPressed="OverlayDragHandle_PointerPressed"
                 PointerReleased="OverlayDragHandle_PointerReleased">

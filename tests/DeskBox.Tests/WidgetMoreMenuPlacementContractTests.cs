@@ -62,9 +62,6 @@ public sealed class WidgetMoreMenuPlacementContractTests
         AssertMenuConsumer(
             "src/DeskBox/Views/ContentWidgetWindow.Commands.cs",
             "ShowFlyoutWithInteraction");
-        AssertMenuConsumer(
-            "src/DeskBox/Views/QuickCaptureWidgetWindow.Menus.cs",
-            "ShowFlyoutWithElevation");
     }
 
     private static void AssertMenuConsumer(string relativePath, string showMethod)

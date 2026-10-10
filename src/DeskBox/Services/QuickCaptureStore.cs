@@ -59,13 +59,27 @@ public sealed class QuickCaptureStore
             nameof(QuickCaptureStore));
     }
 
-    public async Task SaveAsync(QuickCaptureStoreData data)
+    public Task SaveAsync(QuickCaptureStoreData data)
     {
         data = Normalize(data);
-        string json = JsonSerializer.Serialize(
-            data,
-            QuickCaptureJsonContext.Default.StoreData);
-        await ResilientJsonStore.SaveAsync(_storePath, json);
+        // Stream the UTF-8 directly into the temp file: materializing the
+        // whole document as a string first doubles the transient footprint
+        // on every save, and quick-capture autosave fires while the user
+        // keeps typing.
+        return ResilientJsonStore.SaveAsync(
+            _storePath,
+            async tempPath =>
+            {
+                await using var stream = new FileStream(
+                    tempPath,
+                    FileMode.Create,
+                    FileAccess.Write,
+                    FileShare.None);
+                await JsonSerializer.SerializeAsync(
+                    stream,
+                    data,
+                    QuickCaptureJsonContext.Default.StoreData);
+            });
     }
 
     private static QuickCaptureStoreData Normalize(QuickCaptureStoreData? data)

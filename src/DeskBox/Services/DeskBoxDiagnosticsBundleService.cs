@@ -136,7 +136,8 @@ public sealed record DeskBoxDiagnosticSnapshot(
     DeskBoxShortcutNativeDiagnostic ShortcutNative,
     AppRuntimeHealthSnapshot? RuntimeHealth,
     DeskBoxWidgetManagerDiagnostic WidgetManager,
-    IReadOnlyList<DeskBoxDisplayDiagnostic> Displays);
+    IReadOnlyList<DeskBoxDisplayDiagnostic> Displays,
+    ManagedStorageMigrationDiagnostic? StorageMigration = null);
 
 [JsonSourceGenerationOptions(
     GenerationMode = JsonSourceGenerationMode.Metadata,
@@ -187,6 +188,9 @@ public sealed partial class DeskBoxDiagnosticsBundleService
 
     [GeneratedRegex(@"\bS-1-(?:\d+-){1,14}\d+\b", RegexOptions.IgnoreCase)]
     private static partial Regex SecurityIdentifierRegex();
+
+    [GeneratedRegex(@"^0x[0-9a-f]{1,8}[.,;:)]?$", RegexOptions.IgnoreCase)]
+    private static partial Regex HexErrorCodeValueRegex();
 
     public async Task<string> ExportAsync(
         string destinationDirectory,
@@ -242,9 +246,15 @@ public sealed partial class DeskBoxDiagnosticsBundleService
 
         string sanitized = SensitiveAssignmentRegex().Replace(
             value,
-            match => bool.TryParse(match.Groups["value"].Value, out _)
-                ? match.Value
-                : $"{match.Groups[1].Value}=<REDACTED>");
+            match =>
+            {
+                string raw = match.Groups["value"].Value;
+                // The key keywords substring-match unrelated keys ("executeHr" contains
+                // "exe"), but HRESULT hex values carry no user data, so keep them.
+                return bool.TryParse(raw, out _) || HexErrorCodeValueRegex().IsMatch(raw)
+                    ? match.Value
+                    : $"{match.Groups[1].Value}=<REDACTED>";
+            });
         sanitized = QuotedWindowsPathRegex().Replace(sanitized, "'<PATH>'");
         sanitized = UnquotedWindowsPathRegex().Replace(sanitized, "<PATH>");
         sanitized = EmailRegex().Replace(sanitized, "<EMAIL>");

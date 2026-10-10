@@ -10,7 +10,10 @@ namespace DeskBox.Services;
 /// <summary>
 /// Distinguishes Explorer's blank desktop surface from desktop icons. The
 /// list-view hit test uses memory allocated in Explorer because LVM_HITTEST
-/// contains a process-local pointer and is not marshalled by USER32.
+/// contains a process-local pointer and is not marshalled by USER32. Class
+/// matches are additionally restricted to the shell process: the same window
+/// classes also appear inside third-party applications, and their blank areas
+/// must not trigger desktop gestures.
 /// </summary>
 internal static partial class DesktopBlankHitTest
 {
@@ -56,14 +59,78 @@ internal static partial class DesktopBlankHitTest
             if (string.Equals(className, "Progman", StringComparison.Ordinal) ||
                 string.Equals(className, "WorkerW", StringComparison.Ordinal))
             {
-                return true;
+                return IsDesktopHostWindow(current);
             }
 
             current = Win32Helper.GetParent(current);
         }
 
         return listView != IntPtr.Zero &&
+               IsShellDesktopListView(listView) &&
                IsBlankListViewPoint(listView, screenPoint);
+    }
+
+    /// <summary>
+    /// Confirms a SysListView32 window belongs to the shell process. The class
+    /// name alone is not proof: third-party applications host the same
+    /// list-view class, so their blank areas would be mistaken for the
+    /// desktop. Process ids are compared instead of process names because a
+    /// replacement shell keeps its identity in the window registered via
+    /// GetShellWindow. The class-only verdict is retained while Explorer is
+    /// restarting and GetShellWindow temporarily returns zero.
+    /// </summary>
+    internal static bool IsShellDesktopListView(IntPtr listView)
+    {
+        if (listView == IntPtr.Zero)
+        {
+            return false;
+        }
+
+        IntPtr shellWindow = Win32Helper.GetShellWindow();
+        if (shellWindow == IntPtr.Zero)
+        {
+            return true;
+        }
+
+        Win32Helper.GetWindowThreadProcessId(shellWindow, out uint shellProcessId);
+        Win32Helper.GetWindowThreadProcessId(listView, out uint listProcessId);
+        return shellProcessId == 0 ||
+               listProcessId == 0 ||
+               shellProcessId == listProcessId;
+    }
+
+    /// <summary>
+    /// Confirms a Progman/WorkerW window in the ancestor chain belongs to the
+    /// shell-owned desktop surface. Windows hosts that surface on a mix of
+    /// Progman and top-level WorkerW windows, and wallpaper engines parent
+    /// their content into it from a separate process, so the process id of the
+    /// root window is compared with the shell window's instead of the hit
+    /// window's own: content parented into the desktop stays part of it while
+    /// third-party WorkerW windows outside the shell process are rejected.
+    /// The class-only verdict is retained while Explorer is restarting and
+    /// GetShellWindow temporarily returns zero.
+    /// </summary>
+    internal static bool IsDesktopHostWindow(IntPtr window)
+    {
+        if (window == IntPtr.Zero)
+        {
+            return false;
+        }
+
+        IntPtr shellWindow = Win32Helper.GetShellWindow();
+        if (shellWindow == IntPtr.Zero)
+        {
+            return true;
+        }
+
+        IntPtr root = Win32Helper.GetAncestor(window, Win32Helper.GA_ROOT);
+        Win32Helper.GetWindowThreadProcessId(shellWindow, out uint shellProcessId);
+        Win32Helper.GetWindowThreadProcessId(
+            root == IntPtr.Zero ? window : root,
+            out uint rootProcessId);
+        return shellProcessId == 0 ||
+               rootProcessId == 0 ||
+               shellProcessId == rootProcessId;
     }
 
     private static bool IsBlankListViewPoint(

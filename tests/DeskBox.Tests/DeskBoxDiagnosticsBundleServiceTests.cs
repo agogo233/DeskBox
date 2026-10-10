@@ -107,6 +107,33 @@ public sealed class DeskBoxDiagnosticsBundleServiceTests : IDisposable
         Assert.Equal("path=<REDACTED> ready=True", sanitized);
     }
 
+    [Fact]
+    public void SanitizeLog_PreservesHResultHexValuesOnKeywordCollidingKeys()
+    {
+        string source =
+            "[OpenFile] backend=explorer-hosted implementation=IExplorerShellLaunch " +
+            "path='C:\\Users\\secret\\file.txt' applicationHr=0x00000000 executeHr=0x800704CF";
+
+        string sanitized = DeskBoxDiagnosticsBundleService.SanitizeLog(source);
+
+        Assert.Contains("applicationHr=0x00000000", sanitized, StringComparison.Ordinal);
+        Assert.Contains("executeHr=0x800704CF", sanitized, StringComparison.Ordinal);
+        Assert.DoesNotContain("secret", sanitized, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void SanitizeLog_PreservesExecuteHResultWithTrailingPeriod()
+    {
+        string source =
+            "Native Explorer-shell launch failed: status=Failed, HRESULT=0x80004005, " +
+            "execute=0x80004005.";
+
+        string sanitized = DeskBoxDiagnosticsBundleService.SanitizeLog(source);
+
+        Assert.Contains("HRESULT=0x80004005", sanitized, StringComparison.Ordinal);
+        Assert.Contains("execute=0x80004005.", sanitized, StringComparison.Ordinal);
+    }
+
     private static DeskBoxDiagnosticSnapshot CreateSnapshot()
     {
         return new DeskBoxDiagnosticSnapshot(

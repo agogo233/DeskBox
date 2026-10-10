@@ -90,7 +90,8 @@ public sealed class AppearanceSettingsCoordinator : IAppearanceSettings
             WidgetAnimationKinds.NormalizeSlideDirection(
                 shell.WidgetAnimationSlideDirection),
             WidgetAnimationKinds.NormalizeEasingIntensity(
-                shell.WidgetAnimationEasingIntensity));
+                shell.WidgetAnimationEasingIntensity),
+            shell.WidgetAnimationStaggerEnabled);
     }
 
     public AppearanceForegroundSettings ReadForeground()
@@ -328,6 +329,136 @@ public sealed class AppearanceSettingsCoordinator : IAppearanceSettings
         _settings.SaveDebounced();
     }
 
+    public AppearanceWidgetBackgroundSettings ReadWidgetBackground()
+    {
+        WidgetShellSettingsSlice shell = _settings.Settings.WidgetShell;
+        return new(
+            WidgetBackgroundModeKinds.Normalize(shell.WidgetBackgroundMode),
+            shell.WidgetBackgroundUnifiedImage,
+            shell.WidgetBackgroundPanoramaImage,
+            shell.WidgetBackgroundDim ?? WidgetBackgroundCustomization.DefaultDimPercent,
+            WidgetBackgroundCustomization.NormalizeFit(shell.WidgetBackgroundUnifiedFit));
+    }
+
+    public void SetWidgetBackgroundMode(string? mode)
+    {
+        ThrowIfStopped();
+        string normalized = WidgetBackgroundModeKinds.Normalize(mode);
+        WidgetShellSettingsSlice shell = _settings.Settings.WidgetShell;
+        string? stored = normalized == WidgetBackgroundModeKinds.Material ? null : normalized;
+        if (shell.WidgetBackgroundMode == stored)
+        {
+            return;
+        }
+
+        shell.WidgetBackgroundMode = stored;
+        // Background changes repaint every widget, so preview like the
+        // material switch and debounce the save.
+        _settings.RequestAppearancePreview();
+        _settings.SaveDebounced();
+    }
+
+    public void SetWidgetBackgroundUnifiedImage(string? fileName)
+    {
+        ThrowIfStopped();
+        WidgetShellSettingsSlice shell = _settings.Settings.WidgetShell;
+        if (shell.WidgetBackgroundUnifiedImage == fileName) return;
+        shell.WidgetBackgroundUnifiedImage = fileName;
+        _settings.RequestAppearancePreview();
+        _settings.SaveDebounced();
+    }
+
+    public void SetWidgetBackgroundPanoramaImage(string? fileName)
+    {
+        ThrowIfStopped();
+        WidgetShellSettingsSlice shell = _settings.Settings.WidgetShell;
+        if (shell.WidgetBackgroundPanoramaImage == fileName) return;
+        shell.WidgetBackgroundPanoramaImage = fileName;
+        _settings.RequestAppearancePreview();
+        _settings.SaveDebounced();
+    }
+
+    public void SetWidgetBackgroundUnifiedFit(string? fit)
+    {
+        ThrowIfStopped();
+        string normalized = WidgetBackgroundCustomization.NormalizeFit(fit);
+        WidgetShellSettingsSlice shell = _settings.Settings.WidgetShell;
+        string? stored = normalized == WidgetBackgroundCustomization.FitFill ? null : normalized;
+        if (shell.WidgetBackgroundUnifiedFit == stored) return;
+        shell.WidgetBackgroundUnifiedFit = stored;
+        _settings.RequestAppearancePreview();
+        _settings.SaveDebounced();
+    }
+
+    public AppearanceValueUpdate UpdateWidgetBackgroundDim(double percent)
+    {
+        ThrowIfStopped();
+        double normalized = Math.Clamp(
+            double.IsFinite(percent) ? percent : WidgetBackgroundCustomization.DefaultDimPercent,
+            WidgetBackgroundCustomization.MinDimPercent,
+            WidgetBackgroundCustomization.MaxDimPercent);
+        WidgetShellSettingsSlice shell = _settings.Settings.WidgetShell;
+        if (Math.Abs((shell.WidgetBackgroundDim ?? WidgetBackgroundCustomization.DefaultDimPercent) - normalized) < 0.0001)
+        {
+            return AppearanceValueUpdate.CommittedValue(normalized);
+        }
+
+        shell.WidgetBackgroundDim = normalized;
+        _settings.RequestAppearancePreview();
+        _settings.SaveDebounced();
+        return AppearanceValueUpdate.CommittedValue(normalized);
+    }
+
+    /// <summary>
+    /// Removes every per-widget background override (metadata plus stored
+    /// asset files) so all widgets follow the global background mode again.
+    /// </summary>
+    public bool ReadWidgetTextShadowEnabled()
+    {
+        return _settings.Settings.WidgetShell.WidgetTextShadowEnabled;
+    }
+
+    public void SetWidgetTextShadowEnabled(bool enabled)
+    {
+        ThrowIfStopped();
+        WidgetShellSettingsSlice shell = _settings.Settings.WidgetShell;
+        if (shell.WidgetTextShadowEnabled == enabled) return;
+        shell.WidgetTextShadowEnabled = enabled;
+        _settings.RequestAppearancePreview();
+        _settings.SaveDebounced();
+    }
+
+    public int ClearPerWidgetBackgrounds()
+    {
+        ThrowIfStopped();
+        int cleared = 0;
+        foreach (WidgetConfig widget in _settings.Settings.WidgetLayout.Widgets)
+        {
+            string? fileName = WidgetBackgroundCustomization.GetImageFileNameOverride(widget);
+            if (fileName is null &&
+                WidgetBackgroundCustomization.GetColorOverride(widget) is null)
+            {
+                continue;
+            }
+
+            WidgetBackgroundCustomization.Clear(widget);
+            if (fileName is not null)
+            {
+                WidgetTitleIconAssetStore.Current.DeleteImage(widget.Id, fileName);
+            }
+
+            cleared++;
+        }
+
+        if (cleared > 0)
+        {
+            _settings.RequestAppearancePreview();
+            _settings.SaveDebounced(notifySubscribers: true);
+        }
+
+        return cleared;
+    }
+
     public void SetFileNameLineCount(int lineCount)
     {
         ThrowIfStopped();
@@ -485,6 +616,19 @@ public sealed class AppearanceSettingsCoordinator : IAppearanceSettings
         }
 
         shell.WidgetAnimationEasingIntensity = normalized;
+        if (scheduleSave) _settings.SaveDebounced();
+    }
+
+    public void SetAnimationStaggerEnabled(bool enabled, bool scheduleSave = true)
+    {
+        ThrowIfStopped();
+        WidgetShellSettingsSlice shell = _settings.Settings.WidgetShell;
+        if (shell.WidgetAnimationStaggerEnabled == enabled)
+        {
+            return;
+        }
+
+        shell.WidgetAnimationStaggerEnabled = enabled;
         if (scheduleSave) _settings.SaveDebounced();
     }
 

@@ -119,29 +119,4 @@ public sealed class SearchResultActionService
             return false;
         }
     }
-
-    /// <summary>
-    /// Whether the given result can be attached to a todo (requires an existing file
-    /// and at least one enabled Todo widget).
-    /// </summary>
-    public bool CanAttachToTodo(SearchResultItem? item)
-    {
-        return item is not null &&
-               item.Kind == SearchResultKind.File &&
-               !string.IsNullOrWhiteSpace(item.DetailPath) &&
-               File.Exists(item.DetailPath) &&
-               _settingsService.Settings.Widgets
-                   .Any(w => w.WidgetKind == WidgetKind.Todo && !w.IsDisabled);
-    }
-
-    /// <summary>
-    /// Whether the given result can be saved as a note (requires an existing file).
-    /// </summary>
-    public bool CanSaveToNote(SearchResultItem? item)
-    {
-        return item is not null &&
-               item.Kind == SearchResultKind.File &&
-               !string.IsNullOrWhiteSpace(item.DetailPath) &&
-               File.Exists(item.DetailPath);
-    }
 }

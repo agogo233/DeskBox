@@ -404,7 +404,7 @@ public sealed class DesktopOrganizationTests : IDisposable
         Assert.All(progressValues, value => Assert.Equal(2, value.TotalCount));
         Assert.All(progressValues, value => Assert.False(string.IsNullOrWhiteSpace(value.TargetDisplayName)));
 
-        var organizer = new OrganizerService(settings, fileService, () => desktop);
+        var organizer = TestOrganizerServices.Create(settings, fileService, () => desktop);
         await organizer.UndoAsync(result.History.Id);
 
         Assert.True(File.Exists(sourceOne));
@@ -553,7 +553,7 @@ public sealed class DesktopOrganizationTests : IDisposable
         Assert.False(Directory.Exists(sourceFolder));
         Assert.True(File.Exists(Path.Combine(destinationFolder, "readme.txt")));
 
-        await new OrganizerService(settings, fileService, () => desktop)
+        await TestOrganizerServices.Create(settings, fileService, () => desktop)
             .UndoAsync(result.History.Id);
 
         Assert.True(File.Exists(Path.Combine(sourceFolder, "readme.txt")));
@@ -784,7 +784,7 @@ public sealed class DesktopOrganizationTests : IDisposable
         history.Items[0].RestoredPath = firstSource;
         await settings.SaveAsync(notifySubscribers: false);
 
-        var service = new OrganizerService(
+        var service = TestOrganizerServices.Create(
             settings,
             new FileService(),
             () => desktopPath);

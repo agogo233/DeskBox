@@ -53,7 +53,7 @@ public sealed class LocalizationServiceLanguageTests
 
         Assert.Equal(language, localization.CurrentCultureName);
         Assert.Equal(apiCode, localization.ApiLanguageCode);
-        Assert.NotEqual("Onboarding.Task.Step1.Title", localization.T("Onboarding.Task.Step1.Title"));
+        Assert.NotEqual("Onboarding.Step1.Title", localization.T("Onboarding.Step1.Title"));
         Assert.NotEqual("Common.Paste", localization.T("Common.Paste"));
     }
 

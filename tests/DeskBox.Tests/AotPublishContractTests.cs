@@ -212,7 +212,7 @@ public sealed class AotPublishContractTests
         using JsonDocument globalJson = JsonDocument.Parse(
             File.ReadAllText(TestPaths.FromRepository("global.json")));
         JsonElement sdk = globalJson.RootElement.GetProperty("sdk");
-        Assert.Equal("10.0.303", sdk.GetProperty("version").GetString());
+        Assert.Equal("10.0.401", sdk.GetProperty("version").GetString());
         Assert.Equal("latestPatch", sdk.GetProperty("rollForward").GetString());
 
         string rustToolchain = File.ReadAllText(TestPaths.FromRepository("rust-toolchain.toml"));
@@ -544,7 +544,7 @@ public sealed class AotPublishContractTests
 
     [Theory]
     [InlineData("src/DeskBox/ViewModels/SearchPopupViewModel.cs", 15)]
-    [InlineData("src/DeskBox/ViewModels/SettingsViewModel.cs", 14)]
+    [InlineData("src/DeskBox/ViewModels/SettingsViewModel.cs", 15)]
     public void AotSensitiveViewModels_UseObservablePartialProperties(
         string relativePath,
         int expectedCount)

@@ -625,7 +625,7 @@ public sealed partial class SearchPopupWindow : Window
             return;
         }
 
-        if (!TryBeginWindowInteraction(element, e.Pointer))
+        if (!TryBeginWindowInteraction(element, e))
         {
             return;
         }
@@ -650,7 +650,7 @@ public sealed partial class SearchPopupWindow : Window
         }
 
         string direction = element.Tag as string ?? string.Empty;
-        if (string.IsNullOrEmpty(direction) || !TryBeginWindowInteraction(element, e.Pointer))
+        if (string.IsNullOrEmpty(direction) || !TryBeginWindowInteraction(element, e))
         {
             return;
         }
@@ -660,10 +660,11 @@ public sealed partial class SearchPopupWindow : Window
         e.Handled = true;
     }
 
-    private bool TryBeginWindowInteraction(FrameworkElement element, Pointer pointer)
+    private bool TryBeginWindowInteraction(FrameworkElement element, PointerRoutedEventArgs e)
     {
-        if (!Win32Helper.GetCursorPos(out _interactionStartCursor) ||
-            !Win32Helper.GetWindowRect(_hwnd, out var rect))
+        bool anchored = Win32Helper.TryGetPointerScreenPoint(_hwnd, Content, e, out _interactionStartCursor) ||
+            Win32Helper.GetCursorPos(out _interactionStartCursor);
+        if (!anchored || !Win32Helper.GetWindowRect(_hwnd, out var rect))
         {
             return false;
         }
@@ -674,7 +675,7 @@ public sealed partial class SearchPopupWindow : Window
             rect.Right - rect.Left,
             rect.Bottom - rect.Top);
         _windowInteractionElement = element;
-        if (!element.CapturePointer(pointer))
+        if (!element.CapturePointer(e.Pointer))
         {
             _windowInteractionElement = null;
             return false;
@@ -685,8 +686,13 @@ public sealed partial class SearchPopupWindow : Window
 
     private void WindowInteraction_PointerMoved(object sender, PointerRoutedEventArgs e)
     {
-        if ((!_isWindowDragging && !_isWindowResizing) || _appWindow is null ||
-            !Win32Helper.GetCursorPos(out var cursor))
+        if ((!_isWindowDragging && !_isWindowResizing) || _appWindow is null)
+        {
+            return;
+        }
+
+        if (!Win32Helper.TryGetPointerScreenPoint(_hwnd, Content, e, out var cursor) &&
+            !Win32Helper.GetCursorPos(out cursor))
         {
             return;
         }
@@ -1290,6 +1296,7 @@ public sealed partial class SearchPopupWindow : Window
         ToolTipService.SetToolTip(ClosePopupButton, _localizationService.T("Search.Close"));
         NoResultsTitle.Text = _localizationService.T("Search.NoResults.Title");
         NoResultsSubtitle.Text = _localizationService.T("Search.NoResults.Subtitle");
+        NoResultsEverythingHint.Text = _localizationService.T("Search.NoResults.EverythingHint");
         EmptyTabHintText.Text = _localizationService.T("Search.Tab.Empty");
 
         OpenSettingsLabel.Text = _localizationService.T("Search.Action.OpenSettings");
@@ -1692,6 +1699,16 @@ public sealed partial class SearchPopupWindow : Window
         NoResultsPanel.Visibility = hasQuery && !searching && !hasResults
             ? Visibility.Visible
             : Visibility.Collapsed;
+
+        // File-name search is fully delegated to Everything and requires the
+        // user's opt-in. When nothing matched and that provider is not
+        // connected, say so instead of leaving an unexplained empty state
+        // (feedback 291).
+        NoResultsEverythingHint.Visibility =
+            NoResultsPanel.Visibility == Visibility.Visible &&
+            _viewModel.IsFileSearchProviderUnavailable
+                ? Visibility.Visible
+                : Visibility.Collapsed;
 
         bool showResults = hasQuery && hasResults && tabHasItems;
         ResultsPanel.Visibility = showResults ? Visibility.Visible : Visibility.Collapsed;
@@ -2132,38 +2149,6 @@ public sealed partial class SearchPopupWindow : Window
         _selectedAppIndex = -1;
     }
 
-    /// <summary>
-    /// Animates the recommended-apps panel with a smooth fade-in + slide-up.
-    /// Uses Composition API for GPU-accelerated rendering.
-    /// </summary>
-    private void AnimateRecommendedAppsIn()
-    {
-        var visual = ElementCompositionPreview.GetElementVisual(RecommendedAppsPanel);
-        if (visual is null) return;
-
-        ElementCompositionPreview.SetIsTranslationEnabled(RecommendedAppsPanel, true);
-
-        var compositor = visual.Compositor;
-        var easing = compositor.CreateCubicBezierEasingFunction(
-            new System.Numerics.Vector2(0.0f, 0.0f),
-            new System.Numerics.Vector2(0.1f, 1.0f));
-
-        // Fade in: 0 → 1
-        var opacityAnim = compositor.CreateScalarKeyFrameAnimation();
-        opacityAnim.InsertKeyFrame(0f, 0f);
-        opacityAnim.InsertKeyFrame(1f, 1f, easing);
-        opacityAnim.Duration = TimeSpan.FromMilliseconds(250);
-
-        // Slide up: 16px → 0
-        var translateAnim = compositor.CreateScalarKeyFrameAnimation();
-        translateAnim.InsertKeyFrame(0f, 16f);
-        translateAnim.InsertKeyFrame(1f, 0f, easing);
-        translateAnim.Duration = TimeSpan.FromMilliseconds(250);
-
-        visual.StartAnimation("Opacity", opacityAnim);
-        visual.StartAnimation("Translation.Y", translateAnim);
-    }
-
     // ── Skeleton screen ─────────────────────────────────────────────────────────
 
     private async Task ShowAppsSkeletonAfterDelayAsync(
@@ -2486,13 +2471,6 @@ public sealed partial class SearchPopupWindow : Window
 
     private Microsoft.UI.Xaml.Media.Brush? ResolveThemeBrush(string key) =>
         NeutralInteractionBrush.ResolveThemedResource(key, RootGrid);
-
-    // ── Legacy: kept for compatibility ──
-
-    private void RecommendedAppButton_Click(object sender, RoutedEventArgs e)
-    {
-        // Replaced by PointerPressed/DoubleTapped handlers.
-    }
 
     private void RecommendedAppsPanel_RightTapped(object sender, RightTappedRoutedEventArgs e)
     {
@@ -2817,7 +2795,14 @@ public sealed partial class SearchPopupWindow : Window
                 args.Data.Properties.Title = draggedPaths.Length == 1
                     ? item.Title
                     : draggedPaths.Length.ToString();
-                args.Data.RequestedOperation = DataPackageOperation.Copy;
+                // AllowedOperations carries the capability set; keeping
+                // RequestedOperation at None means no preferred-operation
+                // flag reaches Explorer, which is what made Windows 10 show
+                // an operation picker on every drop. The payload is broker
+                // StorageItems (not the native Shell object), so Copy stays
+                // the ceiling — Move could authorize source deletion.
+                args.AllowedOperations = DataPackageOperation.Copy;
+                args.Data.RequestedOperation = DataPackageOperation.None;
                 if (draggedPaths.Length == 1)
                 {
                     await SetDragPayloadAsync(args.Data, draggedPaths[0]);

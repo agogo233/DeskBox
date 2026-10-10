@@ -33,7 +33,7 @@ public partial class App
             ShortcutNativeBackend.CaptureDiagnosticState();
 
         return new DeskBoxDiagnosticSnapshot(
-            SchemaVersion: 5,
+            SchemaVersion: 6,
             GeneratedAtUtc: DateTimeOffset.UtcNow,
             AppVersion: GetDiagnosticVersion(),
             DistributionChannel: DistributionService.ChannelName,
@@ -77,7 +77,8 @@ public partial class App
                 shortcutNative.Capabilities),
             RuntimeHealth: runtimeHealth,
             WidgetManager: widgetManager,
-            Displays: displays);
+            Displays: displays,
+            StorageMigration: WidgetManager?.StorageMigrationDiagnostic);
     }
 
     private static IReadOnlyList<DeskBoxDisplayDiagnostic> GetDisplayDiagnostics()

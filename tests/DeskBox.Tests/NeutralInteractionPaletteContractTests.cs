@@ -17,7 +17,7 @@ public sealed class NeutralInteractionPaletteContractTests
     {
         string visuals = Read("src/DeskBox/Controls/WidgetContents/FileSurfaceContent.ItemVisuals.cs");
         string todo = Read("src/DeskBox/Controls/WidgetContents/TodoWidgetContent.EditingAndUndo.cs");
-        string quickCapture = Read("src/DeskBox/Views/QuickCaptureWidgetWindow.Appearance.cs");
+        string quickCapture = Read("src/DeskBox/Controls/WidgetContents/QuickCaptureSurfaceContent.xaml.cs");
         string search = Read("src/DeskBox/Views/SearchPopupWindow.xaml");
 
         Assert.Contains("NeutralInteractionBrush.Fill(", visuals, StringComparison.Ordinal);
@@ -41,7 +41,6 @@ public sealed class NeutralInteractionPaletteContractTests
         string surface = Read("src/DeskBox/Controls/WidgetContents/FileSurfaceContent.xaml.cs");
         string todo = Read("src/DeskBox/Controls/WidgetContents/TodoWidgetContent.DragDrop.cs");
         string quickCapture = Read("src/DeskBox/Controls/WidgetContents/QuickCaptureSurfaceContent.xaml.cs");
-        string quickCaptureWindow = Read("src/DeskBox/Views/QuickCaptureWidgetWindow.ItemActions.cs");
         string stackPopover = Read("src/DeskBox/Controls/WidgetContents/FileSurfaceContent.StackPopover.cs");
 
         string reorderDrop = MethodBody(todo, "void ApplyTodoReorderDropState(");
@@ -57,10 +56,6 @@ public sealed class NeutralInteractionPaletteContractTests
         Assert.DoesNotContain("GetEffectiveAccentColor", quickCaptureItem, StringComparison.Ordinal);
         // The previous fallback was a hardcoded accent blue, not a neutral.
         Assert.DoesNotContain("0x78, 0x9E, 0xFF", quickCaptureItem, StringComparison.Ordinal);
-
-        string quickCaptureWindowReorder = MethodBody(quickCaptureWindow, "void SetItemReorderDropState(");
-        Assert.Contains("NeutralInteractionBrush.Line(", quickCaptureWindowReorder, StringComparison.Ordinal);
-        Assert.DoesNotContain("GetEffectiveAccentColor", quickCaptureWindowReorder, StringComparison.Ordinal);
 
         // The file surface keeps the accent for import progress only.
         string accentVisuals = MethodBody(surface, "private void ApplyAccentVisuals()");
@@ -81,7 +76,6 @@ public sealed class NeutralInteractionPaletteContractTests
     public void HoverAndSelectionStates_DrawFromTheNeutralPalette()
     {
         string todo = Read("src/DeskBox/Controls/WidgetContents/TodoWidgetContent.EditingAndUndo.cs");
-        string quickCaptureWindow = Read("src/DeskBox/Views/QuickCaptureWidgetWindow.ItemActions.cs");
         string titleSwitcher = Read("src/DeskBox/Controls/WidgetGroupTitleSwitcher.xaml.cs");
         string styleCache = Read("src/DeskBox/Controls/FileItemSurfaceStyleCache.cs");
         string groupDrop = Read("src/DeskBox/Controls/WidgetShell.xaml.cs");
@@ -89,10 +83,6 @@ public sealed class NeutralInteractionPaletteContractTests
         string todoHover = MethodBody(todo, "void SetTodoItemHoverState(");
         Assert.Contains("NeutralInteractionBrush.Fill(", todoHover, StringComparison.Ordinal);
         Assert.DoesNotContain("BuildAccentSurfaceColor", todoHover, StringComparison.Ordinal);
-
-        string quickCaptureHover = MethodBody(quickCaptureWindow, "void SetItemHoverState(");
-        Assert.Contains("NeutralInteractionBrush.Fill(", quickCaptureHover, StringComparison.Ordinal);
-        Assert.DoesNotContain("BuildAccentSurfaceColor", quickCaptureHover, StringComparison.Ordinal);
 
         string wheelFeedback = MethodBody(titleSwitcher, "void ApplyWheelFeedbackAccent(");
         Assert.Contains("NeutralInteractionBrush.Line(", wheelFeedback, StringComparison.Ordinal);
@@ -181,21 +171,11 @@ public sealed class NeutralInteractionPaletteContractTests
         // The search field, the search popup's focus ring and the query-match
         // highlight are input chrome: neutral like the inline rename box, with
         // no accent wash when the input is active.
-        string quickCaptureAppearance = Read("src/DeskBox/Views/QuickCaptureWidgetWindow.Appearance.cs");
         string searchPopup = Read("src/DeskBox/Views/SearchPopupWindow.xaml.cs");
-        string quickCaptureItems = Read("src/DeskBox/Views/QuickCaptureWidgetWindow.Items.cs");
-
-        string searchVisual = MethodBody(quickCaptureAppearance, "void ApplySearchVisualStyle(");
-        Assert.Contains("NeutralInteractionBrush.Line(", searchVisual, StringComparison.Ordinal);
-        Assert.DoesNotContain("accentColor", searchVisual, StringComparison.Ordinal);
-        Assert.DoesNotContain("IsSearchExpanded", searchVisual, StringComparison.Ordinal);
 
         string gotFocus = MethodBody(searchPopup, "void SearchTextBox_GotFocus(");
         Assert.Contains("NeutralInteractionBrush.Line(", gotFocus, StringComparison.Ordinal);
         Assert.DoesNotContain("GetEffectiveAccentColor", gotFocus, StringComparison.Ordinal);
-
-        string highlight = MethodBody(quickCaptureItems, "void ApplyItemSearchHighlight(");
-        Assert.DoesNotContain("GetEffectiveAccentColor", highlight, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -203,13 +183,8 @@ public sealed class NeutralInteractionPaletteContractTests
     {
         // These visuals copy theme-dependent colors into brushes at apply time,
         // so a light/dark flip must run their appliers again.
-        string quickCaptureWindow = Read("src/DeskBox/Views/QuickCaptureWidgetWindow.xaml.cs");
         string quickCaptureSurface = Read("src/DeskBox/Controls/WidgetContents/QuickCaptureSurfaceContent.xaml.cs");
 
-        Assert.Contains(
-            "ApplySegmentedStyle();",
-            MethodBody(quickCaptureWindow, "void OnRootElementThemeChanged("),
-            StringComparison.Ordinal);
         Assert.Contains(
             "ApplySegmentedStyle();",
             MethodBody(quickCaptureSurface, "void QuickCaptureSurfaceContent_ActualThemeChanged("),
@@ -284,6 +259,19 @@ public sealed class NeutralInteractionPaletteContractTests
         Assert.True(start >= 0, $"Missing element: {elementName}");
         int end = source.IndexOf("/>", start, StringComparison.Ordinal);
         return end < 0 ? source[start..] : source[start..end];
+    }
+
+    [Fact]
+    public void PivotSegmentedStyleKey_RemainsDefinedForRuntimeLookup()
+    {
+        // WidgetSegmentedStyleHelper resolves this style by string key at
+        // runtime; deleting it from App.xaml silently disables the "Pivot"
+        // tab style with no test failure elsewhere.
+        string appXaml = Read("src/DeskBox/App.xaml");
+        string helper = Read("src/DeskBox/Services/WidgetSegmentedStyleHelper.cs");
+
+        Assert.Contains("\"WidgetPivotSegmentedStyle\"", helper, StringComparison.Ordinal);
+        Assert.Contains("x:Key=\"WidgetPivotSegmentedStyle\"", appXaml, StringComparison.Ordinal);
     }
 
     private static string Read(string relativePath) =>

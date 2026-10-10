@@ -1023,7 +1023,6 @@ public sealed partial class FileSurfaceContent
         view.HorizontalAlignment = HorizontalAlignment.Center;
         view.VerticalAlignment = VerticalAlignment.Stretch;
         view.IsItemClickEnabled = true;
-        view.CanDragItems = true;
         view.CanReorderItems = false;
         view.AllowDrop = true;
         view.IsMultiSelectCheckBoxEnabled = false;
@@ -1043,9 +1042,7 @@ public sealed partial class FileSurfaceContent
             force: true);
 
         view.ItemClick += Items_ItemClick;
-        view.DragItemsCompleted += Items_DragItemsCompleted;
-        view.DragItemsStarting += Items_DragItemsStarting;
-        view.DragStarting += Items_DragStarting;
+        view.ContainerContentChanging += ItemsView_ContainerContentChanging;
         view.DragOver += StackPopoverItems_DragOver;
         view.DragLeave += StackPopoverItems_DragLeave;
         view.Drop += StackPopoverItems_Drop;
@@ -2163,6 +2160,19 @@ public sealed partial class FileSurfaceContent
 
     private void ReleaseStackPopover()
     {
+        // A popover member drag can outlive the popover: once the events are
+        // detached below, DropCompleted can never arrive and the drag-session
+        // fields would stay armed until the next gesture. Complete the
+        // session first so the in-flight drop's observation, suppression and
+        // reorder cleanup still run.
+        if (_sourceDragSession.ReleaseRecoveryPending || _stackPopoverDragActive)
+        {
+            CompleteDragItemsSession(
+                DataPackageOperation.None,
+                _stackPopoverDragActive,
+                eventItems: []);
+        }
+
         CancelStackPopoverReveal();
         ReleaseStackPopoverItemRenameEditor();
         if (_stackPopoverTitleHost is not null)
@@ -2189,9 +2199,9 @@ public sealed partial class FileSurfaceContent
             DetachStackPopoverItemSurfaces(view);
             view.Loaded -= StackPopoverItemsView_Loaded;
             view.ItemClick -= Items_ItemClick;
-            view.DragItemsCompleted -= Items_DragItemsCompleted;
-            view.DragItemsStarting -= Items_DragItemsStarting;
+            view.ContainerContentChanging -= ItemsView_ContainerContentChanging;
             view.DragStarting -= Items_DragStarting;
+            view.DropCompleted -= Items_DropCompleted;
             view.DragOver -= StackPopoverItems_DragOver;
             view.DragLeave -= StackPopoverItems_DragLeave;
             view.Drop -= StackPopoverItems_Drop;
@@ -2484,7 +2494,10 @@ public sealed partial class FileSurfaceContent
                     payload.DataView,
                     e.AllowedOperations,
                     destinationFolderPath: ViewModel.CurrentFolderPath);
-                e.AcceptedOperation = ToDataPackageOperation(resolvedIntent);
+                e.AcceptedOperation = DeskBoxDragData.ResolveFileDragFeedbackOperation(
+                    e.DataView,
+                    ToDataPackageOperation(resolvedIntent),
+                    e.AllowedOperations);
                 if (payload.IsDeskBoxFileDrag)
                 {
                     e.DragUIOverride.IsGlyphVisible =
@@ -2515,7 +2528,6 @@ public sealed partial class FileSurfaceContent
 
         e.Handled = true;
         e.AcceptedOperation = ResolveInternalArrangementFeedbackOperation(
-            payload.IsDeskBoxFileDrag,
             e.AllowedOperations,
             e.DataView.RequestedOperation);
         TraceInternalDragDecision("stack-reorder", payload, e);

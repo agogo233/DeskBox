@@ -177,11 +177,12 @@ public sealed class GlanceImageInfo
     public bool IsOnline => !string.IsNullOrWhiteSpace(SourcePageUrl);
 }
 
+
 // GlanceCalendarDay / GlanceCalendarMonth / GlanceCalendarEvent moved to
 // src/DeskBox.Abstractions/Models/GlanceCalendarModels.cs (contract closure of
 // ICalendarPresentationSource). GlanceCalendarDayDecoration stays here because
 // its generated bindable provider is bound from widget XAML.
-
+//
 // Bound from the calendar day-item template via {Binding Tag.*}; Native AOT
 // resolves those bindings through this generated provider, reflection cannot.
 [WinRT.GeneratedBindableCustomProperty]
