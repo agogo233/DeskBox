@@ -325,10 +325,13 @@ public sealed class OnboardingExperienceTests
         Assert.DoesNotContain("_featureWidgetsSelectedForReveal", steps, StringComparison.Ordinal);
         Assert.DoesNotContain("ApplyFeatureWidgetSelectionsAsync", steps, StringComparison.Ordinal);
 
+        // NavigateToStepAsync was folded into the synchronous NavigateToStep in
+        // 5deda57c; the stale anchor made IndexOf return -1 and threw
+        // ArgumentOutOfRangeException instead of failing the assertion.
         string completionMethod = windowCode[windowCode.IndexOf(
             "private async Task CompleteOnboardingAsync",
             StringComparison.Ordinal)..windowCode.IndexOf(
-            "private async Task NavigateToStepAsync",
+            "private void NavigateToStep(",
             StringComparison.Ordinal)];
         Assert.True(
             completionMethod.IndexOf("await _featureWidgetSelectionUpdateTask", StringComparison.Ordinal) <
