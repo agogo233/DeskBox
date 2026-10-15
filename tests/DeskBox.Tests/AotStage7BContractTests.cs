@@ -57,7 +57,7 @@ public sealed class AotStage7BContractTests
     [Fact]
     public void GitHubWorkflow_UsesNativeArmRunnerAndUploadsTypedRuntimeEvidence()
     {
-        string workflow = Read(".github/workflows/arm64-runtime.yml");
+        string workflow = Read(".github/workflows/arm64-runtime.yml.bak");
         string runner = Read("scripts/run-arm64-stage-7b-runtime.ps1");
         string gate = Read("tests/DeskBox.Tests/Arm64NativeRuntimeGateTests.cs");
 

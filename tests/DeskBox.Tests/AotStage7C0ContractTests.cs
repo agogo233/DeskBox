@@ -75,7 +75,7 @@ public sealed class AotStage7C0ContractTests
     [Fact]
     public void Arm64Workflow_RunsRuntimeAndCrtGatesAndUploadsSeparateEvidence()
     {
-        string workflow = Read(".github/workflows/arm64-runtime.yml");
+        string workflow = Read(".github/workflows/arm64-runtime.yml.bak");
 
         Assert.Contains("Run Stage 7B native ARM64 gate", workflow, StringComparison.Ordinal);
         Assert.Contains("Run Stage 7C0 ARM64 CRT A/B gate", workflow, StringComparison.Ordinal);

@@ -34,7 +34,9 @@ jobs:
       - name: Setup pinned .NET SDK
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: 10.0.303
+          # Must stay on the same feature band as global.json: rollForward is
+          # latestPatch, which cannot cross 10.0.3xx -> 10.0.4xx.
+          dotnet-version: 10.0.402
 
       # The retail script embeds full validation (PE machine, forbidden files,
       # smoke-harness tokens, warning-code allowlist); any failure aborts.

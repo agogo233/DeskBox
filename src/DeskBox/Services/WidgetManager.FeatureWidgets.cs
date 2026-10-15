@@ -803,7 +803,8 @@ public sealed partial class WidgetManager
         return await FinalizeImportAsync(targetWidgetId, destinationPath);
     }
 
-    public async Task<string?> TryImportTextAsync(        string text,
+    public async Task<string?> TryImportTextAsync(
+        string text,
         string fileName,
         string targetWidgetId,
         CancellationToken cancellationToken = default)

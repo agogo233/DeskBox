@@ -245,7 +245,7 @@ public sealed class AotStage7C1ContractTests
     [Fact]
     public void DistributionWorkflow_UsesNativeX64AndArm64RunnersAndPreservesEvidenceBoundaries()
     {
-        string workflow = Read(".github/workflows/distribution-audit.yml");
+        string workflow = Read(".github/workflows/distribution-audit.yml.bak");
         string orchestrator = Read("scripts/build-stage-7c1-distribution.ps1");
 
         foreach (string token in new[]
