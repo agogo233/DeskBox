@@ -1,3 +1,5 @@
+using System.Text.RegularExpressions;
+
 namespace DeskBox.Tests;
 
 /// <summary>
@@ -20,6 +22,11 @@ public sealed class ToggleSwitchAccessibleNameContractTests
         { "src/DeskBox/Views/SettingsSections/FileWidgetSettingsSection.xaml", 1 },
         { "src/DeskBox/Views/SettingsSections/DesktopOrganizationSettingsSection.xaml", 2 },
         { "src/DeskBox/Views/SettingsSections/CapsuleModeSettingsSection.xaml", 1 },
+        // Batch-D staging copy (roadmap 16.4): the file and its namespace are
+        // deliberate, but nothing instantiates it yet, so it carries no runtime
+        // weight. Whitelisted so its switches keep the same accessibility
+        // contract as the live sections.
+        { "src/DeskBox/Views/SettingsSections/MusicSettingsSection.xaml", 2 },
         { "src/DeskBox/Views/OnboardingWindow.xaml", 6 },
     };
 
@@ -30,7 +37,9 @@ public sealed class ToggleSwitchAccessibleNameContractTests
         string xaml = ReadRepositoryFile(path);
 
         int total = CountOccurrences(xaml, "<ToggleSwitch");
-        int named = CountOccurrences(xaml, "<ToggleSwitch svc:Localized.AutomationNameKey=\"");
+        int named = Regex.Matches(
+            xaml,
+            @"<ToggleSwitch\s+svc:Localized\.AutomationNameKey=""").Count;
 
         Assert.Equal(expectedCount, total);
         Assert.Equal(total, named);

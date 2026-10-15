@@ -312,7 +312,7 @@ public sealed class OnboardingExperienceTests
         foreach (string kind in new[] { "Todo", "QuickCapture", "Search", "Weather", "Music", "Glance" })
         {
             Assert.Contains(
-                $"Tag=\"{kind}\" Toggled=\"TaskStep5FeatureToggle_Toggled\"",
+                $"Tag=\"{kind}\" Toggled=\"Step5FeatureToggle_Toggled\"",
                 xaml,
                 StringComparison.Ordinal);
         }

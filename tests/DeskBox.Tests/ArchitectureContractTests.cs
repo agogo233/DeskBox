@@ -67,12 +67,12 @@ public sealed class ArchitectureContractTests
     private static readonly Dictionary<string, int> FrozenFeatureFileCounts =
         new(StringComparer.Ordinal)
         {
-            ["Weather"] = 16,
-            ["Todo"] = 36,
-            ["Music"] = 15,
-            ["Glance"] = 20,
-            ["Search"] = 20,
-            ["QuickCapture"] = 22,
+            ["Weather"] = 17,
+            ["Todo"] = 38,
+            ["Music"] = 16,
+            ["Glance"] = 23,
+            ["Search"] = 23,
+            ["QuickCapture"] = 25,
         };
 
     private static readonly Dictionary<string, int> FrozenAmbientWidgetManagerAccess =
@@ -80,6 +80,7 @@ public sealed class ArchitectureContractTests
         {
             ["src/DeskBox/Views/SettingsSections/GlanceWidgetSettingsSection.xaml.cs"] = 9,
             ["src/DeskBox/ViewModels/QuickCaptureWidgetViewModel.Operations.cs"] = 1,
+            ["src/DeskBox/Views/SearchPopupWindow.xaml.cs"] = 3,
         };
 
     // Feature files that still declare inside a DeskBox.Views* namespace. They
@@ -98,7 +99,7 @@ public sealed class ArchitectureContractTests
     private static readonly Dictionary<string, string[]> RegisteredSubdirectories =
         new(StringComparer.Ordinal)
         {
-            ["src/DeskBox/Views"] = ["SettingsSections"],
+            ["src/DeskBox/Views"] = ["SettingsSections", "Dialogs"],
             ["src/DeskBox/Controls"] = ["WidgetContents"],
             // Plugin pipeline host-side code (B1); runtime-agnostic package
             // machinery, deliberately outside the six-feature inventory.

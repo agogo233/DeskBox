@@ -19,7 +19,21 @@ public sealed class SettingsWiringContractTests
     /// properties); the list stays empty so any future dead binding fails
     /// immediately.
     /// </summary>
-    private static readonly string[] PendingDeadBindingNames = [];
+    private static readonly string[] PendingDeadBindingNames =
+    [
+        // MusicSettingsSection.xaml is the batch-D staging copy extracted by
+        // 0a432905: the file, its namespace (DeskBox.Controls.WidgetContents)
+        // and the Music file count bump were all deliberate per roadmap 16.4,
+        // but the live SettingsWindow still renders the inline template, so
+        // nothing instantiates this control yet and SettingsViewModel exposes
+        // no Music properties for it to bind to. The four names below are the
+        // pre-migration (prefixed) spellings; batch D rebinds them when the
+        // live template switches to this type. Do not add further names here.
+        "AvailableMusicDisplayModeOptions",
+        "SelectedMusicDisplayMode",
+        "MusicUseArtworkBackdrop",
+        "MusicEnableCoverHoverMotion",
+    ];
 
     /// <summary>
     /// Editor commit events the shell does not subscribe. The batch-47

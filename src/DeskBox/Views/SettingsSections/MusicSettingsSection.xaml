@@ -39,6 +39,7 @@
                     <FontIcon Glyph="&#xEB9F;" />
                 </toolkit:SettingsCard.HeaderIcon>
                 <ToggleSwitch
+                    svc:Localized.AutomationNameKey="Settings.Music.ArtworkBackdrop.Title"
                     OnContent=""
                     OffContent=""
                     MinWidth="0"
@@ -53,6 +54,7 @@
                     <FontIcon Glyph="&#xE7F8;" />
                 </toolkit:SettingsCard.HeaderIcon>
                 <ToggleSwitch
+                    svc:Localized.AutomationNameKey="Settings.Music.CoverHoverMotion.Title"
                     OnContent=""
                     OffContent=""
                     MinWidth="0"

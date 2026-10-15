@@ -11,6 +11,7 @@ using DeskBox.Helpers;
 using DeskBox.Models;
 using DeskBox.Platform;
 using DeskBox.Services;
+using DeskBox.Services.Plugins;
 using DeskBox.Views;
 using System.Diagnostics;
 using H.NotifyIcon;
@@ -1785,7 +1786,8 @@ RunCriticalStartupStep("widget-manager", () =>
             $"[Startup] Applying deferred widget desktop layer " +
             $"explorerReady={explorerDesktopReady}");
         widgetManager.RefreshVisibleWidgetDesktopLayers(
-            "startup-explorer-desktop-ready");
+            "startup-explorer-desktop-ready",
+            absoluteDesktopBottom: true);
     }
 
     private void InitializeGlobalHotkeyService(LocalizationService localizationService)
@@ -3677,6 +3679,10 @@ RunCriticalStartupStep("widget-manager", () =>
         Localized.RefreshAll(LocalizationService);
         RefreshTrayMenuText();
         RefreshTrayToolTipText();
+        // Native packages own their own localized resources and read the host
+        // locale through the config channel; without this push they keep the
+        // strings captured at load time until their next data write.
+        NativeHostApiBridge.PushConfigChanged();
     }
 
     private void OpenSettings()

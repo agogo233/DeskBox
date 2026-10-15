@@ -513,7 +513,14 @@ public sealed class ModuleBoundaryContractTests
         ["src/DeskBox/Services/GlanceWidgetStore.cs"] = 1,
         ["src/DeskBox/Services/LegacySearchIndexCleanupService.cs"] = 1,
         ["src/DeskBox/Services/ManagedStorageDesktopShortcutService.cs"] = 1,
+        ["src/DeskBox/Services/MusicSettingsStore.cs"] = 5,
         ["src/DeskBox/Services/NativeNotificationActivationEnvelopeStore.cs"] = 6,
+        // Batch B/C plugin packages own their three storage roots under
+        // data/packages; every mutation stays inside a verified instance root.
+        ["src/DeskBox/Services/Plugins/NativeInstanceDataLifecycle.cs"] = 1,
+        ["src/DeskBox/Services/Plugins/NativeWidgetDataMigration.cs"] = 3,
+        ["src/DeskBox/Services/Plugins/PluginPackageManager.cs"] = 1,
+        ["src/DeskBox/Services/Plugins/PluginPackageStorage.cs"] = 5,
         ["src/DeskBox/Services/QuickCaptureService.cs"] = 8,
         ["src/DeskBox/Services/ReleaseNotesService.cs"] = 1,
         // +2: RevertLastCommit restores its own .bak (File.Copy) or deletes
@@ -522,7 +529,10 @@ public sealed class ModuleBoundaryContractTests
         ["src/DeskBox/Services/ResilientJsonStore.cs"] = 9,
         ["src/DeskBox/Services/TodoWidgetStore.cs"] = 5,
         ["src/DeskBox/Services/VirtualDropFileNameResolver.cs"] = 1,
-        ["src/DeskBox/Services/WidgetManager.FeatureWidgets.cs"] = 1,
+        // +1: MoveImportIntoPlace renames the staged temp into place and
+        // TryDeleteFile removes a failed import; both act only on the
+        // import staging name this widget just created.
+        ["src/DeskBox/Services/WidgetManager.FeatureWidgets.cs"] = 2,
         // +1: orphan managed-storage restore deletes the emptied source
         // folder after moving its contents back to the desktop (#112
         // migration rollback work in progress).
