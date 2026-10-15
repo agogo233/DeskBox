@@ -25,6 +25,15 @@ public abstract partial class WidgetWindowBase
 {
     private bool _desktopPinnedInputActivationInProgress;
 
+    // WM_MOUSEACTIVATE suppression runs before the same click is routed to
+    // XAML, so without this stamp one suppressed click would run the bottom
+    // reassert twice (native subclass + routed handler). The guard window
+    // only needs to cover the native-message → XAML-dispatch hop of a single
+    // click; anything older is a genuinely new click.
+    private long _desktopPinnedNativeSuppressionTimestamp;
+    private static readonly long DesktopPinnedNativeSuppressionWindowTicks =
+        TimeSpan.FromMilliseconds(150).Ticks;
+
     protected void ConfigureWindowCore()
     {
         if (!_isTrackedForDiagnostics)
@@ -210,10 +219,23 @@ public abstract partial class WidgetWindowBase
         {
             ActivateDesktopPinnedWindow(reason);
         }
+        else if (WasRecentlyNativeSuppressed())
+        {
+            // The WM_MOUSEACTIVATE subclass already reasserted the desktop
+            // bottom state for this exact click; the routed event is the
+            // same press, not a new one.
+        }
         else
         {
             RestoreDesktopPinnedBottomState(reason);
         }
+    }
+
+    private bool WasRecentlyNativeSuppressed()
+    {
+        long timestamp = _desktopPinnedNativeSuppressionTimestamp;
+        return timestamp != 0 &&
+            DateTime.UtcNow.Ticks - timestamp < DesktopPinnedNativeSuppressionWindowTicks;
     }
 
     private void RootElement_GotFocusForDesktopPinnedLayer(
@@ -263,13 +285,27 @@ public abstract partial class WidgetWindowBase
         _desktopPinnedInputActivationInProgress = true;
         try
         {
-            if (Win32Helper.GetForegroundWindow() != HWnd)
+            IntPtr foreground = Win32Helper.GetForegroundWindow();
+            if (foreground != HWnd)
             {
-                // Activation is retained for keyboard-oriented controls, but
-                // the HWND is returned to the desktop bottom before this input
-                // dispatch completes, so activation never creates a layer lease.
-                base.Activate();
-                _ = Win32Helper.SetForegroundWindow(HWnd);
+                // 454: after "show desktop" the shell owns the foreground, and
+                // activating this DefView-owned HWND promotes the whole owner
+                // band — the hand-off that can drag a minimized borderless
+                // fullscreen application back to the front. A pointer click
+                // does not need that promotion: the mouse message is already
+                // delivered (MA_NOACTIVATE semantics), and keyboard-oriented
+                // activations still take the full path below.
+                bool pointerOriginOnDesktopForeground =
+                    string.Equals(reason, "routed-pointer", StringComparison.Ordinal) &&
+                    IsDesktopShellRootWindow(foreground);
+                if (!pointerOriginOnDesktopForeground)
+                {
+                    // Activation is retained for keyboard-oriented controls, but
+                    // the HWND is returned to the desktop bottom before this input
+                    // dispatch completes, so activation never creates a layer lease.
+                    base.Activate();
+                    _ = Win32Helper.SetForegroundWindow(HWnd);
+                }
             }
         }
         finally
@@ -278,6 +314,38 @@ public abstract partial class WidgetWindowBase
         }
 
         RestoreDesktopPinnedBottomState(reason);
+        // The deliberate activation promoted the whole DefView owner band;
+        // drop the siblings back under covering applications in this same
+        // cycle so only the interacting window stays up (#574).
+        App.Current.WidgetManager?.RebedPinnedSiblingsAfterActivation(
+            HWnd,
+            $"{reason}-siblings");
+    }
+
+    private static bool IsDesktopShellRootWindow(IntPtr windowHandle)
+    {
+        if (windowHandle == IntPtr.Zero)
+        {
+            return false;
+        }
+
+        IntPtr current = windowHandle;
+        while (current != IntPtr.Zero)
+        {
+            var className = new System.Text.StringBuilder(256);
+            int length = Win32Helper.GetClassName(current, className, className.Capacity);
+            if (length > 0 &&
+                (string.Equals(className.ToString(), "Progman", StringComparison.Ordinal) ||
+                 string.Equals(className.ToString(), "WorkerW", StringComparison.Ordinal) ||
+                 string.Equals(className.ToString(), "SHELLDLL_DefView", StringComparison.Ordinal)))
+            {
+                return true;
+            }
+
+            current = Win32Helper.GetParent(current);
+        }
+
+        return false;
     }
 
     private void WidgetWindowBase_ActivatedForDesktopPinnedLayer(
@@ -293,6 +361,15 @@ public abstract partial class WidgetWindowBase
         {
             RestoreDesktopPinnedBottomState(
                 $"window-{args.WindowActivationState}");
+            // A native activation also promoted the whole owner band; re-bed
+            // the siblings in the same cycle so the group never lingers above
+            // covering applications (#574).
+            if (args.WindowActivationState == WindowActivationState.CodeActivated)
+            {
+                App.Current.WidgetManager?.RebedPinnedSiblingsAfterActivation(
+                    HWnd,
+                    "window-CodeActivated-siblings");
+            }
         }
     }
 
@@ -355,7 +432,10 @@ public abstract partial class WidgetWindowBase
             // MA_NOACTIVATE keeps the existing foreground application active
             // but still lets the widget receive the mouse message. Reasserting
             // the desktop owner here also repairs any stale owner/Z-order state
-            // without a visible raise-and-restore flash.
+            // without a visible raise-and-restore flash. The stamp lets the
+            // XAML routed handler recognize this same click and skip its own
+            // duplicate reassert.
+            _desktopPinnedNativeSuppressionTimestamp = DateTime.UtcNow.Ticks;
             RestoreDesktopPinnedBottomState("native-pointer-suppressed");
             return new IntPtr(Win32Helper.MA_NOACTIVATE);
         }

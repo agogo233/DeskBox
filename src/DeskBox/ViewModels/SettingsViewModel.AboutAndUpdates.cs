@@ -82,7 +82,22 @@ public partial class SettingsViewModel
 
     // One-click update properties
     public string UpdateSummaryText =>
-        GetUpdateSummaryPreview(_availableUpdateManifest?.GetLocalizedSummary(_localizationService.CurrentCultureName));
+        GetUpdateSummaryPreview(GetLocalizedUpdateSummary());
+
+    private string GetLocalizedUpdateSummary()
+    {
+        if (_availableUpdateManifest is null)
+            return string.Empty;
+
+        // Server-published manifests keep authoritative per-locale summaries;
+        // locally built GitHub/Store manifests synthesize from string resources.
+        string summary = _availableUpdateManifest.GetLocalizedSummary(_localizationService.CurrentCultureName);
+        return string.IsNullOrWhiteSpace(summary)
+            ? _availableUpdateManifest.Channel == "store"
+                ? _localizationService.T("Settings.Update.Summary.Store")
+                : _localizationService.Format("Settings.Update.Summary.GitHub", _availableUpdateManifest.Version)
+            : summary;
+    }
     public Visibility UpdateSummaryVisibility =>
         _availableUpdateManifest is not null &&
         !IsDownloadingUpdate &&
@@ -299,7 +314,9 @@ public partial class SettingsViewModel
             return AppUpdateInstallResult.Failed(_localizationService.T("Settings.Update.Detail.DownloadMissing"));
         }
 
-        var result = _appUpdateService.StartInstallerHelper(_downloadedUpdateInstallerPath);
+        var result = _appUpdateService.StartInstallerHelper(
+            _downloadedUpdateInstallerPath,
+            appCultureName: _localizationService.CurrentCultureName);
         if (result.Success)
         {
             UpdateStatusText = _localizationService.T("Settings.Update.Status.Installing");

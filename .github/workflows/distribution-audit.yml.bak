@@ -51,7 +51,7 @@ jobs:
       - name: Setup pinned .NET SDK
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: 10.0.401
+          dotnet-version: 10.0.402
 
       - name: Verify native runner, Rust, Inno Setup, and Windows SDK
         shell: pwsh
@@ -89,7 +89,31 @@ jobs:
             throw "The runner image does not expose ISCC.exe."
           }
           $innoVersion = (Get-Item -LiteralPath $iscc).VersionInfo.FileVersion
+          # Some Inno installations do not stamp ISCC.exe version info; fall
+          # back to the uninstall registration before applying the floor. The
+          # floor guards the installer language arbitration the /LANG update
+          # flow relies on (DeskBox.Updater Program.cs pins /LANG; the
+          # silent-mode no-dialog + /LANG-overrides-previous-language behavior
+          # was verified against Inno Setup 6.4+ sources).
+          if ($innoVersion -in @('', '0.0.0.0')) {
+            foreach ($hive in 'HKLM:', 'HKCU:') {
+              $innoReg = Get-ItemProperty "$hive\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Inno Setup 6_is1" -ErrorAction SilentlyContinue
+              if ($innoReg -and $innoReg.DisplayVersion) {
+                $innoVersion = $innoReg.DisplayVersion
+                break
+              }
+            }
+          }
           Write-Host "Inno Setup compiler: $iscc ($innoVersion)"
+          $innoParsed = $null
+          if ([version]::TryParse($innoVersion, [ref]$innoParsed)) {
+            if ($innoParsed -lt [version]'6.4.0') {
+              throw "Inno Setup $innoVersion is below the required 6.4.0 (installer language arbitration floor for the /LANG update flow)."
+            }
+          }
+          else {
+            Write-Warning "Inno Setup version '$innoVersion' could not be parsed; skipped the 6.4.0 floor check."
+          }
 
           $kitsBin = Join-Path ${env:ProgramFiles(x86)} 'Windows Kits\10\bin'
           if (-not (Get-ChildItem -LiteralPath $kitsBin -Filter makeappx.exe -Recurse -File |

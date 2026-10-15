@@ -30,7 +30,7 @@ public sealed class AotStage4E5ContractTests
     }
 
     [Fact]
-    public void SearchResultRow_UsesEightManuallyRefreshedOneTimeCompiledBindings()
+    public void SearchResultRow_UsesNineManuallyRefreshedOneTimeCompiledBindings()
     {
         string xaml = ReadRepositoryFile(
             "src/DeskBox/Controls/SearchResultRowControl.xaml");
@@ -43,11 +43,13 @@ public sealed class AotStage4E5ContractTests
             "Subtitle",
             "TypeDisplay",
             "SizeDisplay",
-            "DateDisplay"
+            "DateDisplay",
+            // Tooltip carries the full path for truncated subtitles.
+            "DetailPath"
         ];
 
         Assert.DoesNotContain("{Binding ", xaml, StringComparison.Ordinal);
-        Assert.Equal(8, CountOccurrences(xaml, "{x:Bind Item."));
+        Assert.Equal(9, CountOccurrences(xaml, "{x:Bind Item."));
         foreach (string leaf in leaves.Distinct(StringComparer.Ordinal))
         {
             int expected = leaf == "Title" ? 2 : 1;

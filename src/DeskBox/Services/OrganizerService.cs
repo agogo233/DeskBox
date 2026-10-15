@@ -415,11 +415,19 @@ public sealed class OrganizerService
                     canUndo: true));
             }
 
-            string[] failedPaths = normalizedSourcePaths
-                .Except(
-                    completed.Select(result => result.SourcePath),
-                    StringComparer.OrdinalIgnoreCase)
-                .ToArray();
+            // A user-cancelled Shell transfer is not a failure: whatever
+            // did not move was declined in the Shell's own dialog, not
+            // lost. Record only the completed set; the retired legacy
+            // bridge recorded nothing for cancelled remainder either.
+            bool userCancelledShellTransfer =
+                ex is FileService.FileTransferCanceledException;
+            string[] failedPaths = userCancelledShellTransfer
+                ? []
+                : normalizedSourcePaths
+                    .Except(
+                        completed.Select(result => result.SourcePath),
+                        StringComparer.OrdinalIgnoreCase)
+                    .ToArray();
             if (failedPaths.Length > 0)
             {
                 await AddHistoryEntryAsync(CreateFailureEntry(

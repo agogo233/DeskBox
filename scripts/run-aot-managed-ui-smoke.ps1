@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [string]$SummaryPath,
 
@@ -4489,7 +4489,7 @@ if ($scenario -ceq "LocalFileSurfacePersistenceRestart") {
         }
         $runtimeDeferredPathLogLines = @(
             $runtimeLogLines | Where-Object {
-                $_.IndexOf("[FileTransfer] Shell move", [StringComparison]::Ordinal) -ge 0 -or
+                $_.IndexOf("[FileTransfer] Windows shell transfer", [StringComparison]::Ordinal) -ge 0 -or
                 $_.IndexOf("[FolderPicker]", [StringComparison]::Ordinal) -ge 0 -or
                 $_.IndexOf("[NativeDrop", [StringComparison]::Ordinal) -ge 0 -or
                 $_.IndexOf("RecycleBin", [StringComparison]::OrdinalIgnoreCase) -ge 0

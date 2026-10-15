@@ -164,14 +164,19 @@ public sealed class ModuleBoundaryContractTests
         ["src/DeskBox/Services/WidgetSettingsMenuHelper.cs"] = 2,
         // UiDispatch migration: the settings-changed marshal now routes
         // through DeskBox.Platform.UiDispatch (count 14 → 13).
-        ["src/DeskBox/Services/WidgetManager.ZOrder.cs"] = 13,
+        // Z-order self-heal (289/447/468): the desktop-pinned bedding
+        // watchdog timer creation (13 → 14); enqueues use UiDispatch.
+        // Shutdown self-redispatch fix (#530/#532): four marshals moved
+        // onto UiDispatch.RunOrDefer (14 → 10).
+        ["src/DeskBox/Services/WidgetManager.ZOrder.cs"] = 10,
         ["src/DeskBox/Services/WidgetManager.Surfaces.cs"] = 1,
         ["src/DeskBox/Services/WidgetManager.Storage.cs"] = 1,
         // UiDispatch migration: the enable-state marshal and the feature
         // widget marshal helper moved onto UiDispatch (12 → 10 in the main
-        // file; FeatureWidgets dropped to zero).
-        ["src/DeskBox/Services/WidgetManager.cs"] = 10,
-        ["src/DeskBox/Services/WidgetManager.CapsuleArrangement.cs"] = 1,
+        // file; FeatureWidgets dropped to zero). Shutdown self-redispatch
+        // fix (#530/#532): four more marshals moved onto RunOrDefer (10 → 6;
+        // CapsuleArrangement dropped to zero).
+        ["src/DeskBox/Services/WidgetManager.cs"] = 6,
         ["src/DeskBox/Services/WidgetLayerService.cs"] = 8,
         // The 1.6 native plugin pilot reads the active culture through the
         // host global while materializing localized package metadata.
@@ -193,6 +198,24 @@ public sealed class ModuleBoundaryContractTests
             .ToArray();
         AssertViolationManifest(offenders, BusinessGlobalAccessExpectedViolations,
             "Inject new business dependencies; existing global-access exceptions may only shrink:");
+    }
+
+    [Fact]
+    public void UiAccessGuards_NeverRedispatchThroughTheRawDispatcher()
+    {
+        // A raw App.UiDispatcherQueue re-dispatch behind a UiDispatch access
+        // gate re-queues itself forever on the UI thread once the gate and the
+        // raw queue disagree; the shutdown spin of #530/#532 was this shape.
+        Regex guardedRawRedispatch = new(
+            @"if \(!(?:HasUiThreadAccess\(\)|(?:DeskBox\.Platform\.)?UiDispatch\.HasAccess)\)\s*\{[^{}]*\bApp\.UiDispatcherQueue\b");
+        string[] offenders = ProductionSource()
+            .Where(item => guardedRawRedispatch.IsMatch(item.Source))
+            .Select(item => item.Path)
+            .ToArray();
+
+        Assert.True(offenders.Length == 0,
+            "Route access-gated re-dispatch through UiDispatch.RunOrDefer/RunAsync:\n" +
+            string.Join('\n', offenders));
     }
 
     [Fact]

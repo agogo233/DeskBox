@@ -85,6 +85,12 @@ WizardStyle=modern
 ; Let the user pick the installer language; the dialog pre-selects the
 ; language detected from the system locale. English is listed first so any
 ; locale that is neither Chinese nor English falls back to English.
+; Silent in-app updates never see this dialog: DeskBox.Updater pins the run
+; with /LANG to the language the app is currently showing (mapped in
+; AppUpdateService.MapAppCultureToInstallerLanguage — the reverse of
+; InstallLanguageCode below; extend both sides plus DeskBox.arm64.iss when a
+; language is added), so a stale "Inno Setup: Language" value from an old
+; install cannot replay the wrong language.
 ShowLanguageDialog=yes
 
 [Languages]

@@ -537,7 +537,8 @@ public sealed partial class DeskBoxDataBackupService
                 archiveInfo.Manifest.CreatedAtUtc,
                 archiveInfo.Manifest.AppVersion,
                 Domains: null,
-                AllowMissingSettings: allowMissingSettings);
+                AllowMissingSettings: allowMissingSettings,
+                SourceDataPath: archiveInfo.Manifest.SourceDataPath);
             await WritePendingRestoreMarkerAtomicallyAsync(
                 PendingRestoreMarkerPath,
                 marker,
@@ -1250,6 +1251,18 @@ public sealed partial class DeskBoxDataBackupService
                 return DeskBoxRestoreApplyResult.NoPendingRestore;
             }
 
+            if (marker.Domains is not { Count: > 0 } && !marker.FullRestoreConfirmed)
+            {
+                // Same defense for full restores: the marker predates its
+                // confirmation dialog, so an unanswered dialog (hidden
+                // settings window, exit, crash) must discard the restore
+                // instead of swapping the whole data directory on the next
+                // launch.
+                DeletePendingRestoreCore();
+                App.Log("[DataBackup] Discarded an unconfirmed full restore.");
+                return DeskBoxRestoreApplyResult.NoPendingRestore;
+            }
+
             if (marker.Domains is { Count: > 0 } markerDomains)
             {
                 return await ApplyScopedRestoreCoreAsync(
@@ -1292,7 +1305,12 @@ public sealed partial class DeskBoxDataBackupService
             TryDeleteDirectory(stagingRoot);
             TryDeleteDirectory(rollbackRoot);
             App.Log($"[DataBackup] Applied pending restore from '{marker.ArchivePath}'.");
-            return new DeskBoxRestoreApplyResult(true, true, null);
+            return new DeskBoxRestoreApplyResult(
+                true,
+                true,
+                null,
+                DeskBoxRestoreApplyKind.Full,
+                marker.SourceDataPath);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -1302,7 +1320,7 @@ public sealed partial class DeskBoxDataBackupService
         {
             App.Log($"[DataBackup] Pending restore failed: {ex}");
             DeletePendingRestoreCore();
-            return new DeskBoxRestoreApplyResult(true, false, ex.Message);
+            return new DeskBoxRestoreApplyResult(true, false, ex.Message, DeskBoxRestoreApplyKind.Full);
         }
         finally
         {
@@ -1435,7 +1453,7 @@ public sealed partial class DeskBoxDataBackupService
             TryDeleteFile(PendingRestoreMarkerPath);
             TryDeleteDirectory(stagingRoot);
             App.Log($"[DataBackup] Applied scoped restore from '{marker.ArchivePath}' (domains: {scope}).");
-            return new DeskBoxRestoreApplyResult(true, true, null);
+            return new DeskBoxRestoreApplyResult(true, true, null, DeskBoxRestoreApplyKind.Scoped);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -1457,7 +1475,8 @@ public sealed partial class DeskBoxDataBackupService
                 return new DeskBoxRestoreApplyResult(
                     true,
                     false,
-                    $"Restore failed on {attempts} launches and was abandoned: {ex.Message}");
+                    $"Restore failed on {attempts} launches and was abandoned: {ex.Message}",
+                    DeskBoxRestoreApplyKind.Scoped);
             }
 
             App.Log(
@@ -1477,7 +1496,7 @@ public sealed partial class DeskBoxDataBackupService
                 App.Log($"[DataBackup] Failed to persist restore attempt count: {writeEx.Message}");
             }
 
-            return new DeskBoxRestoreApplyResult(true, false, ex.Message);
+            return new DeskBoxRestoreApplyResult(true, false, ex.Message, DeskBoxRestoreApplyKind.Scoped);
         }
     }
 
@@ -1510,6 +1529,43 @@ public sealed partial class DeskBoxDataBackupService
                         ? true
                         : marker.ScopedRestoreConfirmed
                 },
+                cancellationToken);
+            return true;
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    /// <summary>
+    /// Persists the user's "restore" answer onto a pending FULL restore
+    /// marker. The marker is written before its confirmation dialog opens,
+    /// so this call is what authorizes the next launch to apply it; until
+    /// then the startup gate discards the marker. Returns false when
+    /// nothing is pending or the pending restore is scoped (scoped
+    /// restores confirm through their own item-mode call).
+    /// </summary>
+    internal async Task<bool> ConfirmPendingFullRestoreAsync(
+        CancellationToken cancellationToken = default)
+    {
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            if (!File.Exists(PendingRestoreMarkerPath))
+            {
+                return false;
+            }
+
+            PendingRestoreMarker marker = await ReadPendingRestoreMarkerAsync(cancellationToken);
+            if (marker.Domains is { Count: > 0 })
+            {
+                return false;
+            }
+
+            await WritePendingRestoreMarkerAtomicallyAsync(
+                PendingRestoreMarkerPath,
+                marker with { FullRestoreConfirmed = true },
                 cancellationToken);
             return true;
         }
@@ -3280,7 +3336,25 @@ public sealed partial class DeskBoxDataBackupService
         // chooses an item mode. Null means a pre-existing marker or full
         // restore and retains its historical apply behavior.
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-        bool? ScopedRestoreConfirmed = null);
+        bool? ScopedRestoreConfirmed = null,
+        // Full restores are likewise unconfirmed until the user answers the
+        // restore dialog: the marker is written before that dialog opens, so
+        // a crash, hidden window, or exit in between must never let the next
+        // launch swap the whole data directory. Markers from versions
+        // without this field deserialize as false and are discarded — the
+        // safe direction, since the user simply re-runs the restore.
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+        bool FullRestoreConfirmed = false,
+        // Full restores only: the source machine's data directory recorded
+        // by the backup manifest. The apply swap moves only files, so after
+        // it lands this is the sole trace of where the archived settings'
+        // machine-local paths (managed storage root, custom snapshot
+        // folder) originally lived — the post-restore recovery step derives
+        // the source user profile from it. Null on scoped markers and on
+        // markers written before this field existed; those launches simply
+        // skip the rebase.
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        string? SourceDataPath = null);
 
     [JsonSourceGenerationOptions(
         GenerationMode = JsonSourceGenerationMode.Metadata,
@@ -3396,10 +3470,19 @@ internal sealed record TodoRestorePlan(
 /// </summary>
 public sealed record DeskBoxDomainItemCount(string Domain, int Items);
 
+internal enum DeskBoxRestoreApplyKind
+{
+    None = 0,
+    Full,
+    Scoped,
+}
+
 internal sealed record DeskBoxRestoreApplyResult(
     bool HadPendingRestore,
     bool Succeeded,
-    string? ErrorMessage)
+    string? ErrorMessage,
+    DeskBoxRestoreApplyKind Kind = DeskBoxRestoreApplyKind.None,
+    string? SourceDataPath = null)
 {
     public static DeskBoxRestoreApplyResult NoPendingRestore { get; } = new(false, true, null);
 }

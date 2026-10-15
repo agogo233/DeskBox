@@ -470,7 +470,7 @@ public sealed partial class FileSurfaceContent
 
                 if (!string.IsNullOrWhiteSpace(ViewModel.MappedFolderPath))
                 {
-                    await ViewModel.RefreshFromConfigAsync();
+                    await ViewModel.RefreshFromConfigAsync(clearIconCacheBeforeHydration: false);
                 }
 
                 string[] movedSourcePaths = move
@@ -711,7 +711,7 @@ public sealed partial class FileSurfaceContent
 
             if (!string.IsNullOrWhiteSpace(ViewModel.MappedFolderPath))
             {
-                await ViewModel.RefreshFromConfigAsync();
+                await ViewModel.RefreshFromConfigAsync(clearIconCacheBeforeHydration: false);
             }
 
             if (move)
@@ -794,7 +794,7 @@ public sealed partial class FileSurfaceContent
 
         try
         {
-            await ViewModel.RefreshFromConfigAsync();
+            await ViewModel.RefreshFromConfigAsync(clearIconCacheBeforeHydration: false);
         }
         catch (Exception ex)
         {

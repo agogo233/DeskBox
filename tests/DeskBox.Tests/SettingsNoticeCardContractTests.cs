@@ -84,16 +84,43 @@ public sealed class SettingsNoticeCardContractTests
         }
     }
 
-    [Theory]
-    [InlineData("src/DeskBox/Views/SettingsWindow.Navigation.cs")]
-    [InlineData("src/DeskBox/Views/SettingsSections/SearchSettingsSection.xaml.cs")]
-    public void NoticeInfoBarSeverityBrushes_ArePinnedFromCodeBehind(string path)
+    [Fact]
+    public void NoticeInfoBarSeverityBrushes_ResolvePerActualTheme()
     {
-        string code = ReadRepositoryFile(path);
+        // The informational wash is pinned per ActualTheme with the library's
+        // own per-theme values. The previous pin read
+        // Application.Current.Resources, whose themed lookup served the stale
+        // dictionary on Windows 10 after a live theme switch, painting the
+        // light wash over the dark theme.
+        string code = ReadRepositoryFile("src/DeskBox/Views/SettingsWindow.Navigation.cs");
 
-        Assert.Contains("InfoBarInformationalSeverityBackgroundBrush", code, StringComparison.Ordinal);
-        Assert.Contains("InfoBarInformationalSeverityForegroundBrush", code, StringComparison.Ordinal);
-        Assert.Contains("Application.Current.Resources", code, StringComparison.Ordinal);
+        Assert.Contains("NoticeInfoBackgroundLight", code, StringComparison.Ordinal);
+        Assert.Contains("0x80, 0xF6, 0xF6, 0xF6", code, StringComparison.Ordinal);
+        Assert.Contains("NoticeInfoBackgroundDark", code, StringComparison.Ordinal);
+        Assert.Contains("0x08, 0xFF, 0xFF, 0xFF", code, StringComparison.Ordinal);
+        Assert.Contains("infoBar.ActualTheme == ElementTheme.Dark", code, StringComparison.Ordinal);
+        Assert.Contains("AccessibilitySettings().HighContrast", code, StringComparison.Ordinal);
+        // WinRT activation must stay lazy: static initializers would run on
+        // headless test hosts without WinAppSDK activation.
+        Assert.DoesNotContain("static readonly Windows.UI.ViewManagement", code, StringComparison.Ordinal);
+        Assert.DoesNotContain("InfoBarInformationalSeverityBackgroundBrush\" out", code, StringComparison.Ordinal);
+
+        // The template's default text colors already follow the theme; the
+        // foreground pin (whose key never existed in the library) is gone.
+        Assert.DoesNotContain("InfoBarInformationalSeverityForegroundBrush", code, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SearchSectionNoticeBrushes_DelegateToTheSharedPerThemePin()
+    {
+        string code = ReadRepositoryFile(
+            "src/DeskBox/Views/SettingsSections/SearchSettingsSection.xaml.cs");
+
+        Assert.Contains(
+            "SettingsWindow.ApplyInformationalSeverityBrushes(SearchHotkeyElevatedNoticeInfoBar)",
+            code,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("Application.Current.Resources", code, StringComparison.Ordinal);
     }
 
     [Fact]

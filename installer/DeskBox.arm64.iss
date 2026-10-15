@@ -77,6 +77,9 @@ VersionInfoTextVersion={#MyAppVersion}
 Compression=lzma
 SolidCompression=yes
 WizardStyle=modern
+; Keep this language list identical to DeskBox.iss: silent in-app updates
+; pin /LANG from AppUpdateService.MapAppCultureToInstallerLanguage, whose
+; names must match the [Languages] entries here.
 ShowLanguageDialog=yes
 
 [Languages]

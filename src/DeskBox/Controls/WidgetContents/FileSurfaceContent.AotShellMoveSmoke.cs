@@ -74,9 +74,17 @@ public sealed partial class FileSurfaceContent
             object? sender,
             WidgetFeedbackRequestedEventArgs args)
         {
+            // The move-back menu owns "file-move-desktop"; a watchdog-
+            // abandoned transfer (the fixture's Late mode) surfaces through
+            // the standard action-error route instead. Either completes the
+            // probe — which one arrived is itself evidence.
             if (string.Equals(
                     args.Request.DeduplicationKey,
                     "file-move-desktop",
+                    StringComparison.Ordinal) ||
+                string.Equals(
+                    args.Request.DeduplicationKey,
+                    "file-action-error",
                     StringComparison.Ordinal))
             {
                 feedbackCompletion.TrySetResult(args.Request);

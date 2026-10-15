@@ -153,7 +153,6 @@ public sealed partial class SearchPopupWindow : Window
 
         _viewModel.ActionRequested += OnViewModelActionRequested;
         _viewModel.ContentRequested += OnViewModelContentRequested;
-        _viewModel.QueryApplied += OnViewModelQueryApplied;
         _viewModel.PropertyChanged += OnViewModelPropertyChanged;
         ResultsRepeater.ElementPrepared += OnResultsElementPrepared;
         RecommendedAppsRepeater.ElementPrepared += OnRecommendedAppsElementPrepared;
@@ -804,10 +803,7 @@ public sealed partial class SearchPopupWindow : Window
 
     private static void SetPointerCursor(UIElement element, InputSystemCursorShape shape)
     {
-        var property = typeof(UIElement).GetProperty(
-            "ProtectedCursor",
-            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
-        property?.SetValue(element, InputSystemCursor.Create(shape));
+        UiElementCursorHelper.SetCursor(element, shape);
     }
 
     /// <summary>
@@ -1312,48 +1308,14 @@ public sealed partial class SearchPopupWindow : Window
         FilterImagesItem.Content = _localizationService.T("Search.Filter.Images");
         FilterDocumentsItem.Content = _localizationService.T("Search.Filter.Documents");
         FilterDeskBoxItem.Content = _localizationService.T("Search.Filter.DeskBox");
-        HomeSectionHeader.Text = _localizationService.T("Search.Section.RecommendedApps");
         OpenSelectedLabel.Text = _localizationService.T("Search.Menu.Open");
         OpenLocationLabel.Text = _localizationService.T("Search.Menu.OpenLocation");
         AttachSelectedLabel.Text = _localizationService.T("Search.Menu.AttachToTodo");
         SaveSelectedLabel.Text = _localizationService.T("Search.Menu.SaveToNote");
 
-        // Recommendation panel localization
-        FavoritesHeaderText.Text = _localizationService.T("Search.Recommend.Favorite");
-        RecentSearchesHeaderText.Text = _localizationService.T("Search.Recommend.History");
-        ClearAllButton.Content = _localizationService.T("Search.Section.ClearHistory");
-        ClearRecentButton.Content = _localizationService.T("Search.Section.ClearHistory");
-        ConfirmClearAllItem.Text = _localizationService.T("Search.Section.ClearHistory");
-        ConfirmClearRecentItem.Text = _localizationService.T("Search.Section.ClearHistory");
-
         TabsList.ItemsSource = _viewModel.Tabs;
         ResultsRepeater.ItemsSource = _viewModel.CurrentResults;
         RecommendedAppsRepeater.ItemsSource = _viewModel.CurrentResults;
-        
-        // Bind recommendation panels (favorites and recent searches)
-        var favorites = _viewModel.FavoriteQueries
-            .Select(query => new SearchRecommendationItem
-            {
-                Kind = SearchResultKind.Favorite,
-                Title = query,
-                HistoryQuery = query
-            })
-            .ToList();
-        var recent = _viewModel.RecentQueries
-            .Take(8)
-            .Select(query => new SearchRecommendationItem
-            {
-                Kind = SearchResultKind.History,
-                Title = query,
-                HistoryQuery = query
-            })
-            .ToList();
-        FavoritesRepeater.ItemsSource = favorites;
-        RecentSearchesRepeater.ItemsSource = recent;
-
-        // Hook up item tap events for recommendations
-        FavoritesRepeater.ElementPrepared += (s, e) => UpdateRecItemClickEvent(e.Element);
-        RecentSearchesRepeater.ElementPrepared += (s, e) => UpdateRecItemClickEvent(e.Element);
 
         UpdatePanelVisibility();
         UpdateSortHeaders();
@@ -1412,12 +1374,20 @@ public sealed partial class SearchPopupWindow : Window
         // ── Recommended apps panel takes priority when visible ──
         bool recommendedVisible = RecommendedAppsPanel.Visibility == Visibility.Visible;
 
-        // Escape: clear recommended app selection first, then hide popup.
+        // Escape: clear recommended app selection first, then hand focus back
+        // from a sort header to the search box (same tier as the results
+        // panel's Escape), then hide popup.
         if (e.Key == Windows.System.VirtualKey.Escape)
         {
             if (_selectedAppIndex >= 0)
             {
                 ClearRecommendedAppSelection();
+                SearchTextBox.Focus(FocusState.Programmatic);
+                e.Handled = true;
+                return;
+            }
+            if (FocusManager.GetFocusedElement() is Button focusedHeader && IsSortHeaderButton(focusedHeader))
+            {
                 SearchTextBox.Focus(FocusState.Programmatic);
                 e.Handled = true;
                 return;
@@ -1473,7 +1443,32 @@ public sealed partial class SearchPopupWindow : Window
                 e.Handled = true;
             }
         }
+
+        // Sort headers joined the tab chain: printable keys falling through
+        // from a focused header must keep flowing into the query, mirroring
+        // the results panel's redirect (ResultsPanel_KeyDown default branch).
+        // Modifier chords stay untouched — Ctrl+A/C/V must not insert
+        // literal characters into the query.
+        if (!Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Control) &&
+            !Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Menu) &&
+            FocusManager.GetFocusedElement() is Button focusedControl &&
+            IsSortHeaderButton(focusedControl))
+        {
+            if (TryRedirectCharToSearchBox(e.Key))
+            {
+                e.Handled = true;
+            }
+        }
     }
+
+    /// <summary>
+    /// The four result sort headers are the only buttons on the tab chain
+    /// whose character input must flow into the query instead of being
+    /// dropped; the filter combos and other controls keep their own editing.
+    /// </summary>
+    private bool IsSortHeaderButton(Button button) =>
+        button == SortNameHeader || button == SortTypeHeader ||
+        button == SortSizeHeader || button == SortDateHeader;
 
     private bool TryMoveResultSelection(Windows.System.VirtualKey key)
     {
@@ -1749,10 +1744,6 @@ public sealed partial class SearchPopupWindow : Window
             ? Visibility.Visible
             : Visibility.Collapsed;
 
-        HomeSectionHeader.Visibility = Visibility.Collapsed;
-
-        RecommendationPanel.Visibility = Visibility.Collapsed;
-
         UpdateSelectionActions();
     }
 
@@ -1984,29 +1975,6 @@ public sealed partial class SearchPopupWindow : Window
         return true;
     }
 
-    /// <summary>
-    /// Updates click event handlers on recommendation list items so tapping applies the query.
-    /// </summary>
-    private void UpdateRecItemClickEvent(DependencyObject element)
-    {
-        if (element is FrameworkElement fe &&
-            fe.DataContext is SearchRecommendationItem)
-        {
-            fe.PointerPressed -= OnRecommendationItem_PointerPressed;
-            fe.PointerPressed += OnRecommendationItem_PointerPressed;
-        }
-    }
-
-    private void OnRecommendationItem_PointerPressed(object sender, PointerRoutedEventArgs e)
-    {
-        if (sender is FrameworkElement fe &&
-            fe.DataContext is SearchRecommendationItem { HistoryQuery: { } queryText })
-        {
-            _viewModel.ApplyQuery(queryText);
-            e.Handled = true;
-        }
-    }
-
     private void OpenSettingsButton_Click(object sender, RoutedEventArgs e)
     {
         _viewModel.InvokeAction("open-settings");
@@ -2176,7 +2144,6 @@ public sealed partial class SearchPopupWindow : Window
         AppsSkeletonRepeater.ItemsSource = Enumerable.Range(0, count).Select(_ => new object()).ToList();
         AppsSkeletonPanel.Visibility = Visibility.Visible;
         RecommendedAppsPanel.Visibility = Visibility.Collapsed;
-        HomeSectionHeader.Visibility = Visibility.Collapsed;
 
         var visual = ElementCompositionPreview.GetElementVisual(AppsSkeletonPanel);
         visual.StopAnimation("Opacity");
@@ -2536,38 +2503,6 @@ public sealed partial class SearchPopupWindow : Window
             // Assigning the same value the view model already holds would
             // re-enter SelectionChanged without changing state.
             ResultFilterComboBox.SelectedIndex = index;
-        }
-    }
-
-    /// <summary>
-    /// Clear history button clicked - confirms via flyout and clears appropriate data.
-    /// </summary>
-    private void ClearHistoryButton_Click(object sender, RoutedEventArgs e)
-    {
-        // This method is a placeholder; actual clearing happens in ConfirmClearHistory_Click
-    }
-
-    /// <summary>
-    /// Confirms clear action from the confirmation menu item.
-    /// Uses the button's Tag property to identify type of clear.
-    /// </summary>
-    private void ConfirmClearHistory_Click(object sender, RoutedEventArgs e)
-    {
-        var menuItem = sender as MenuFlyoutItem;
-        if (menuItem?.Parent is MenuFlyout parentFlyout)
-        {
-            // Get tag from the button to determine type
-            if (parentFlyout.Target is Button buttonElement && buttonElement.Tag is string clearType)
-            {
-                if (clearType == "all")
-                {
-                    _viewModel.ClearAllHistory();
-                }
-                else
-                {
-                    _viewModel.ClearRecentSearches();
-                }
-            }
         }
     }
 
@@ -3669,51 +3604,49 @@ public sealed partial class SearchPopupWindow : Window
             return;
         }
 
-        var dialog = new ContentDialog
-        {
-            XamlRoot = RootGrid.XamlRoot,
-            Title = string.Format(_localizationService.T("Search.Batch.DeleteTitle"), items.Count),
-            Content = _localizationService.T("Search.Delete.Message"),
-            PrimaryButtonText = _localizationService.T("Search.Delete.Action"),
-            CloseButtonText = _localizationService.T("Common.Cancel"),
-            DefaultButton = ContentDialogButton.Close
-        };
+        await DeleteFileSystemItemsCoreAsync(
+            items.Select(i => i.DetailPath!),
+            clearMultiSelectionOnSuccess: true);
+    }
 
-        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+    /// <summary>
+    /// Deletes search-result entries through the Shell with an owner window,
+    /// so the native confirmation (recycle or permanent, per the user's own
+    /// Explorer settings) replaces the retired self-drawn dialog: that dialog
+    /// promised a Recycle Bin while the underlying flags silently degraded to
+    /// a permanent delete on volumes without one.
+    /// </summary>
+    private async Task DeleteFileSystemItemsCoreAsync(
+        IEnumerable<string> paths,
+        bool clearMultiSelectionOnSuccess)
+    {
+        var fileService = (App.Current as App)?.FileService;
+        if (fileService is null || _hwnd == IntPtr.Zero)
         {
+            ShowTransientStatus(_localizationService.T("Search.Action.FileOperationFailed"));
             return;
         }
 
         try
         {
-            await Task.Run(() =>
+            IReadOnlySet<string> deletedPaths = await fileService.DeleteEntriesWithShellAsync(
+                paths,
+                recycle: true,
+                _hwnd);
+            if (deletedPaths.Count > 0)
             {
-                foreach (var item in items)
+                ShowTransientStatus(_localizationService.T("Search.Action.Deleted"));
+                if (clearMultiSelectionOnSuccess)
                 {
-                    var path = item.DetailPath!;
-                    if (File.Exists(path))
-                    {
-                        Microsoft.VisualBasic.FileIO.FileSystem.DeleteFile(
-                            path,
-                            Microsoft.VisualBasic.FileIO.UIOption.OnlyErrorDialogs,
-                            Microsoft.VisualBasic.FileIO.RecycleOption.SendToRecycleBin);
-                    }
-                    else if (Directory.Exists(path))
-                    {
-                        Microsoft.VisualBasic.FileIO.FileSystem.DeleteDirectory(
-                            path,
-                            Microsoft.VisualBasic.FileIO.UIOption.OnlyErrorDialogs,
-                            Microsoft.VisualBasic.FileIO.RecycleOption.SendToRecycleBin);
-                    }
+                    ClearMultiSelection();
                 }
-            });
-            ShowTransientStatus(_localizationService.T("Search.Action.Deleted"));
-            ClearMultiSelection();
+            }
+
             await RefreshResultsAfterFileOperationAsync();
         }
         catch (Exception ex)
         {
-            App.Log($"[SearchPopup] Batch delete failed: {ex.Message}");
+            App.Log($"[SearchPopup] Delete failed: {ex.Message}");
             ShowTransientStatus(_localizationService.T("Search.Action.FileOperationFailed"));
         }
     }
@@ -3965,48 +3898,9 @@ public sealed partial class SearchPopupWindow : Window
             return;
         }
 
-        var dialog = new ContentDialog
-        {
-            XamlRoot = RootGrid.XamlRoot,
-            Title = string.Format(_localizationService.T("Search.Delete.Title"), item.Title),
-            Content = _localizationService.T("Search.Delete.Message"),
-            PrimaryButtonText = _localizationService.T("Search.Delete.Action"),
-            CloseButtonText = _localizationService.T("Common.Cancel"),
-            DefaultButton = ContentDialogButton.Close
-        };
-
-        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
-        {
-            return;
-        }
-
-        try
-        {
-            await Task.Run(() =>
-            {
-                if (File.Exists(path))
-                {
-                    Microsoft.VisualBasic.FileIO.FileSystem.DeleteFile(
-                        path,
-                        Microsoft.VisualBasic.FileIO.UIOption.OnlyErrorDialogs,
-                        Microsoft.VisualBasic.FileIO.RecycleOption.SendToRecycleBin);
-                }
-                else
-                {
-                    Microsoft.VisualBasic.FileIO.FileSystem.DeleteDirectory(
-                        path,
-                        Microsoft.VisualBasic.FileIO.UIOption.OnlyErrorDialogs,
-                        Microsoft.VisualBasic.FileIO.RecycleOption.SendToRecycleBin);
-                }
-            });
-            ShowTransientStatus(_localizationService.T("Search.Action.Deleted"));
-            await RefreshResultsAfterFileOperationAsync();
-        }
-        catch (Exception ex)
-        {
-            App.Log($"[SearchPopup] Delete failed: {ex.Message}");
-            ShowTransientStatus(_localizationService.T("Search.Action.FileOperationFailed"));
-        }
+        await DeleteFileSystemItemsCoreAsync(
+            [path],
+            clearMultiSelectionOnSuccess: false);
     }
 
     private void ShowFileSystemItemProperties(SearchResultItem item)
@@ -4381,14 +4275,6 @@ public sealed partial class SearchPopupWindow : Window
         ContentRequested?.Invoke(this, item);
     }
 
-    private void OnViewModelQueryApplied(object? sender, string query)
-    {
-        // Reflect the applied history/favorite query into the search box and re-focus.
-        SearchTextBox.Text = query;
-        SearchTextBox.Focus(FocusState.Programmatic);
-        UpdatePanelVisibility();
-    }
-
     private void OnWindowClosed(object sender, WindowEventArgs args)
     {
         App.Log(
@@ -4396,7 +4282,6 @@ public sealed partial class SearchPopupWindow : Window
             $"hwnd=0x{_hwnd.ToInt64():X}");
         _viewModel.ActionRequested -= OnViewModelActionRequested;
         _viewModel.ContentRequested -= OnViewModelContentRequested;
-        _viewModel.QueryApplied -= OnViewModelQueryApplied;
         _viewModel.PropertyChanged -= OnViewModelPropertyChanged;
         ResultsRepeater.ElementPrepared -= OnResultsElementPrepared;
         RecommendedAppsRepeater.ElementPrepared -= OnRecommendedAppsElementPrepared;
@@ -4417,8 +4302,6 @@ public sealed partial class SearchPopupWindow : Window
         _rubberBandAutoScrollTimer?.Stop();
         ResultsRepeater.ItemsSource = null;
         RecommendedAppsRepeater.ItemsSource = null;
-        FavoritesRepeater.ItemsSource = null;
-        RecentSearchesRepeater.ItemsSource = null;
         TabsList.ItemsSource = null;
         DisposeAcrylicController();
         DisposeMicaController();

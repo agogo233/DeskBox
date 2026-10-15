@@ -8,11 +8,33 @@ using WinRT.Interop;
 
 namespace DeskBox.Views;
 
+/// <summary>Body/button shape the elevation notice takes.</summary>
+public enum ElevationNoticeVariant
+{
+    /// <summary>DeskBox is elevated above the shell. Offer a one-click exit
+    /// of the elevated instance; the user restarts DeskBox normally (a
+    /// plain launch lands at the shell's standard-user level). The notice
+    /// deliberately no longer relaunches the app itself: the shell-parented
+    /// hand-over spawned a Medium child whose startup state differed from a
+    /// normal launch (silent-startup hide followed by a raised reveal), and
+    /// that combination starved drags on the current tree. Self-serve keeps
+    /// every restarted instance on the plain, field-proven path.</summary>
+    ExitElevatedInstance,
+
+    /// <summary>The shell runs above this process: tray creation and
+    /// cross-level drag are UIPI-blocked and the app cannot change the
+    /// shell's token. Explain the degraded session instead.</summary>
+    ExplainShellAboveApp
+}
+
 /// <summary>
-/// One-shot notice shown when DeskBox was launched elevated. Elevated
-/// DeskBox can neither receive OLE drops from Explorer (UIPI) nor start XAML
-/// drags, so an elevated launch either offers a one-click unelevated restart
-/// (when a standard-user context exists) or explains the limitation.
+/// One-shot notice shown when DeskBox and the shell sit at different
+/// integrity levels. An elevated DeskBox under a standard shell can neither
+/// receive OLE drops nor start XAML drags, so it offers a one-click exit and
+/// asks the user to restart DeskBox normally; a standard DeskBox under an
+/// elevated shell has its tray blocked and gets an explanation instead.
+/// Same-level sessions (including fully elevated desktops) never see this
+/// window.
 /// </summary>
 public sealed partial class ElevationNoticeWindow : Window
 {
@@ -20,33 +42,47 @@ public sealed partial class ElevationNoticeWindow : Window
     private const int DesiredWindowHeight = 360;
     private const int WindowWorkAreaMargin = 80;
 
-    private readonly StartupElevationAssessment _assessment;
     private readonly AppWindow _appWindow;
     private readonly IntPtr _hWnd;
-    private bool _relaunchAttempted;
+    private bool _exitStarted;
+
+    /// <summary>
+    /// Pure variant selection, testable without a window: the notice never
+    /// offers an action the environment cannot deliver, and never claims a
+    /// fixable problem on same-level desktops (those never reach this
+    /// window).
+    /// </summary>
+    internal static ElevationNoticeVariant SelectVariant(StartupElevationAssessment assessment) =>
+        assessment.Mismatch == ShellIntegrityMismatch.ShellAboveApp
+            ? ElevationNoticeVariant.ExplainShellAboveApp
+            : ElevationNoticeVariant.ExitElevatedInstance;
 
     public ElevationNoticeWindow(
         LocalizationService localizationService,
         StartupElevationAssessment assessment)
     {
-        _assessment = assessment;
         InitializeComponent();
 
         WindowsCompatibilityService.ApplySafeBackdrop(this);
 
         Title = localizationService.T("Startup.ElevationNotice.Title");
         TitleText.Text = localizationService.T("Startup.ElevationNotice.Title");
-        BodyText.Text = _assessment.CanRelaunchUnelevated
-            ? localizationService.T("Startup.ElevationNotice.BodyCanRelaunch")
-            : localizationService.T("Startup.ElevationNotice.BodyCannotRelaunch");
-        RelaunchButton.Content = localizationService.T("Startup.ElevationNotice.RelaunchButton");
-        ContinueButton.Content = localizationService.T("Startup.ElevationNotice.ContinueButton");
+        ExitButton.Content = localizationService.T("Startup.ElevationNotice.ExitButton");
         OkButton.Content = localizationService.T("Startup.ElevationNotice.OkButton");
 
-        if (!_assessment.CanRelaunchUnelevated)
+        ElevationNoticeVariant variant = SelectVariant(assessment);
+        BodyText.Text = variant == ElevationNoticeVariant.ExplainShellAboveApp
+            ? localizationService.T("Startup.ElevationNotice.BodyShellAboveApp")
+            : localizationService.T("Startup.ElevationNotice.BodyExitAndRestart");
+
+        if (variant == ElevationNoticeVariant.ExitElevatedInstance)
         {
-            RelaunchButton.Visibility = Visibility.Collapsed;
-            ContinueButton.Visibility = Visibility.Collapsed;
+            ExitButton.Visibility = Visibility.Visible;
+            OkButton.Visibility = Visibility.Collapsed;
+        }
+        else
+        {
+            ExitButton.Visibility = Visibility.Collapsed;
             OkButton.Visibility = Visibility.Visible;
         }
 
@@ -65,43 +101,24 @@ public sealed partial class ElevationNoticeWindow : Window
         ResizeAndCenterForDisplay(windowId);
     }
 
-    private async void RelaunchButton_Click(object sender, RoutedEventArgs e)
+    private async void ExitButton_Click(object sender, RoutedEventArgs e)
     {
-        if (_relaunchAttempted)
+        if (_exitStarted)
         {
             return;
         }
 
-        _relaunchAttempted = true;
-        RelaunchButton.IsEnabled = false;
-        ContinueButton.IsEnabled = false;
+        _exitStarted = true;
+        ExitButton.IsEnabled = false;
+        OkButton.IsEnabled = false;
 
-        // A persisted RUNASADMIN compatibility layer would relaunch elevated
-        // again, so clear it before handing over.
-        _ = DragDropPermissionService.ClearElevationCompatibilityFlags();
-
-        string arguments = $"--await-parent-exit {Environment.ProcessId}";
-        if (DragDropPermissionService.TryRelaunchAsExplorerUser(arguments))
-        {
-            App.Log("[Elevation] Unelevated relaunch scheduled; shutting down elevated instance");
-            // A bare Application.Exit() called inline from an input handler is
-            // deferred through the XAML message loop and never consumed — the
-            // process stayed alive with its tray second window closed (real
-            // machine: relaunch watchdog timed out and reactivated the
-            // elevated zombie). The full shutdown path has the deadline and
-            // Environment.Exit fallbacks that guarantee process death.
-            Close();
-            await App.Current.ShutdownForRestartAsync();
-            // Not reached on a healthy exit; surface the state if it ever is.
-            App.Log("[Elevation] ShutdownForRestartAsync returned after relaunch");
-        }
-
-        App.Log("[Elevation] Unelevated relaunch failed from notice");
-        BodyText.Text = App.Current.LocalizationService.T(
-            "Settings.DragDropPermission.RelaunchFailedBody");
-        RelaunchButton.Visibility = Visibility.Collapsed;
-        ContinueButton.IsEnabled = true;
-        ContinueButton.Focus(FocusState.Programmatic);
+        // The full shutdown path carries the deadline and hard-exit
+        // backstops that guarantee process death (measured 0.5 s), so the
+        // single-instance mutex frees for the user's normal restart.
+        App.Log("[Elevation] Exiting elevated instance from notice; user restart expected");
+        Close();
+        await App.Current.ShutdownForRestartAsync();
+        App.Log("[Elevation] ShutdownForRestartAsync returned after notice exit");
     }
 
     private void ContinueButton_Click(object sender, RoutedEventArgs e)

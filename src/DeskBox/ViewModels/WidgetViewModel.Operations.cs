@@ -522,12 +522,34 @@ public partial class WidgetViewModel
             return 0;
         }
 
-        var operation = await _organizerService.MoveItemsBackToDesktopAsync(
-            Config,
-            Name,
-            targets.Select(item => item.Path),
-            useShellProgress,
-            ownerWindowHandle);
+        OrganizerOperationResult operation;
+        try
+        {
+            operation = await _organizerService.MoveItemsBackToDesktopAsync(
+                Config,
+                Name,
+                targets.Select(item => item.Path),
+                useShellProgress,
+                ownerWindowHandle);
+        }
+        catch (FileService.FileTransferCanceledException ex)
+        {
+            // A shell transfer the user cancelled mid-way: the organizer
+            // already recorded the completed set's history, so reconcile
+            // the view and return the count — the surface turns it into the
+            // same moved-N/none-moved feedback the retired legacy bridge's
+            // silent partial return used to produce.
+            var canceledMovedPaths = ex.CompletedResults
+                .Select(result => result.SourcePath)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            foreach (var item in targets.Where(item => canceledMovedPaths.Contains(item.Path)))
+            {
+                RemoveItemByPath(item.Path);
+            }
+
+            RemoveStackMemberOverridePaths(canceledMovedPaths);
+            return canceledMovedPaths.Count;
+        }
 
         // CompletedItems (not the persisted History entry) carries this
         // run's receipts: oversized batches are compacted to a summary
@@ -546,7 +568,8 @@ public partial class WidgetViewModel
         return movedSourcePaths.Count;
     }
 
-    public async Task RefreshFromConfigAsync()
+    public async Task RefreshFromConfigAsync(
+        bool clearIconCacheBeforeHydration = true)
     {
         using var perfScope = PerformanceLogger.Measure(
             "WidgetViewModel.RefreshFromConfig",
@@ -561,10 +584,20 @@ public partial class WidgetViewModel
         OnPropertyChanged(nameof(FollowsDefaultStoragePath));
         ApplyStackSettings();
 
+        if (!clearIconCacheBeforeHydration)
+        {
+            // The freshness ledger at the refresh merge owns icon
+            // invalidation now; a recovery refresh additionally resets
+            // retry-state markers so timed-out sources get a fresh attempt —
+            // the wake-recovery property the blanket clear used to carry,
+            // minus the visible placeholder churn on mapped folders.
+            _fileService.ResetIconTransientFailures();
+        }
+
         await ConfigureFolderWatchersAsync(CurrentFolderPath);
         await ReloadFolderContentsAsync(
             CurrentFolderPath!,
-            clearIconCacheBeforeHydration: true);
+            clearIconCacheBeforeHydration);
         UpdateDependentProperties();
     }
 

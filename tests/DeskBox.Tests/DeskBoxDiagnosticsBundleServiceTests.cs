@@ -36,7 +36,7 @@ public sealed class DeskBoxDiagnosticsBundleServiceTests : IDisposable
             .Order(StringComparer.Ordinal)
             .ToArray();
         Assert.Equal(
-            new[] { "DeskBox-sanitized.log", "README.txt", "diagnostics.json" }
+            new[] { "DeskBox-sanitized.log", "README.txt", "diagnostics.json", "windows-events.json" }
                 .Order(StringComparer.Ordinal),
             entryNames);
 
@@ -58,7 +58,41 @@ public sealed class DeskBoxDiagnosticsBundleServiceTests : IDisposable
         Assert.Contains("\"widgetManager\"", diagnostics, StringComparison.Ordinal);
         Assert.Contains("\"fileHosts\"", diagnostics, StringComparison.Ordinal);
         Assert.Contains("\"strategy\": \"Unavailable\"", diagnostics, StringComparison.Ordinal);
+        Assert.Contains("\"startupLedger\"", diagnostics, StringComparison.Ordinal);
+        Assert.Contains("\"stormGuardActive\": true", diagnostics, StringComparison.Ordinal);
+        Assert.Contains("\"assessmentReason\"", diagnostics, StringComparison.Ordinal);
         Assert.DoesNotContain("settings.json", diagnostics, StringComparison.OrdinalIgnoreCase);
+
+        // The crash-event report ships on every export — with events, empty,
+        // or explicitly unavailable — because "was there a crash at all?" is
+        // the first question every loop report raises (feedback #576).
+        string crashEvents = await ReadEntryAsync(archive, "windows-events.json");
+        Assert.Contains("\"schemaVersion\": 1", crashEvents, StringComparison.Ordinal);
+        Assert.Contains("\"status\"", crashEvents, StringComparison.Ordinal);
+        Assert.Contains("\"windowStartUtc\"", crashEvents, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SanitizeDiagnosticsValue_KeepsImageNameButRedactsDirectories()
+    {
+        string value = $@"C:\Users\{Environment.UserName}\AppData\Local\DeskBox\DeskBox.exe";
+
+        string sanitized = DeskBoxDiagnosticsBundleService.SanitizeDiagnosticsValue(value);
+
+        Assert.DoesNotContain(Environment.UserName, sanitized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("AppData", sanitized, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("<PATH>\\DeskBox.exe", sanitized, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SanitizeDiagnosticsValue_RedactsEmailsAndSids()
+    {
+        string sanitized = DeskBoxDiagnosticsBundleService.SanitizeDiagnosticsValue(
+            $"user-{Environment.UserName}@example.com S-1-5-21-1-2-3-4");
+
+        Assert.DoesNotContain(Environment.UserName, sanitized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("@example.com", sanitized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("S-1-5-21-1-2-3-4", sanitized, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -188,7 +222,11 @@ public sealed class DeskBoxDiagnosticsBundleServiceTests : IDisposable
                     1.5,
                     new DeskBoxDiagnosticRect(0, 0, 1920, 1080),
                     new DeskBoxDiagnosticRect(0, 0, 1920, 1040))
-            ]);
+            ],
+            StartupLedger: new DeskBoxStartupLedgerDiagnostic(
+                true,
+                "abnormal-exit-age=120s",
+                new DateTimeOffset(2026, 10, 13, 13, 49, 49, TimeSpan.Zero)));
     }
 
     private static async Task<string> ReadEntryAsync(ZipArchive archive, string name)

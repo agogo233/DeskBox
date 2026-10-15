@@ -31,9 +31,13 @@ public partial class App
                 SettingsService.Settings.SearchHotkeyKey);
         ShortcutNativeDiagnosticState shortcutNative =
             ShortcutNativeBackend.CaptureDiagnosticState();
+        var startupLedger = new DeskBoxStartupLedgerDiagnostic(
+            StormGuardActive: _startupStormAssessment?.SuppressFileMutatingStartup == true,
+            AssessmentReason: _startupStormAssessment?.Reason,
+            PreviousLaunchStartedAtUtc: _startupStormAssessment?.PreviousLaunchStartedAtUtc);
 
         return new DeskBoxDiagnosticSnapshot(
-            SchemaVersion: 6,
+            SchemaVersion: 7,
             GeneratedAtUtc: DateTimeOffset.UtcNow,
             AppVersion: GetDiagnosticVersion(),
             DistributionChannel: DistributionService.ChannelName,
@@ -78,7 +82,8 @@ public partial class App
             RuntimeHealth: runtimeHealth,
             WidgetManager: widgetManager,
             Displays: displays,
-            StorageMigration: WidgetManager?.StorageMigrationDiagnostic);
+            StorageMigration: WidgetManager?.StorageMigrationDiagnostic,
+            StartupLedger: startupLedger);
     }
 
     private static IReadOnlyList<DeskBoxDisplayDiagnostic> GetDisplayDiagnostics()

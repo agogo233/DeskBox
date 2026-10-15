@@ -1025,7 +1025,7 @@ public partial class App
 
         _trayIcon.ToolTipText = _widgetsRaisedFromTray
             ? LocalizationService.T("Tray.TooltipRaised")
-            : LocalizationService.T("Tray.Tooltip");
+            : LocalizationService.T("Tray.TooltipNormal");
     }
 
     private static string GetCreateEntryText(WidgetContentDescriptor descriptor, LocalizationService localization)
@@ -1138,7 +1138,12 @@ public partial class App
     private void ShowFolderMappingFailure(string message)
     {
         string title = LocalizationService.T("Common.NewFolderMapping");
-        if (_nativeNotificationService?.TryShow(title, message) == true || _trayIcon is null)
+        if (_nativeNotificationService?.TryShow(
+                title,
+                message,
+                options: new NativeAppNotificationOptions(
+                    Tag: FolderMappingConflictNotificationTag,
+                    Group: FolderMappingNotificationGroup)) == true || _trayIcon is null)
         {
             return;
         }

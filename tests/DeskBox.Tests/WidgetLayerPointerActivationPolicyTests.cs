@@ -5,16 +5,21 @@ namespace DeskBox.Tests;
 public sealed class WidgetLayerPointerActivationPolicyTests
 {
     [Theory]
-    [InlineData(false, true, false, false, false)]
-    [InlineData(true, false, false, false, false)]
-    [InlineData(true, true, true, false, false)]
-    [InlineData(true, true, false, true, false)]
-    [InlineData(true, true, false, false, true)]
-    public void PointerActivation_IsSuppressedOnlyForPinnedWidgetBehindForeignWindow(
+    [InlineData(false, true, false, false, false, false)]
+    [InlineData(true, false, false, false, false, false)]
+    [InlineData(true, true, true, false, false, false)]
+    [InlineData(true, true, false, true, false, false)]
+    [InlineData(true, true, false, false, false, true)]
+    [InlineData(true, true, true, false, true, true)]
+    [InlineData(true, true, false, true, true, true)]
+    [InlineData(true, false, false, false, true, true)]
+    [InlineData(false, true, false, false, true, false)]
+    public void PointerActivation_IsSuppressedForCoveredPinnedWidgetOrForeignForeground(
         bool usesDesktopPinnedMode,
         bool hasForegroundWindow,
         bool foregroundIsDesktopShell,
         bool foregroundIsWidget,
+        bool coveredByForeignWindow,
         bool expected)
     {
         Assert.Equal(
@@ -23,7 +28,8 @@ public sealed class WidgetLayerPointerActivationPolicyTests
                 usesDesktopPinnedMode,
                 hasForegroundWindow,
                 foregroundIsDesktopShell,
-                foregroundIsWidget));
+                foregroundIsWidget,
+                coveredByForeignWindow));
     }
 
     [Theory]

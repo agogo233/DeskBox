@@ -6,7 +6,6 @@ using DeskBox.Services.Plugins;
 using DeskBox.Platform;
 using DeskBox.ViewModels;
 using DeskBox.Views;
-using Microsoft.UI.Dispatching;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 
@@ -266,21 +265,18 @@ public sealed partial class WidgetManager :
         bool forceScheduleWhenHidden = false,
         bool? observedNativeVisibility = null)
     {
+        if (App.IsShuttingDown)
+        {
+            return;
+        }
+
         if (!HasUiThreadAccess())
         {
-            DispatcherQueue? dispatcherQueue = App.UiDispatcherQueue;
-            bool enqueued = dispatcherQueue?.TryEnqueue(() =>
+            UiDispatch.RunOrDefer(() =>
                 ReconcileBackgroundMemoryCleanupForWidgetVisibility(
                     reason,
                     forceScheduleWhenHidden,
-                    observedNativeVisibility)) == true;
-            if (!enqueued)
-            {
-                App.Log(
-                    $"[Memory] Widget visibility reconciliation failed " +
-                    $"reason={reason} error=dispatcher-unavailable");
-            }
-
+                    observedNativeVisibility));
             return;
         }
 
@@ -727,8 +723,7 @@ public sealed partial class WidgetManager :
     {
         if (!HasUiThreadAccess())
         {
-            App.UiDispatcherQueue?.TryEnqueue(
-                ApplyPerformanceSettingsIfChanged);
+            UiDispatch.RunOrDefer(ApplyPerformanceSettingsIfChanged);
             return;
         }
 
@@ -782,7 +777,7 @@ public sealed partial class WidgetManager :
     {
         if (!HasUiThreadAccess())
         {
-            App.UiDispatcherQueue.TryEnqueue(
+            UiDispatch.RunOrDefer(
                 () => RefreshVisibleWidgetDesktopLayers(reason, absoluteDesktopBottom));
             return;
         }
@@ -1499,6 +1494,11 @@ public sealed partial class WidgetManager :
             NormalizeIdleWidgetZOrder("set-all-visible");
             SaveBatchVisibilityState();
             await _trayBatchAnimationDriver.WaitForIdleAsync();
+            // Reveal re-shows each window from its own persisted placement
+            // without re-running the bar arrangement; overlapping capsules
+            // then only healed on the next drag. Verify the bar once the
+            // reveal settles (feedback 327).
+            ScheduleCapsuleArrangementConsistencyCheck("tray-reveal-completed");
             App.LogVerbose($"[TrayBatch] SetAllVisible completed visible=true prepared={windowsToShow.Count} shown={shownWindows.Count}");
             return;
         }
@@ -1618,11 +1618,20 @@ public sealed partial class WidgetManager :
 
         await Task.Yield();
         QueueIdleWidgetZOrderNormalization("display-topology-restored");
+        // 289: topology/DPI churn is a known leak window for the pinned
+        // group's owner-band bedding; verify it once the positions settle.
+        QueueDesktopPinnedBeddingRecheck(
+            "display-topology-restored",
+            TimeSpan.FromMilliseconds(400));
         PlacePendingInitialWidgets();
         ApplyDisconnectCollapsePolicy(
             Win32Helper.GetMonitorWorkAreaInfos()
                 .Select(area => Win32Helper.ResolveStableMonitorId(area.DeviceName))
                 .ToList());
+        // Per-window restore can strand two bar members on one slot with no
+        // later event to heal it (feedback 327). The debounced check
+        // re-runs the bar arrangement once the burst of restores settles.
+        ScheduleCapsuleArrangementConsistencyCheck("display-topology-restored");
         return allRestored;
     }
 
@@ -1644,11 +1653,15 @@ public sealed partial class WidgetManager :
     /// group surface and every member when grouped (regardless of which
     /// member the change arrives through), repositions the live host window,
     /// and captures the settled geometry into the active topology profile.
+    /// Batch callers (move-all) pass <paramref name="persistImmediately"/>:
+    /// false to skip the trailing per-surface save and persist the whole
+    /// batch once themselves at the end.
     /// </summary>
     public async Task ApplyScreenBindingAsync(
         string widgetId,
         WidgetScreenBindingMode mode,
-        string? boundScreenId)
+        string? boundScreenId,
+        bool persistImmediately = true)
     {
         if (FindConfig(widgetId) is not { } config)
         {
@@ -1738,7 +1751,13 @@ public sealed partial class WidgetManager :
         MarkSurfaceEntryAuthoritative(
             config,
             stableIdOverride: mode == WidgetScreenBindingMode.Pinned ? boundScreenId : null);
-        await _settingsService.SaveAsync();
+        // persistImmediately=false: a batch caller (move-all) saves the whole
+        // batch once at its end; the in-memory binding, window reposition,
+        // and topology capture above are already complete at this point.
+        if (persistImmediately)
+        {
+            await _settingsService.SaveAsync();
+        }
         NotifyScreenHomeChangedAction?.Invoke();
     }
 
@@ -1958,11 +1977,28 @@ public sealed partial class WidgetManager :
     /// <summary>
     /// Remove a widget and close its window.
     /// </summary>
-    public async Task RemoveWidgetAsync(string widgetId, WidgetRemovalAction removalAction = WidgetRemovalAction.RemoveWidgetOnly)
+    public async Task RemoveWidgetAsync(
+        string widgetId,
+        WidgetRemovalAction removalAction = WidgetRemovalAction.RemoveWidgetOnly,
+        IntPtr ownerWindowHandle = default)
     {
         var config = FindConfig(widgetId);
         if (config is not null)
         {
+            // Managed-folder cleanup runs before any irreversible removal
+            // step: a failed move-back or recycle throws here and leaves the
+            // widget fully intact, so the close flow can surface the error
+            // and the user can retry. Structurally invalid cleanup requests
+            // (e.g. a widget on a non-default storage path) downgrade to
+            // widget-only removal instead of blocking the deletion.
+            bool folderCleanupApplicable =
+                removalAction != WidgetRemovalAction.RemoveWidgetOnly &&
+                config.FollowsDefaultStoragePath &&
+                IsDefaultManagedStorageFolder(config.MappedFolderPath);
+            await ApplyWidgetRemovalActionAsync(
+                config,
+                folderCleanupApplicable ? removalAction : WidgetRemovalAction.RemoveWidgetOnly,
+                ownerWindowHandle);
             await RemoveWidgetFromGroupAsync(widgetId, revealStandalone: false);
         }
         _deletedWidgetIds.Add(widgetId);
@@ -1996,15 +2032,6 @@ public sealed partial class WidgetManager :
 
         if (config is not null)
         {
-            try
-            {
-                await ApplyWidgetRemovalActionAsync(config, removalAction);
-            }
-            catch (Exception ex)
-            {
-                App.Log($"[WidgetManager] Managed folder cleanup failed while deleting widget '{widgetId}'. The widget will be removed and the folder will be kept. {ex}");
-            }
-
             RemoveMappedWidgetShortcut(config);
             // Per-widget custom icon/background assets follow the widget out:
             // nothing under data/widget-assets may outlive its config.
@@ -2281,6 +2308,10 @@ public sealed partial class WidgetManager :
                 await Task.Delay(120);
                 await RestoreVisibleWidgetGroupsAsync();
                 RestoreLoadedWidgetBoundsAfterStartup();
+                // The last bounds-writing pass of startup re-resolves windows
+                // independently and can re-scatter the capsule bar; heal it
+                // once, debounced (feedback 327).
+                ScheduleCapsuleArrangementConsistencyCheck("startup-bounds-reconciled");
             }
             catch (Exception ex)
             {
@@ -2523,6 +2554,7 @@ public sealed partial class WidgetManager :
     {
         CancelAllWidgetSurfaceSwitches();
         StopTrayLayerRestoreMonitor();
+        StopDesktopPinnedBeddingWatchdog();
         DisposeWidgetDetachPlacementPreview();
         _settingsService.SettingsChanged -= OnSettingsChanged;
         _settingsService.AppearancePreviewChanged -= ApplyAppearancePreview;
@@ -2585,7 +2617,7 @@ public sealed partial class WidgetManager :
 
         if (_fileWidgets.TryGetValue(widgetId, out var fileEntry))
         {
-            await fileEntry.ViewModel.RefreshFromConfigAsync();
+            await fileEntry.ViewModel.RefreshFromConfigAsync(clearIconCacheBeforeHydration: false);
             return;
         }
 
@@ -2596,7 +2628,7 @@ public sealed partial class WidgetManager :
                 string.Equals(surface.WidgetId, widgetId, StringComparison.Ordinal));
         if (contentWindow?.CurrentContent is FileWidgetContentAdapter fileSurface)
         {
-            await fileSurface.ViewModel.RefreshFromConfigAsync();
+            await fileSurface.ViewModel.RefreshFromConfigAsync(clearIconCacheBeforeHydration: false);
         }
     }
 
@@ -2606,7 +2638,7 @@ public sealed partial class WidgetManager :
     {
         if (!HasUiThreadAccess())
         {
-            App.UiDispatcherQueue?.TryEnqueue(() =>
+            UiDispatch.RunOrDefer(() =>
                 SetDesktopOrganizationBusy(widgetIds.ToArray(), isBusy));
             return;
         }
@@ -3006,8 +3038,11 @@ public sealed partial class WidgetManager :
 
     private void NormalizeWidgetBounds(WidgetConfig config)
     {
-        int width = (int)Math.Round(Math.Max(SettingsService.MinWidgetWidth, config.Width));
-        int height = (int)Math.Round(Math.Max(SettingsService.MinWidgetHeight, config.Height));
+        // Elastic projection may legitimately size a widget below the
+        // preferred minimum under extreme shrink; re-clamping to it here
+        // would push the widget over its neighbours on the work area.
+        int width = (int)Math.Round(Math.Max(WidgetElasticLayout.AbsoluteMinWidgetSizeDips, config.Width));
+        int height = (int)Math.Round(Math.Max(WidgetElasticLayout.AbsoluteMinWidgetSizeDips, config.Height));
         int x = (int)Math.Round(config.X);
         int y = (int)Math.Round(config.Y);
         double previousX = config.X;

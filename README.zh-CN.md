@@ -7,7 +7,7 @@
 > 目前暂不接受外部 PR 合并——欢迎通过 Issue / Discussion 提交 Bug、功能建议与技术讨论，详见 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
 [![CI](https://github.com/Tianyu199509/DeskBox/actions/workflows/ci.yml/badge.svg)](https://github.com/Tianyu199509/DeskBox/actions/workflows/ci.yml)
-[![1.5.6 版本](https://img.shields.io/badge/release-1.5.6-2563EB.svg)](https://github.com/Tianyu199509/DeskBox/releases/tag/v1.5.6)
+[![1.5.8 版本](https://img.shields.io/badge/release-1.5.8-2563EB.svg)](https://github.com/Tianyu199509/DeskBox/releases/tag/v1.5.8)
 [![Windows 10/11](https://img.shields.io/badge/Windows-10%2F11-0078D4.svg)](#环境要求)
 [![x64 and ARM64](https://img.shields.io/badge/architecture-x64%20%7C%20ARM64-5C2D91.svg)](#下载)
 [![License: GPL v3](https://img.shields.io/badge/license-GPLv3-blue.svg)](LICENSE)
@@ -41,10 +41,10 @@ DeskBox 使用贴近 Windows 原生体验的材质，同时保留普通桌面文
 
 ## 下载
 
-DeskBox 1.5.6 已进入发版准备阶段。下方 [GitHub Releases](https://github.com/Tianyu199509/DeskBox/releases/tag/v1.5.6) 下载链接会在正式发布后生效。
+DeskBox 1.5.8 已进入发版准备阶段。下方 [GitHub Releases](https://github.com/Tianyu199509/DeskBox/releases/tag/v1.5.8) 下载链接会在正式发布后生效。
 
-- [DeskBox 1.5.6 x64 安装包](https://github.com/Tianyu199509/DeskBox/releases/download/v1.5.6/DeskBox_Setup_1.5.6_x64.exe)，推荐大多数 Intel 和 AMD 电脑使用。
-- [DeskBox 1.5.6 ARM64 安装包](https://github.com/Tianyu199509/DeskBox/releases/download/v1.5.6/DeskBox_Setup_1.5.6_arm64.exe)，推荐骁龙、Surface Pro X 等 Windows on ARM 电脑使用。
+- [DeskBox 1.5.8 x64 安装包](https://github.com/Tianyu199509/DeskBox/releases/download/v1.5.8/DeskBox_Setup_1.5.8_x64.exe)，推荐大多数 Intel 和 AMD 电脑使用。
+- [DeskBox 1.5.8 ARM64 安装包](https://github.com/Tianyu199509/DeskBox/releases/download/v1.5.8/DeskBox_Setup_1.5.8_arm64.exe)，推荐骁龙、Surface Pro X 等 Windows on ARM 电脑使用。
 
 两个安装包都是 Full Native AOT 构建，并内置对应架构的私有 Windows App Runtime 2.5.1，可离线安装，不需要另外下载 .NET 10 或 Windows App Runtime。
 
@@ -130,12 +130,31 @@ DeskBox 1.5.6 已进入发版准备阶段。下方 [GitHub Releases](https://git
 - 可导出经过隐私过滤的一键诊断包用于排查问题。
 - 设置使用可恢复快照，退出时刷新待保存内容；保存失败会明确记录和提示，不再静默恢复默认配置。
 
+## 1.5.8 更新亮点
+
+- **更准确的管理员运行提示。**「以管理员身份运行」提示只在 DeskBox 以高于资源管理器的权限运行时出现，因此全桌面提权的电脑（含公司统一管理机）不再显示该提示。提示出现时可一键退出当前实例并按步骤以普通权限重新打开；一键更新也不再以管理员身份重启应用。
+- **资源管理器提权时优雅降级。** Explorer 以管理员运行时 DeskBox 保持可达——唤出热键与设置继续可用，说明弹窗取代静默的英文报错框，诊断还能识别快捷方式的"以管理员身份运行"勾选。
+- **维护波次。** 拖动待办不再崩溃；切换分组不再丢失叠放成员图标；剪切子文件夹粘贴回原处不再卡死；自动整理规则跨重启保持；桌面反复崩溃时 DeskBox 不再在登录时反复重启。
+
+完整内容见 [更新日志](CHANGELOG.md) 和 [1.5.8 发布说明](docs/releases/v1.5.8.md)。
+
+## 1.5.7 更新亮点
+
+- **退出可靠性。** 从托盘退出后进程必定结束——在系统退出握手机制失灵的机器上（典型为 UAC 完全关闭且资源管理器以管理员运行），此前会残留一个后台进程慢慢吃内存，还带着右键菜单代理一起驻留。
+- **Windows 10 细节。** 「文件格子 → 文件拖放行为 → 拖出格子时」卡片的标题与问号提示恢复显示，Windows 10 说明文字改在标题下方描述区渲染，不再撑坏卡片或溢出边界；其他设置卡里的长辅助文字同样限宽。
+- **对话框配色与规则行。** 桌面整理的放弃确认、预览卡、热键录制弹窗重新跟随应用主题覆盖；桌面整理规则行恢复可点击。
+
+完整内容见 [更新日志](CHANGELOG.md) 和 [1.5.7 发布说明](docs/releases/v1.5.7.md)。
+
 ## 1.5.6 更新亮点
 
 - **格子归属显示器。** 把格子拖到哪块屏，那块屏就是它的归属；每种显示器组合各自记住布局，拔屏后格子体面收起或迁往剩余屏幕，接回时逐一回到原位。设置新增「显示器」页：识别屏幕、一键固定布局、指定新格子的默认屏幕。
+- **经得起缩放变化的布局。** 格子按“每屏参考系”记住自己的尺寸与锚点，1080p 与 4K 互切、进入远程会话都按弹性规则重排，不再出现格子过大或大片空白。
+- **还原适配本机。** 备份还原到另一台电脑或另一个账户时，开机自启在本机重新注册、账户本地文件夹迁到当前用户，还原通知会说明做了什么。
 - **装扮你的格子。** 任意格子可换表情或本地图片图标、设置自己的背景图；全局背景提供跟随材质、统一图片、按各格桌面位置取景的全景图片三种模式，外加边框样式与文字阴影。
 - **更安静、更安心的启动。** 可随 Windows 静默启动，托盘或热键一键唤回；管理员运行会弹窗说明并一键以普通权限重启；文件迁入受管存储改为"先复制、后校验"流程，源文件不会被自动删除。
 - **更多打磨。** 四套天气图标风格、PowerToys 式快捷键录制、可撤销的"全部移到此显示器"，以及风琴化重组的设置窗口。
+- **文件安全加固。** 发版前审计轮修掉了全部可达的数据丢失路径：全量还原不再会在无人确认时自动执行、删除搜索结果改走系统确认（无回收站的卷上也不再静默永久删除）、网络驱动器上的格子文件夹删除不再绕过回收站、附件移除只碰托管副本、移回桌面失败时格子保留并明确提示。
 - **平台。** Windows App Runtime 升级到 2.5.1；支持的 Windows 10 最低版本降到 19041（2004）。
 
 完整内容见 [更新日志](CHANGELOG.md) 和 [1.5.6 发布说明](docs/releases/v1.5.6.md)。
@@ -243,8 +262,8 @@ ISCC.exe /DDeskBoxNativeAot=1 /DDeskBoxBundledRuntime=1 /DMyAppReleaseDir=..\.ar
 预期输出：
 
 ```text
-Output\DeskBox_Setup_1.5.6_x64.exe
-Output\DeskBox_Setup_1.5.6_arm64.exe
+Output\DeskBox_Setup_1.5.8_x64.exe
+Output\DeskBox_Setup_1.5.8_arm64.exe
 ```
 
 ## 项目结构

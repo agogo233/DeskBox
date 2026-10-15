@@ -153,7 +153,7 @@ public sealed class AotStage5B4B1ContractTests
             weatherData,
             StringComparison.Ordinal);
         Assert.Contains(
-            "IsOn=\"{x:Bind FileStack.StacksEnabled, Mode=TwoWay}\"",
+            "controls:SettingsComboBox.Value=\"{x:Bind FileStack.OpenMode, Mode=TwoWay}\"",
             fileWidgetXaml,
             StringComparison.Ordinal);
         Assert.Contains(
@@ -334,8 +334,8 @@ public sealed class AotStage5B4B1ContractTests
         string baseline = ReadRepositoryFile("tests/DeskBox.Tests/JsonSerializationBaselineContractTests.cs");
         string source = ReadRepositoryFile("src/DeskBox/App.AotManagedUiSmoke.cs");
 
-        Assert.Contains("Assert.Equal(40, actual.Count);", baseline, StringComparison.Ordinal);
-        Assert.Contains("Assert.Equal(94, actual.Values.Sum());", baseline, StringComparison.Ordinal);
+        Assert.Contains("Assert.Equal(42, actual.Count);", baseline, StringComparison.Ordinal);
+        Assert.Contains("Assert.Equal(97, actual.Values.Sum());", baseline, StringComparison.Ordinal);
         Assert.Contains("\"src/DeskBox/App.AotManagedUiSmoke.cs\"", baseline, StringComparison.Ordinal);
         Assert.Equal(1, CountOccurrences(source, "JsonSerializer.Serialize("));
     }

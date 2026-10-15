@@ -125,8 +125,8 @@ DeskBox 私有文件载荷的移动/快捷方式意图由目标端自行执行�
 ## 5. 完整路由矩阵
 
 | 源 | 目标 | 路由/处理 | 是否改磁盘 | 是否改叠放/顺序 | 关键完成规则 |
-| --- | --- | --- | ---: | ---: | --- |
-| 主表面独立文件 | 同格主表面插入线 | `surface-reorder` | 否 | 是 | 内部完成不得为 `Move` |
+| --- | --- | --- | --- | ---: | --- |
+| 主表面独立文件（含多选块） | 同格主表面插入线 | `surface-reorder`（多选按稳定整块提交，见 5.3） | 否 | 是 | 内部完成不得为 `Move` |
 | 非弹窗叠放成员 | 原叠放成员区域 | 主表面成员排序 | 否 | 是 | 保持成员身份，仅改 override 顺序 |
 | 非弹窗叠放成员 | 叠放范围外的主表面 | `MoveVisibleItemForReorder` | 否 | 是 | 解除成员关系并插入为独立显示单元 |
 | 弹窗叠放成员 | 同一弹窗列表 | `stack-reorder` | 否 | 是 | 使用弹窗插入索引；内部完成不得为 `Move` |
@@ -150,6 +150,17 @@ DeskBox 私有文件载荷的移动/快捷方式意图由目标端自行执行�
 跨格传输由目标格子实际执行文件移动，并通过 `NotifyItemsMovedOutAsync` 告知源格子哪些路径成功。对于 DeskBox 自己的原生 Shell 载荷，再向源端返回 `Move` 会形成第二次源清理。因此 `ResolveSafeDropCompletionOperation` 在“DeskBox 来源 + 目标已完成真实移动”时返回 `None`；目标完成通知和后续磁盘协调才是事实依据。
 
 非 DeskBox 来源只有在请求移动数与实际完成数完全一致时才返回 `Move`。部分完成、取消或失败必须返回 `None`。
+
+### 5.3 多选拖动排序的整块提交语义（2026-10-14）
+
+主表面（非弹窗）的 `surface-reorder` 支持多选块提交，约束如下：
+
+- 提交端必须解析**全部**被拖项（`ResolveSurfaceReorderItems` + `_surfaceReorderDraggedItems`），禁止回退到 `FirstOrDefault` 单锚点坍缩——那是"多选拖动只动一个"旧缺陷的根因；
+- 块内相对顺序 = 拖动起算时的可见顺序；落点换算用"非移动显示单元计数"（`TryMoveDisplayUnitOverrides` / `TryComputeItemBlockReorder`），不依赖会被成员变更移位的裸索引；
+- 非投影路径用逐项 `Items.Move` 施加（保留 ListView 选择）；投影路径整批只允许**常数次**投影重建 + persist（`MoveVisibleItemsForReorder` 按相位各一次），禁止对 N 个选中项循环调用单项原语——那是投影重建风暴（#576 同型）；
+- 内联展开叠放的成员：插入点落在本叠放成员区内 → 复用 `MoveStackMembersForReorder` 成员整块排序；落在区外 → 先批量解除成员关系（`DetachStackMembersForBlockReorder`，语义镜像 `RemoveItemsFromStack` 的解散/转手动分支）再作为散件入块；
+- 叠放卡片与文件混选拖动排序维持既有语义（锚点为叠放头时只重排叠放卡片，`GetSelectedItems` 本就剔除卡片）；
+- 投影重建会丢掉拖动用的多选；主表面与弹窗的重排成功路径都必须按路径重放选择（`ScheduleSurfaceReorderSelectionRestore` / `ScheduleStackPopoverReorderSelectionRestore`，低优先级延迟——弹窗侧需双跳以落在 `ApplyStackProjectionChange` 的延迟清选之后）。
 
 ## 6. 事件链与状态清理
 
@@ -312,6 +323,8 @@ WinUI 的拖拽完成时刻可能晚于物理鼠标松开。2026-09-04 的两次
 18. 不要让托管目录复制递归进入 junction、符号链接或已经访问过的物理目录。
 19. 不要把“两个格子 ID 不同”等同于一定需要文件传输；源项目已经位于有效目标目录时必须无操作。
 20. 不要为了让文件夹快捷方式可在格子内打开而把 `WidgetItem.IsFolder` 改为 `true`，也不要把拖拽源路径从 `.lnk` 改成 `TargetPath`。
+21. 不要让**纯进程内状态**走 OLE 自定义格式通道运输（2026-10-13 待办色点教训）：自定义格式只能异步 `GetDataAsync` 读——Drop 处理器里无 deferral 的 await 会让拖拽事务在首 yield 即终结（丢/挂），且空自定义格式拖过桌面会被 shell 逐格式探测（0x8000FFFF 崩溃向量）。内部状态一律走进程内字段（`_draggedTodoItemId`/`_draggedColorMarker` 先例），`DragStarting` 只保留拖拽视觉（RequestedOperation/Title）。
+22. Drop/DragOver 处理器里任何 `await` 都必须先 `e.GetDeferral()` 并在 finally `Complete()`；ResilientJsonStore 只重试一种 IOException，存盘类异常须在处理器内 catch 收敛，不得逃出 async void 升级为全局故障。
 
 ## 10. 日志判读
 
@@ -417,6 +430,7 @@ dotnet test .\tests\DeskBox.Tests\DeskBox.Tests.csproj `
 | 叠放卡片目标与加入叠放 | `Controls/WidgetContents/FileSurfaceContent.ItemVisuals.cs` |
 | 弹窗成员排序与释放恢复 | `Controls/WidgetContents/FileSurfaceContent.StackPopover.cs` |
 | 叠放投影、成员覆盖和显示单元顺序 | `ViewModels/WidgetViewModel.Stacks.cs` |
+| 多选整块排序原语与成员批量脱离 | `WidgetViewModel.Stacks.cs`（`MoveVisibleItemsForReorder`/`TryMoveDisplayUnitOverrides`/`DetachStackMembersForBlockReorder`）+ `WidgetViewModel.SortingAndWatchers.cs`（`MoveItemsForReorder`/`TryComputeItemBlockReorder`） |
 | 紧凑窗口鼠标释放恢复 | `Controls/WidgetShell.xaml.cs` |
 | 原生 Explorer 拖入 | `Helpers/NativeDropTarget.cs` 及关联文件传输服务 |
 

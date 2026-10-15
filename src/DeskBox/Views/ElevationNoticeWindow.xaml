@@ -47,14 +47,10 @@
             Spacing="8"
             HorizontalAlignment="Right">
             <Button
-                x:Name="RelaunchButton"
-                Click="RelaunchButton_Click"
+                x:Name="ExitButton"
+                Click="ExitButton_Click"
                 MinWidth="150"
                 Style="{ThemeResource AccentButtonStyle}" />
-            <Button
-                x:Name="ContinueButton"
-                Click="ContinueButton_Click"
-                MinWidth="110" />
             <Button
                 x:Name="OkButton"
                 Click="ContinueButton_Click"

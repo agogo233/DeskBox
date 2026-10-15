@@ -94,24 +94,12 @@ public sealed partial class SearchSettingsSection : UserControl
     /// The elevated-hotkey notice's ThemeResource severity brushes fail to
     /// resolve inside sections realized through DataTemplate.LoadContent
     /// (the known delayed-creation pitfall), leaving the bar painted like
-    /// the card behind it with near-invisible text. Pin the informational
-    /// severity brushes from the application resources so the notice keeps
-    /// a distinct background and readable text in both themes.
+    /// the card behind it. Delegates to the shared per-ActualTheme pin so
+    /// the wash stays correct on a live theme switch (Windows 10 included).
     /// </summary>
     private void ApplyElevatedNoticeSeverityBrushes()
     {
-        if (Application.Current.Resources.TryGetValue(
-                "InfoBarInformationalSeverityBackgroundBrush", out object? background) &&
-            background is Brush backgroundBrush)
-        {
-            SearchHotkeyElevatedNoticeInfoBar.Background = backgroundBrush;
-        }
-        if (Application.Current.Resources.TryGetValue(
-                "InfoBarInformationalSeverityForegroundBrush", out object? foreground) &&
-            foreground is Brush foregroundBrush)
-        {
-            SearchHotkeyElevatedNoticeInfoBar.Foreground = foregroundBrush;
-        }
+        SettingsWindow.ApplyInformationalSeverityBrushes(SearchHotkeyElevatedNoticeInfoBar);
     }
 
     private void OnUnloaded(object sender, RoutedEventArgs e)

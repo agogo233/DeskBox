@@ -17,6 +17,7 @@ using H.NotifyIcon;
 using H.NotifyIcon.Core;
 using Microsoft.Windows.AppLifecycle;
 using Microsoft.Windows.AppNotifications;
+using Microsoft.Windows.AppNotifications.Builder;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
@@ -66,6 +67,12 @@ public partial class App : Application
     private const string TodoSnoozeConfirmationNotificationSource = "todoSnoozeConfirmation";
     private const string TodoSnoozeConfirmationNotificationGroup = "todo-feedback";
     private const string TodoSnoozeConfirmationNotificationTag = "todo-snooze-confirmation";
+    private const string TodoReminderNotificationTag = "todo-reminder";
+    private const string TodoReminderNotificationGroup = "todo";
+    private const string DesktopOrganizationNotificationGroup = "desktop-organization";
+    private const string DesktopOrganizationTargetUnavailableNotificationTag = "desktop-organization-target-unavailable";
+    private const string FolderMappingNotificationGroup = "folder-mapping";
+    private const string FolderMappingConflictNotificationTag = "folder-mapping-conflict";
 
     // Feature-runtime registry keys (Services/FeatureRuntimeRegistry). They
     // intentionally read like the matching shutdown step names.
@@ -93,6 +100,14 @@ public partial class App : Application
     private static Mutex? _singleInstanceMutex;
     private static EventWaitHandle? _activationEvent;
     private static RegisteredWaitHandle? _activationRegistration;
+
+    // Written by the primary instance only; secondary activations never touch
+    // the file. See StartupSessionLedger for the lifecycle contract.
+    private readonly StartupSessionLedger? _startupSessionLedger;
+    private readonly StartupStormAssessment? _startupStormAssessment;
+
+    private bool SuppressFileMutatingStartup =>
+        _startupStormAssessment?.SuppressFileMutatingStartup == true;
 
     private TaskbarIcon? _trayIcon;
     private Window? _trayWindow;
@@ -136,7 +151,8 @@ public partial class App : Application
     private BackupRuntime? _backupRuntime;
     private readonly ShutdownSequence _shutdownSequence = new(Log);
     private static int s_shutdownRequested;
-    private static bool IsShuttingDown => Volatile.Read(ref s_shutdownRequested) != 0;
+    internal static bool IsShuttingDown => Volatile.Read(ref s_shutdownRequested) != 0;
+    private static readonly TimeSpan ShutdownHardTerminateGrace = TimeSpan.FromSeconds(3);
     private TodoReminderService? _todoReminderService => _todoReminderRuntime?.Current as TodoReminderService;
     private DisplayAreaWatcherService? _displayAreaWatcher;
     private DisplayTopologyTransitionCoordinator? _displayTopologyTransitionCoordinator;
@@ -270,6 +286,21 @@ public partial class App : Application
             true,
             DeskBoxDataPathService.Current.SingleInstanceMutexName,
             out bool createdNew);
+        if (createdNew)
+        {
+            // The launch breadcrumb is written before anything can exit so a
+            // death anywhere in this launch is attributable on the next one.
+            _startupSessionLedger = new StartupSessionLedger(
+                Path.Combine(DeskBoxDataPathService.Current.RootPath, "startup-ledger.json"));
+            _startupStormAssessment = _startupSessionLedger.BeginPrimaryLaunch();
+            if (_startupStormAssessment.SuppressFileMutatingStartup)
+            {
+                Log(
+                    $"[Startup] Storm guard active ({_startupStormAssessment.Reason}): " +
+                    "desktop file operations stay deferred this launch.");
+            }
+        }
+
         bool notificationLaunch = NativeNotificationActivationBootstrap.IsNotificationLaunch(
             Environment.GetCommandLineArgs());
         if (createdNew || notificationLaunch)
@@ -358,7 +389,8 @@ public partial class App : Application
                 $"[Elevation] Elevated launch detected " +
                 $"uacDisabled={_startupElevationAssessment.IsUacDisabled} " +
                 $"explorerElevated={_startupElevationAssessment.IsExplorerElevated} " +
-                $"canRelaunch={_startupElevationAssessment.CanRelaunchUnelevated}");
+                $"canRelaunch={_startupElevationAssessment.CanRelaunchUnelevated} " +
+                $"mismatch={_startupElevationAssessment.Mismatch}");
             if (_processStartupLaunchDetected)
             {
                 // Nobody is watching an unattended launch: fix the cause and
@@ -381,6 +413,7 @@ public partial class App : Application
                     if (DragDropPermissionService.TryRelaunchAsExplorerUser(relaunchArguments))
                     {
                         Log("[Elevation] Unattended launch relaunched unelevated; exiting elevated instance");
+                        _startupSessionLedger?.MarkCleanExit();
                         _nativeNotificationService?.Dispose();
                         DrainLogQueue();
                         Environment.Exit(0);
@@ -1110,13 +1143,40 @@ public partial class App : Application
             // whose normalization writes are the first bulk mutation of the
             // session, so the captured snapshot still reflects the previous
             // session.
+            // Exception — the launch that applied a full restore: the options
+            // above were read from the raw, not-yet-rebased settings, so a
+            // scheduled snapshot here would target the source machine's
+            // profile (misleading fallback warning under standard rights, or
+            // a foreign account's directory tree under permissive ACLs). The
+            // pre-restore safety archive from the apply already protects this
+            // state; the next launch snapshots with rebased options.
+            bool skipStartupAutomaticSnapshot = PostRestoreRecoveryPolicy
+                .ShouldSkipStartupScheduledSnapshot(restoreResult.Kind, restoreResult.Succeeded);
             Task startupAutomaticSnapshotTask = RunOptionalStartupStepAsync(
                 "automatic-snapshot",
-                async () => await _backupRuntime.RunScheduledLocalAsync());
+                async () =>
+                {
+                    if (skipStartupAutomaticSnapshot)
+                    {
+                        Log("[DataBackup] Skipped the startup automatic snapshot on the restore launch; " +
+                            "the pre-restore safety archive already covers this state.");
+                        return;
+                    }
+
+                    await _backupRuntime.RunScheduledLocalAsync();
+                });
 
             // Phase 1: Load settings (must complete first)
             MarkStartupProgress();
             await RunCriticalStartupStepAsync("settings-load", () => SettingsService.LoadAsync());
+            // Runs only on the launch that applied a full restore, before the
+            // backup options refresh below so a rebased snapshot folder is the
+            // one this session uses. The await is accepted because restore
+            // launches are rare; every other launch returns immediately.
+            PostRestoreRecoverySummary postRestoreRecovery = PostRestoreRecoverySummary.None;
+            await RunOptionalStartupStepAsync(
+                "post-restore-recovery",
+                async () => postRestoreRecovery = await RecoverMachineLocalStateAfterRestoreAsync(restoreResult));
             RefreshAutomaticBackupOptionsFromSettings();
             SettingsService.SettingsChanged += OnBackupSettingsChanged;
             SettingsService.SettingsChanged += OnMaterialCapabilitySettingsChanged;
@@ -1306,15 +1366,27 @@ RunCriticalStartupStep("widget-manager", () =>
             await startupAutomaticSnapshotTask;
             if (IsShuttingDown) return;
             int recoveredDesktopItems = 0;
-            await RunOptionalStartupStepAsync(
-                "desktop-organization-recovery",
-                async () => recoveredDesktopItems = await new DesktopOrganizationTransaction(
-                    SettingsService,
-                    FileService,
-                    widgetManager: WidgetManager).RecoverPendingAsync());
-            if (recoveredDesktopItems > 0)
+            if (SuppressFileMutatingStartup)
             {
-                Log($"[DesktopOrganization] Recovered {recoveredDesktopItems} items from an interrupted transaction.");
+                // The interrupted-transaction journal is durable; the next
+                // healthy launch replays it. Replaying desktop file moves
+                // into a launch storm is how interrupted operations pile up.
+                Log(
+                    "[Startup] Storm guard: deferring desktop-organization recovery " +
+                    "until a launch that follows a clean exit.");
+            }
+            else
+            {
+                await RunOptionalStartupStepAsync(
+                    "desktop-organization-recovery",
+                    async () => recoveredDesktopItems = await new DesktopOrganizationTransaction(
+                        SettingsService,
+                        FileService,
+                        widgetManager: WidgetManager).RecoverPendingAsync());
+                if (recoveredDesktopItems > 0)
+                {
+                    Log($"[DesktopOrganization] Recovered {recoveredDesktopItems} items from an interrupted transaction.");
+                }
             }
             // A detached storage drive must not abort widget restoration.
             bool managedStorageRootUnavailable = false;
@@ -1366,7 +1438,8 @@ RunCriticalStartupStep("widget-manager", () =>
             await RunOptionalStartupStepAsync(
                 "external-activation-initialization",
                 CompleteExternalActivationInitializationAsync);
-            RunOptionalStartupStep("restore-result-notification", () => ShowDataRestoreResultNotification(restoreResult));
+            RunOptionalStartupStep("restore-result-notification", () =>
+                ShowDataRestoreResultNotification(restoreResult, postRestoreRecovery));
             RunOptionalStartupStep("settings-recovery-notification", ShowSettingsLoadRecoveryNotification);
             if (managedStorageRootUnavailable)
             {
@@ -1394,8 +1467,39 @@ RunCriticalStartupStep("widget-manager", () =>
                     OrganizerService,
                     widgetManager);
                 DesktopAutoOrganizationWatcher.ItemOrganized += ShowDesktopAutoOrganizationNotification;
+                DesktopAutoOrganizationWatcher.AutoOrganizationTargetUnavailable +=
+                    ShowDesktopAutoOrganizationTargetUnavailableNotification;
+                if (SuppressFileMutatingStartup)
+                {
+                    // Constructed now (event wiring intact) but held idle for
+                    // the suppression window: FileSystemWatcher stays off and
+                    // no organize pass can trigger while the storm lasts.
+                    var deferredStart = UiDispatcherQueue.CreateTimer();
+                    deferredStart.Interval = StartupStormPolicy.SuppressionWindow;
+                    deferredStart.Tick += (_, _) =>
+                    {
+                        deferredStart.Stop();
+                        DesktopAutoOrganizationWatcher?.Start();
+                    };
+                    deferredStart.Start();
+                    Log(
+                        "[Startup] Storm guard: desktop auto-organization watcher start deferred " +
+                        $"{StartupStormPolicy.SuppressionWindow.TotalMinutes:F0} minutes.");
+                    return;
+                }
+
                 DesktopAutoOrganizationWatcher.Start();
             });
+
+            // The availability probe can block on offline devices for the
+            // network timeout, so it runs after startup on a pool thread —
+            // never inside the settings load/save normalize passes.
+            await RunOptionalStartupStepAsync(
+                "desktop-organization-target-availability",
+                () => Task.Run(() =>
+                    DesktopOrganizationTargetAvailabilityAdvisor.WarnIfUnavailableTargets(
+                        SettingsService,
+                        ShowDesktopAutoOrganizationTargetUnavailableNotification)));
 
             await RunOptionalStartupStepAsync(
                 "onboarding",
@@ -1436,7 +1540,8 @@ RunCriticalStartupStep("widget-manager", () =>
                     (titleKey, bodyKey) => ShowSettingsNotification(
                         titleKey,
                         bodyKey,
-                        NotificationIcon.Warning)));
+                        NotificationIcon.Warning,
+                        "AppearanceMaterialSettings")));
 
             // Configure taskbar Jump List with quick actions
             SafeFireAndForget(
@@ -1565,6 +1670,90 @@ RunCriticalStartupStep("widget-manager", () =>
         }
     }
 
+    /// <summary>
+    /// Adapts a freshly applied full restore to this machine. The archived
+    /// settings describe the source machine: its startup registration and its
+    /// user-profile-local paths do not exist here. The startup choice is
+    /// re-registered only when the restored setting is "on" and this machine
+    /// has no registration of its own (AutoStartDefaultApplied=true keeps the
+    /// one-time default out of the way, so the two never race on the task
+    /// backend); profile-local paths are rebased from the source user profile
+    /// derived off the backup manifest. Scoped cloud restores never touch
+    /// these settings and are skipped.
+    /// </summary>
+    private async Task<PostRestoreRecoverySummary> RecoverMachineLocalStateAfterRestoreAsync(
+        DeskBoxRestoreApplyResult restoreResult)
+    {
+        if (restoreResult.Kind != DeskBoxRestoreApplyKind.Full || !restoreResult.Succeeded)
+        {
+            return PostRestoreRecoverySummary.None;
+        }
+
+        bool autoStartReRegistered = false;
+        if (SettingsService.Settings.Core.AutoStart && SettingsService.Settings.Core.AutoStartDefaultApplied)
+        {
+            // Registration state reads and writes shell out to schtasks (and
+            // the packaged channel may prompt for consent), so they stay off
+            // the UI thread exactly like the one-time default.
+            StartupRegistrationState state = await Task.Run(() => StartupService.Current.GetState());
+            if (RestoreAutoStartReconcilePolicy.ShouldRegister(SettingsService.Settings.Core.AutoStart, state))
+            {
+                StartupOperationResult result = await Task.Run(() => StartupService.SetEnabled(true));
+                // Only a live registration backs the notification's assertion:
+                // the packaged channel's Pending means the consent dialog is
+                // still in flight and the user may decline it.
+                autoStartReRegistered = RestoreAutoStartReconcilePolicy.IsRegistered(result.State);
+                Log($"[DataBackup] Post-restore autostart reconcile: {state} → {result.State}.");
+            }
+            else
+            {
+                Log($"[DataBackup] Post-restore autostart reconcile: state={state}, left as-is.");
+            }
+        }
+
+        RestorePathRebaseResult rebase = RestoreMachineLocalPathRebase.Rebase(
+            SettingsService.Settings,
+            restoreResult.SourceDataPath,
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
+        bool localPathsRebased = false;
+        if (rebase.Changed)
+        {
+            if (await SettingsService.SaveCheckedAsync())
+            {
+                localPathsRebased = true;
+                // The rebased root is where file widgets resolve immediately;
+                // create it so an empty-but-valid folder is what they see.
+                if (rebase.RebasedManagedStorageRootPath is { } storageRoot)
+                {
+                    try
+                    {
+                        Directory.CreateDirectory(storageRoot);
+                    }
+                    catch (Exception ex)
+                    {
+                        Log($"[DataBackup] Post-restore storage root create failed: {ex.Message}");
+                    }
+                }
+
+                Log(
+                    $"[DataBackup] Post-restore path rebase: settings={rebase.SettingsPathsRebased} " +
+                    $"widgets={rebase.WidgetsRebased} sourceProfile='{rebase.SourceProfileRoot}'.");
+            }
+            else
+            {
+                // The rebased values live on only in this session's memory;
+                // the disk still holds the source machine's paths. The
+                // notification must not claim success, and manufacturing the
+                // new root directory would paper over the persistence
+                // failure the settings surface is already reporting.
+                Log("[DataBackup] Post-restore path rebase could not be persisted; " +
+                    "disk paths were left unchanged.");
+            }
+        }
+
+        return new PostRestoreRecoverySummary(autoStartReRegistered, localPathsRebased);
+    }
+
     private async Task CompleteStartupDesktopLayerInitializationAsync(
         Task<bool> readinessTask,
         WidgetManager widgetManager)
@@ -1685,14 +1874,14 @@ RunCriticalStartupStep("widget-manager", () =>
             return;
         }
 
-        HashSet<string> current = DisplayIdentityTokens.CurrentSet();
+        IReadOnlyList<string> current = DisplayIdentityTokens.CurrentSet();
         if (gate.ClosedReasons.Contains(DisplayTopologyGateReason.RemovalGrace))
         {
             gate.ObserveDisplays(current);
             return;
         }
 
-        HashSet<string> active = DisplayIdentityTokens.ActiveProfileSet(SettingsService.Settings);
+        IReadOnlyList<string> active = DisplayIdentityTokens.ActiveProfileSet(SettingsService.Settings);
         if (active.Count > 0 && DisplayIdentityTokens.IsTrueSubset(current, active))
         {
             gate.StartRemovalGrace(active, current);
@@ -1758,7 +1947,7 @@ RunCriticalStartupStep("widget-manager", () =>
     {
         try
         {
-            HashSet<string> active = DisplayIdentityTokens.ActiveProfileSet(SettingsService.Settings);
+            IReadOnlyList<string> active = DisplayIdentityTokens.ActiveProfileSet(SettingsService.Settings);
             if (active.Count == 0)
             {
                 return;
@@ -1767,7 +1956,7 @@ RunCriticalStartupStep("widget-manager", () =>
             var deadline = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(5);
             while (DateTimeOffset.UtcNow < deadline)
             {
-                HashSet<string> current = DisplayIdentityTokens.CurrentSet();
+                IReadOnlyList<string> current = DisplayIdentityTokens.CurrentSet();
                 if (!DisplayIdentityTokens.IsTrueSubset(current, active))
                 {
                     break;
@@ -1865,6 +2054,11 @@ RunCriticalStartupStep("widget-manager", () =>
                 _hookHealthWatchdog.Watch(() => GlobalHotkeyService);
                 _hookHealthWatchdog.Watch(() => _searchHotkeyService);
                 _hookHealthWatchdog.Watch(() => DesktopDoubleClickActivationService);
+                // RegisterHotKey chords have no hook to probe; the watchdog
+                // keeps them alive with a periodic unregister+register
+                // round-trip instead (feedback 308/371).
+                _hookHealthWatchdog.WatchMaintenance(() => GlobalHotkeyService);
+                _hookHealthWatchdog.WatchMaintenance(() => _searchHotkeyService);
             }
             catch (Exception ex)
             {
@@ -1912,6 +2106,9 @@ RunCriticalStartupStep("widget-manager", () =>
 
     private void FlushSettingsForEndSession(string reason)
     {
+        // The OS ends the process after this flush without the shutdown
+        // sequence, so the launch breadcrumb is closed here.
+        _startupSessionLedger?.MarkCleanExit();
         Log($"[Lifecycle] Flushing settings for {reason}.");
         try
         {
@@ -2147,6 +2344,32 @@ RunCriticalStartupStep("widget-manager", () =>
 
             _ = RaiseTrayWidgetsAsync();
         }
+        else if (notificationArguments.TryGetValue("type", out string? updateNotificationType) &&
+                 string.Equals(
+                     updateNotificationType,
+                     "update",
+                     StringComparison.OrdinalIgnoreCase))
+        {
+            // Same target as the tray's About entry, without the tray-flyout
+            // close delay the tray path waits out.
+            OpenAboutSettingsFromTray();
+        }
+        else if (notificationArguments.TryGetValue("type", out string? settingsNotificationType) &&
+                 string.Equals(
+                     settingsNotificationType,
+                     "settings",
+                     StringComparison.OrdinalIgnoreCase))
+        {
+            if (notificationArguments.TryGetValue("section", out string? settingsSectionTag) &&
+                !string.IsNullOrWhiteSpace(settingsSectionTag))
+            {
+                ShowSettings(settingsSectionTag);
+            }
+            else
+            {
+                ShowSettings();
+            }
+        }
         else
         {
             _ = RaiseTrayWidgetsAsync();
@@ -2186,7 +2409,73 @@ RunCriticalStartupStep("widget-manager", () =>
             ],
             options: new NativeAppNotificationOptions(
                 Tag: "desktop-auto-organization",
-                Group: "desktop-organization"));
+                Group: DesktopOrganizationNotificationGroup));
+    }
+
+    /// <summary>
+    /// User-visible counterpart of the recoverable-skip policy: a rule whose
+    /// target folder is temporarily unreachable keeps the auto-organization
+    /// switch on and is skipped at runtime, and this notice makes that skip
+    /// visible instead of silent. Shared by the startup availability advisor
+    /// and the watcher's move-time unavailability episodes.
+    /// </summary>
+    private void ShowDesktopAutoOrganizationTargetUnavailableNotification(
+        DesktopOrganizationTargetUnavailableSummary summary)
+    {
+        if (UiDispatcherQueue is { HasThreadAccess: false } dispatcherQueue)
+        {
+            dispatcherQueue.TryEnqueue(() =>
+                ShowDesktopAutoOrganizationTargetUnavailableNotification(summary));
+            return;
+        }
+
+        if (LocalizationService is null || IsShuttingDown ||
+            summary.WidgetNames.Count == 0)
+        {
+            return;
+        }
+
+        string title = LocalizationService.T(
+            "DesktopOrganization.Auto.TargetUnavailableTitle");
+        string message = summary.WidgetNames.Count == 1
+            ? LocalizationService.Format(
+                "DesktopOrganization.Auto.TargetUnavailableBody.Widget",
+                summary.WidgetNames[0])
+            : LocalizationService.Format(
+                "DesktopOrganization.Auto.TargetUnavailableBody.Count",
+                summary.WidgetNames.Count);
+        if (_nativeNotificationService?.TryShow(
+                title,
+                message,
+                new Dictionary<string, string>
+                {
+                    ["type"] = "settings",
+                    ["section"] = "DesktopOrganizationSettings"
+                },
+                options: new NativeAppNotificationOptions(
+                    Tag: DesktopOrganizationTargetUnavailableNotificationTag,
+                    Group: DesktopOrganizationNotificationGroup)) == true || _trayIcon is null)
+        {
+            return;
+        }
+
+        try
+        {
+            _trayIcon.ShowNotification(
+                title,
+                message,
+                NotificationIcon.Warning,
+                customIconHandle: null,
+                largeIcon: false,
+                sound: false,
+                respectQuietTime: true,
+                realtime: false,
+                timeout: TimeSpan.FromSeconds(10));
+        }
+        catch (Exception ex)
+        {
+            Log($"[DesktopAutoOrganization] Target-unavailable notification failed: {ex.Message}");
+        }
     }
 
     private async Task UndoDesktopOrganizationFromNotificationAsync(string historyId)
@@ -2243,6 +2532,15 @@ RunCriticalStartupStep("widget-manager", () =>
                 $"snooze={result.SnoozeSelection ?? "none"} " +
                 $"targetPresented={result.TargetPresented} " +
                 $"refreshCompleted={result.RefreshCompleted}");
+            if (result.Disposition == TodoNotificationActivationRouter.DispositionCompleted &&
+                _nativeNotificationService is { } reminderNotificationService)
+            {
+                // The system already retracts the banner on the completion
+                // button; this also clears the reminder's Action Center entry.
+                SafeFireAndForget(() => reminderNotificationService.RemoveByTagAndGroupAsync(
+                    TodoReminderNotificationTag,
+                    TodoReminderNotificationGroup));
+            }
 #if DESKBOX_NATIVE_AOT && DESKBOX_AOT_SMOKE_HARNESS
             RecordAotTodoNotificationSurfaceRoute(result);
 #endif
@@ -2405,7 +2703,11 @@ RunCriticalStartupStep("widget-manager", () =>
             return;
         }
 
-        if (TryShowNativeTodoReminderNotification(notification))
+        if (TryShowNativeTodoReminderNotification(
+                notification,
+                new NativeAppNotificationOptions(
+                    TodoReminderNotificationTag,
+                    TodoReminderNotificationGroup)))
         {
             Log($"[TodoReminder] Native notification shown count={notification.Count} widget={notification.WidgetId ?? "none"} item={notification.ItemId ?? "none"}");
             return;
@@ -2451,6 +2753,13 @@ RunCriticalStartupStep("widget-manager", () =>
         List<NativeAppNotificationComboBox>? comboBoxes = null;
         if (notification.Count == 1 && !string.IsNullOrWhiteSpace(notification.ItemId))
         {
+            // A single-item reminder already carries the two buttons the
+            // Reminder scenario requires, and the persistent banner matches
+            // "this item is due now" semantics; keep caller tags intact.
+            options = new NativeAppNotificationOptions(
+                options?.Tag,
+                options?.Group,
+                AppNotificationScenario.Reminder);
             comboBoxes =
             [
                 new(
@@ -2485,6 +2794,18 @@ RunCriticalStartupStep("widget-manager", () =>
                         ["itemId"] = notification.ItemId ?? string.Empty
                     },
                     TodoReminderSnoozeInputId)
+            ];
+        }
+        else
+        {
+            // Aggregates have no single completable target, so they keep the
+            // plain toast lifecycle (auto-dismiss into Notification Center)
+            // and expose a view button that reuses the body's arguments.
+            actions =
+            [
+                new(
+                    LocalizationService.T("Common.View"),
+                    arguments)
             ];
         }
 
@@ -2617,7 +2938,42 @@ RunCriticalStartupStep("widget-manager", () =>
         RefreshTrayMenuText();
         RefreshTrayToolTipText();
 
-        if (_updateNotificationShown || _trayIcon is null)
+        if (_updateNotificationShown)
+        {
+            return;
+        }
+
+        string title = LocalizationService.T("Tray.UpdateAvailableTitle");
+        string message = LocalizationService.Format("Tray.UpdateAvailableMessage", manifest.Version);
+        // A manual check that surfaces a version already on screen (the
+        // settings About page) does not need a toast repeating it.
+        if (_settingsWindow is { IsVisibleToUser: true })
+        {
+            return;
+        }
+
+        var updateArguments = new Dictionary<string, string>
+        {
+            ["type"] = "update"
+        };
+        if (_nativeNotificationService?.TryShow(
+                title,
+                message,
+                updateArguments,
+                [
+                    new NativeAppNotificationAction(
+                        LocalizationService.T("Tray.UpdateOpenSettings"),
+                        updateArguments)
+                ],
+                options: new NativeAppNotificationOptions(
+                    Tag: "update-available",
+                    Group: "update")) == true)
+        {
+            _updateNotificationShown = true;
+            return;
+        }
+
+        if (_trayIcon is null)
         {
             return;
         }
@@ -2625,8 +2981,8 @@ RunCriticalStartupStep("widget-manager", () =>
         try
         {
             _trayIcon.ShowNotification(
-                LocalizationService.T("Tray.UpdateAvailableTitle"),
-                LocalizationService.Format("Tray.UpdateAvailableMessage", manifest.Version),
+                title,
+                message,
                 NotificationIcon.Info,
                 customIconHandle: null,
                 largeIcon: true,
@@ -2890,7 +3246,9 @@ RunCriticalStartupStep("widget-manager", () =>
         NativeAppNotificationActivation? activation,
         TodoNotificationActivationRouteResult result);
 
-    private void ShowDataRestoreResultNotification(DeskBoxRestoreApplyResult result)
+    private void ShowDataRestoreResultNotification(
+        DeskBoxRestoreApplyResult result,
+        PostRestoreRecoverySummary recovery)
     {
         if (!result.HadPendingRestore)
         {
@@ -2901,12 +3259,21 @@ RunCriticalStartupStep("widget-manager", () =>
             ? "Settings.DataBackup.RestoreAppliedTitle"
             : "Settings.DataBackup.RestoreApplyFailedTitle");
         string message = result.Succeeded
-            ? LocalizationService.T("Settings.DataBackup.RestoreAppliedBody")
+            ? BuildRestoreAppliedMessage(recovery)
             : LocalizationService.Format(
                 "Settings.DataBackup.RestoreApplyFailedBody",
                 result.ErrorMessage ?? string.Empty);
+        // A failed restore deep-links to the backup section it blocks; a
+        // successful one returns the user to the widget board.
+        Dictionary<string, string>? restoreArguments = result.Succeeded
+            ? null
+            : new Dictionary<string, string>
+            {
+                ["type"] = "settings",
+                ["section"] = "BackupRestoreSettings"
+            };
 
-        if (_nativeNotificationService?.TryShow(title, message) == true || _trayIcon is null)
+        if (_nativeNotificationService?.TryShow(title, message, restoreArguments) == true || _trayIcon is null)
         {
             return;
         }
@@ -2930,6 +3297,27 @@ RunCriticalStartupStep("widget-manager", () =>
         }
     }
 
+    /// <summary>
+    /// The restore-complete body plus one line per recovery action the launch
+    /// performed, so a cross-machine restore tells the user its startup
+    /// registration and local paths were adapted to this machine.
+    /// </summary>
+    private string BuildRestoreAppliedMessage(PostRestoreRecoverySummary recovery)
+    {
+        string message = LocalizationService.T("Settings.DataBackup.RestoreAppliedBody");
+        if (recovery.AutoStartReRegistered)
+        {
+            message += "\n" + LocalizationService.T("Settings.DataBackup.RestoreAppliedAutoStartNote");
+        }
+
+        if (recovery.LocalPathsRebased)
+        {
+            message += "\n" + LocalizationService.T("Settings.DataBackup.RestoreAppliedLocalPathsNote");
+        }
+
+        return message;
+    }
+
     private void ShowSettingsLoadRecoveryNotification()
     {
         switch (SettingsService.LastLoadRecoveryState)
@@ -2938,13 +3326,15 @@ RunCriticalStartupStep("widget-manager", () =>
                 ShowSettingsNotification(
                     "Settings.Persistence.RecoveredTitle",
                     "Settings.Persistence.RecoveredBody",
-                    NotificationIcon.Info);
+                    NotificationIcon.Info,
+                    "Maintenance");
                 break;
             case SettingsLoadRecoveryState.DefaultsAfterFailure:
                 ShowSettingsNotification(
                     "Settings.Persistence.ResetTitle",
                     "Settings.Persistence.ResetBody",
-                    NotificationIcon.Warning);
+                    NotificationIcon.Warning,
+                    "Maintenance");
                 break;
         }
 
@@ -2975,7 +3365,8 @@ RunCriticalStartupStep("widget-manager", () =>
         ShowSettingsNotification(
             "Settings.Persistence.SaveFailedTitle",
             "Settings.Persistence.SaveFailedBody",
-            NotificationIcon.Warning);
+            NotificationIcon.Warning,
+            "Maintenance");
     }
 
     private void RefreshAutomaticBackupOptionsFromSettings()
@@ -2993,7 +3384,8 @@ RunCriticalStartupStep("widget-manager", () =>
                 (titleKey, bodyKey) => ShowSettingsNotification(
                     titleKey,
                     bodyKey,
-                    NotificationIcon.Warning)));
+                    NotificationIcon.Warning,
+                    "AppearanceMaterialSettings")));
     }
 
     private void OnBackupSettingsChanged()
@@ -3036,7 +3428,8 @@ RunCriticalStartupStep("widget-manager", () =>
             ShowSettingsNotification(
                 "Settings.CloudBackup.UploadUnverified.Title",
                 "Settings.CloudBackup.UploadUnverified.Body",
-                NotificationIcon.Warning);
+                NotificationIcon.Warning,
+                "CloudBackupSettings");
             return;
         }
 
@@ -3052,7 +3445,8 @@ RunCriticalStartupStep("widget-manager", () =>
         ShowSettingsNotification(
             "Settings.CloudBackup.ScheduledFailure.Title",
             "Settings.CloudBackup.ScheduledFailure.Body",
-            NotificationIcon.Warning);
+            NotificationIcon.Warning,
+            "CloudBackupSettings");
     }
 
     private void OnAutomaticBackupFallbackDetected()
@@ -3067,22 +3461,34 @@ RunCriticalStartupStep("widget-manager", () =>
         ShowSettingsNotification(
             "Settings.DataBackup.AutomaticBackupDirectory.FallbackTitle",
             "Settings.DataBackup.AutomaticBackupDirectory.FallbackBody",
-            NotificationIcon.Warning);
+            NotificationIcon.Warning,
+            "BackupRestoreSettings");
     }
 
     private void ShowSettingsNotification(
         string titleKey,
         string bodyKey,
-        NotificationIcon icon)
+        NotificationIcon icon,
+        string? sectionTag = null)
     {
         if (LocalizationService is null || IsShuttingDown)
         {
             return;
         }
 
+        // Failure notices deep-link their body click into the owning settings
+        // section; status notices without a section keep the raise-widgets
+        // fallback below.
+        Dictionary<string, string>? arguments = string.IsNullOrWhiteSpace(sectionTag)
+            ? null
+            : new Dictionary<string, string>
+            {
+                ["type"] = "settings",
+                ["section"] = sectionTag
+            };
         string title = LocalizationService.T(titleKey);
         string message = LocalizationService.T(bodyKey);
-        if (_nativeNotificationService?.TryShow(title, message) == true || _trayIcon is null)
+        if (_nativeNotificationService?.TryShow(title, message, arguments) == true || _trayIcon is null)
         {
             return;
         }
@@ -3115,7 +3521,14 @@ RunCriticalStartupStep("widget-manager", () =>
 
         string title = LocalizationService.T("Settings.ManagedPath.UnavailableTitle");
         string message = LocalizationService.T("Settings.ManagedPath.UnavailableBody");
-        if (_nativeNotificationService?.TryShow(title, message) == true || _trayIcon is null)
+        if (_nativeNotificationService?.TryShow(
+                title,
+                message,
+                new Dictionary<string, string>
+                {
+                    ["type"] = "settings",
+                    ["section"] = "ManagedStorage"
+                }) == true || _trayIcon is null)
         {
             return;
         }
@@ -3150,7 +3563,14 @@ RunCriticalStartupStep("widget-manager", () =>
         string message = LocalizationService.T("Settings.Recovery.AvailableBody");
         Log($"[DataBackup] Recovery snapshot available after fresh settings start: {snapshot.Path}");
 
-        if (_nativeNotificationService?.TryShow(title, message) == true || _trayIcon is null)
+        if (_nativeNotificationService?.TryShow(
+                title,
+                message,
+                new Dictionary<string, string>
+                {
+                    ["type"] = "settings",
+                    ["section"] = "BackupRestoreSettings"
+                }) == true || _trayIcon is null)
         {
             return;
         }
@@ -3289,7 +3709,8 @@ RunCriticalStartupStep("widget-manager", () =>
                 action => UiDispatcherQueue.TryEnqueue(() => action()),
                 ex => Log($"[BackupSettings] Operation failed: {ex}"),
                 localize: LocalizationService.T,
-                format: (key, args) => LocalizationService.Format(key, args)),
+                format: (key, args) => LocalizationService.Format(key, args),
+                isStoreChannel: AppDistributionService.Current.IsMicrosoftStore),
             _backupRestoreActions ?? throw new InvalidOperationException(
                 "Backup restore actions are not initialized."),
             _quickCaptureSettings ?? throw new InvalidOperationException("Quick Capture is not initialized."),
@@ -3452,11 +3873,57 @@ RunCriticalStartupStep("widget-manager", () =>
     /// Shows the elevated-launch notice once startup has produced a usable
     /// surface. Skipped for unattended launches (the constructor already
     /// attempted a silent unelevated relaunch; nobody is watching a dialog)
-    /// and on shutdown.
+    /// and on shutdown. Only the asymmetric mismatch warns: on a fully
+    /// elevated desktop (company machines, UAC-off) DeskBox and the shell
+    /// share an integrity level, drag works, and a "running as
+    /// administrator" warning would be a false alarm.
     /// </summary>
     private void ShowElevationNoticeIfNeeded()
     {
         if (!_startupElevationAssessment.IsCurrentProcessElevated ||
+            _startupElevationAssessment.Mismatch != ShellIntegrityMismatch.AppAboveShell ||
+            IsStartupMode ||
+            IsShuttingDown ||
+            _elevationNoticeWindow is not null)
+        {
+            return;
+        }
+
+        // Persisted RUNASADMIN-style compatibility layers keep relaunching
+        // DeskBox elevated, so scrub them while the notice is up — whether
+        // the user exits via the button or the window X, their next normal
+        // launch must be able to land unelevated. Failures log only.
+        _ = DragDropPermissionService.ClearElevationCompatibilityFlags();
+
+        _elevationNoticeWindow = new ElevationNoticeWindow(LocalizationService, _startupElevationAssessment);
+        _elevationNoticeWindow.Closed += (_, _) => _elevationNoticeWindow = null;
+        ThemeService.TrackWindow(_elevationNoticeWindow);
+        _elevationNoticeWindow.Activate();
+        Log("[Elevation] Notice shown for interactive elevated launch");
+    }
+
+    /// <summary>
+    /// When the shell runs above this process's integrity, tray creation is
+    /// blocked by UIPI rather than by a DeskBox defect. Once the tray retry
+    /// loop has confirmed the icon is gone, surface the explanatory notice so
+    /// the user is not left with an invisible tray and no reason — the
+    /// session itself stays alive (the lifeline accepts the hotkey as a
+    /// usable surface).
+    /// </summary>
+    private async Task ShowShellElevationNoticeWhenTrayFailsAsync(Task<bool> trayCreation)
+    {
+        bool trayCreated;
+        try
+        {
+            trayCreated = await trayCreation;
+        }
+        catch (Exception ex)
+        {
+            Log($"[Elevation] Tray creation task faulted: {ex.Message}");
+            trayCreated = false;
+        }
+
+        if (trayCreated ||
             IsStartupMode ||
             IsShuttingDown ||
             _elevationNoticeWindow is not null)
@@ -3468,7 +3935,7 @@ RunCriticalStartupStep("widget-manager", () =>
         _elevationNoticeWindow.Closed += (_, _) => _elevationNoticeWindow = null;
         ThemeService.TrackWindow(_elevationNoticeWindow);
         _elevationNoticeWindow.Activate();
-        Log("[Elevation] Notice shown for interactive elevated launch");
+        Log("[Elevation] Notice shown for shell-above-app tray failure");
     }
 
     public void ShowOnboarding(bool resumeProgress = false)
@@ -4865,8 +5332,45 @@ RunCriticalStartupStep("widget-manager", () =>
         await ShutdownApplicationAsync();
     }
 
+    /// <summary>
+    /// Delayed termination that guarantees the process dies even when
+    /// Application.Exit fails to unwind the XAML loop. Stage one is the
+    /// graceful Environment.Exit. It never returns, and under CoreCLR it
+    /// waits forever for a finalizer thread that a cross-apartment WinRT
+    /// release can block, so stage two is armed first on its own thread and
+    /// hard-terminates. Both are background threads, so neither keeps a
+    /// healthy shutdown alive; the log drain mirrors the startup fatal path
+    /// so the exit tail is not swallowed.
+    /// </summary>
+    private static void ArmShutdownExitBackstop(TimeSpan delay)
+    {
+        var hardStop = new Thread(() =>
+        {
+            Thread.Sleep(delay + ShutdownHardTerminateGrace);
+            Log("[Shutdown] Exit backstop did not complete; terminating the process.");
+            DrainLogQueue();
+            Win32Helper.TerminateCurrentProcess(0);
+        })
+        {
+            IsBackground = true,
+            Name = "DeskBox shutdown hard stop"
+        };
+        hardStop.Start();
+
+        _ = Task.Run(async () =>
+        {
+            await Task.Delay(delay);
+            Log($"[Shutdown] Exit backstop fired: the XAML loop was still alive {delay.TotalSeconds:F0}s after Exit().");
+            DrainLogQueue();
+            Environment.Exit(0);
+        });
+    }
+
     private async Task ShutdownApplicationAsync()
     {
+        // Recorded first so a death anywhere inside teardown still reads as
+        // an intentional exit on the next launch (storm-guard semantics).
+        _startupSessionLedger?.MarkCleanExit();
         bool dependentTeardownCompleted = true;
         try
         {
@@ -4899,9 +5403,10 @@ RunCriticalStartupStep("widget-manager", () =>
                 // The watchdog path guarantees process death within seconds;
                 // releasing the mutex there would open a window where a new
                 // instance starts while this process may still be writing.
-                // Let process death release it instead. The throw path has no
-                // watchdog, so the manual release must remain unconditional
-                // there to never leave a pumping process holding the mutex.
+                // Let process death release it instead. The throw path
+                // finishes its writes before Exit(), so the manual release
+                // must remain unconditional there to never leave a pumping
+                // process holding the mutex.
                 if (dependentTeardownCompleted)
                 {
                     try
@@ -4916,19 +5421,18 @@ RunCriticalStartupStep("widget-manager", () =>
                 try { DrainLogQueue(); }
                 finally
                 {
-                    if (!dependentTeardownCompleted)
-                    {
-                        // Application.Exit is deferred through the XAML
-                        // message loop, and the skipped teardown can keep
-                        // that loop alive after Exit returns (measured:
-                        // the deadline probe stayed pumping forever).
-                        // The deadline path must still terminate.
-                        _ = Task.Run(async () =>
-                        {
-                            await Task.Delay(TimeSpan.FromSeconds(3));
-                            Environment.Exit(0);
-                        });
-                    }
+                    // Application.Exit only requests the XAML loop to stop.
+                    // When teardown was skipped, its pump can stay alive after
+                    // Exit returns (measured: the deadline probe pumped
+                    // forever); even a completed teardown can leave dispatcher
+                    // work that keeps re-queueing itself, so the UI thread
+                    // spins and the loop never drains — a silent zombie with
+                    // tray gone, mutex released, process resident and pinning
+                    // the thumbnail proxy's stdin pipe (feedback 555/556,
+                    // #530/#532). Arm the hard exit on every path; a healthy
+                    // Exit() outruns the timer and the delayed call never fires.
+                    ArmShutdownExitBackstop(TimeSpan.FromSeconds(
+                        dependentTeardownCompleted ? 5 : 3));
                     if (dependentTeardownCompleted &&
                         AppRelaunchService.PendingOsRestartOnShutdown &&
                         DistributionService.IsMicrosoftStore)
@@ -5032,6 +5536,11 @@ RunCriticalStartupStep("widget-manager", () =>
                 _featureRuntimes?.DisposeAsync(TodoRemindersFeatureRuntimeId) ?? Task.CompletedTask,
                 shutdownGrace, abortFollowingStepsOnTimeout: true),
             ShutdownStep.Sync("notifications", () => { _nativeNotificationService?.Dispose(); _nativeNotificationService = null; }),
+            ShutdownStep.Sync("search-popup-window", () =>
+            {
+                _searchPopupWindow?.Close();
+                _searchPopupWindow = null;
+            }),
             ShutdownStep.Bounded("search-settings", () =>
                 _searchSettings?.StopAsync() ?? Task.CompletedTask,
                 shutdownGrace, abortFollowingStepsOnTimeout: true),
@@ -5053,6 +5562,7 @@ RunCriticalStartupStep("widget-manager", () =>
             ShutdownStep.Sync("settings-window", () => { _settingsWindow?.CloseForShutdown(); _settingsWindow = null; }),
             ShutdownStep.Sync("backup-settings", () => _backupSettings?.Dispose()),
             ShutdownStep.Sync("onboarding-window", () => { _onboardingWindow?.Close(); _onboardingWindow = null; }),
+            ShutdownStep.Sync("elevation-notice-window", () => { _elevationNoticeWindow?.Close(); _elevationNoticeWindow = null; }),
             // Closing a surface may commit its final edit/order. Flush after
             // those consumers are closed, while persistence services still live.
             new("settings-flush", async () =>

@@ -583,6 +583,11 @@ public sealed partial class FileSurfaceContent
 
             _stackPopoverKey = currentStack.StackKey;
             _stackPopoverMembers = currentStack.Members.ToArray();
+            // The popover is the only surface that displays every folded
+            // member at once; acquiring their icons here keeps the
+            // release/acquire pairing intact when a release ran while the
+            // stack was collapsed (group switch, long-hidden maintenance).
+            ViewModel.HealReleasedItemIconsIfIdle();
             _stackPopoverLayout = layout;
             _stackPopoverPopupClosing = false;
             _stackPopoverCleanupPending = false;
@@ -2705,9 +2710,57 @@ public sealed partial class FileSurfaceContent
         if (reordered)
         {
             UpdateStackPopoverKeyAfterReorder(items);
+            ScheduleStackPopoverReorderSelectionRestore(items);
         }
 
         return reordered;
+    }
+
+    // The projection-change wrapper around a popover reorder clears the
+    // popover selection, including a deferred reset that runs after
+    // container recycling. The restore therefore hops twice through the
+    // low-priority queue: the first hop queues behind that reset's
+    // enqueue, and the second runs after the reset itself, so the same
+    // members stay selected for a follow-up drag.
+    private void ScheduleStackPopoverReorderSelectionRestore(
+        IReadOnlyList<WidgetItem> items)
+    {
+        string[] paths = items
+            .Select(item => Path.GetFullPath(item.Path))
+            .ToArray();
+        DispatcherQueue.TryEnqueue(
+            Microsoft.UI.Dispatching.DispatcherQueuePriority.Low,
+            () => DispatcherQueue.TryEnqueue(
+                Microsoft.UI.Dispatching.DispatcherQueuePriority.Low,
+                () =>
+                {
+                    if (_isDisposed ||
+                        _stackPopoverItemsView is not { } view ||
+                        !IsStackPopoverInteractionActive)
+                    {
+                        return;
+                    }
+
+                    HashSet<string> pathSet = paths
+                        .ToHashSet(StringComparer.OrdinalIgnoreCase);
+                    List<WidgetItem> restored = view.Items
+                        .OfType<WidgetItem>()
+                        .Where(item => item is not WidgetStackItem &&
+                            pathSet.Contains(Path.GetFullPath(item.Path)))
+                        .ToList();
+                    if (restored.Count == 0)
+                    {
+                        return;
+                    }
+
+                    view.SelectedItems.Clear();
+                    foreach (WidgetItem item in restored)
+                    {
+                        view.SelectedItems.Add(item);
+                    }
+
+                    UpdateSelectionCommandBar();
+                }));
     }
 
     private int ResolveStackPopoverMemberInsertionIndex(

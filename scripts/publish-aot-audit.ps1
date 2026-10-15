@@ -6289,14 +6289,17 @@ $stage5B4C1B2ARequiredFixturePatterns = @(
     "character is >= '0' and <= '9'",
     ">= 'a' and <= 'f'",
     'TryGetOwnedDesktopPath',
-    'GetRecoveryProbeDelay',
-    'TimeSpan.FromMilliseconds(150)',
-    'executeRealShellMove()',
+    'TryCaptureModernTransfer',
+    'ThrowSimulatedModernOutcome',
+    'RecordModernRealCompletion',
+    'proceedWithRealEngine = true',
+    'AbandonedButCompletedOutcome',
+    'StaOperationAbandonedException(',
+    'FileService.FileTransferCanceledException(',
     'case PartialMode',
     'case CancelMode',
     'case LateMode',
     'SimulatedOperationsAborted = true',
-    'Thread.Sleep(800)',
     'unsupported owned selection shape'
 )
 $stage5B4C1B2AMissingFixturePatterns = @(
@@ -6323,14 +6326,9 @@ $stage5B4C1B2ARequiredProductPatterns = @(
     'GetDefaultDesktopPath',
     'AotShellMoveFixture.TryGetOwnedDesktopPath',
     'ExecuteTransferPlanAsync(',
-    'MoveEntriesWithShellProgress(',
-    'WindowHandle = ownerWindowHandle',
-    'SHFileOperation(ref fileOperation)',
-    'AotShellMoveFixture.TryExecute',
-    'AotShellMoveFixture.ReturnedOutcome',
-    'AotShellMoveFixture.RecoveredPendingOutcome',
-    'AotShellMoveFixture.ExtendedWaitOutcome',
-    'ObserveLateShellMoveCompletionAsync'
+    'ExecuteModernShellTransferPlanAsync(',
+    'catch (FileService.FileTransferCanceledException',
+    'SHFileOperation(ref operation)'
 )
 $stage5B4C1B2AMissingProductPatterns = @(
     foreach ($pattern in $stage5B4C1B2ARequiredProductPatterns) {
@@ -6371,9 +6369,9 @@ $stage5B4C1B2ARequiredScenarioPatterns = @(
     'InvokeAotShellMoveBackToDesktopAsync',
     'WaitForAotLocalFileSurfaceAsync',
     'ShellMoveMenuMatrixCompleted',
-    'LateTaskPendingWhenProductReturned',
-    'RecoveredPendingOutcome',
-    '[1, 0, 1, 1]',
+    'AbandonedButCompleted',
+    'AbandonedButCompletedOutcome',
+    '[1, 1, 1]',
     'case "VerifyRestore"',
     'case "Postflight"',
     'case "Compensate"',
@@ -6422,7 +6420,7 @@ $stage5B4C1B2ARequiredSmokeScriptPatterns = @(
     'recoveryRootCleaned',
     'final-fixture',
     'disk-states.json',
-    'Pending shell move call eventually returned',
+    '[FileTransfer] Windows shell transfer abandoned by the watchdog',
     'Stop-ExactPreviewProcess'
 )
 $stage5B4C1B2AMissingSmokeScriptPatterns = @(

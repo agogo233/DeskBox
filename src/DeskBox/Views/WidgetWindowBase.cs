@@ -198,6 +198,15 @@ public abstract partial class WidgetWindowBase : Window
     /// <summary>Extra guards that block RestoreDesktopLayer (e.g. open flyouts).</summary>
     protected virtual bool HasBlockingFlyoutOpen()
     {
+        // The native Shell context menu lives in the proxy process, so no XAML
+        // popup ever exists for it. Without this guard an expanded capsule
+        // auto-collapses while the user browses a menu that extends past the
+        // expanded bounds (the pointer reads as outside the window).
+        if (ShellContextMenuProxy.IsMenuRoundInFlight)
+        {
+            return true;
+        }
+
         XamlRoot? xamlRoot = RootElement.XamlRoot;
         return xamlRoot is not null &&
             VisualTreeHelper.GetOpenPopupsForXamlRoot(xamlRoot).Count > 0;

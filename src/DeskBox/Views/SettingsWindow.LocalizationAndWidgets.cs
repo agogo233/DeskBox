@@ -87,6 +87,9 @@ public sealed partial class SettingsWindow
         }
         RefreshManagedStoragePathWarning();
         RefreshManagedStorageDesktopShortcutState();
+        // RefreshAll re-applied the static DescriptionKey text, dropping the
+        // Win10 note that RefreshDragOutWin10State appends to it.
+        RefreshDragOutWin10State();
         if (TryGetSectionRoute(_currentSettingsSection, out SettingsSectionRoute? route))
         {
             UpdateBreadcrumb(route);
@@ -232,7 +235,7 @@ public sealed partial class SettingsWindow
                 Content = new FontIcon
                 {
                     Glyph = "\uE72C",
-                    FontSize = 13,
+                    FontSize = 16,
                     FontFamily = (FontFamily)Application.Current.Resources["SymbolThemeFontFamily"]
                 }
             };
@@ -252,6 +255,9 @@ public sealed partial class SettingsWindow
                 Tag = entry.Kind
             };
             ClearToggleSwitchContent(toggle);
+            // Same accessible-name contract as the XAML toggles: the card
+            // name does not propagate to the content switch.
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(toggle, entry.Title);
             toggle.Toggled += FeatureWidgetToggle_Toggled;
             contentPanel.Children.Add(toggle);
         }
@@ -294,6 +300,7 @@ public sealed partial class SettingsWindow
             row.Toggle.IsOn = entry.IsEnabled;
             row.Toggle.IsEnabled = entry.CanToggle;
             ClearToggleSwitchContent(row.Toggle);
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(row.Toggle, entry.Title);
         }
     }
 

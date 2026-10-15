@@ -27,12 +27,12 @@ public sealed class AotStage4D1BContractTests
         Assert.Contains("using CommunityToolkit.WinUI.Controls;", source, StringComparison.Ordinal);
         Assert.Matches(
             new Regex(
-                @"case SettingsCard (?<name>\w+):\s*\k<name>\.Header = value;",
+                @"case SettingsCard (?<name>\w+):\s*\k<name>\.Header = InfoTip\.TryCreateHeaderContent\(\k<name>, value\) \?\? value;",
                 RegexOptions.CultureInvariant),
             source);
         Assert.Matches(
             new Regex(
-                @"case SettingsExpander (?<name>\w+):\s*\k<name>\.Header = value;",
+                @"case SettingsExpander (?<name>\w+):\s*\k<name>\.Header = InfoTip\.TryCreateHeaderContent\(\k<name>, value\) \?\? value;",
                 RegexOptions.CultureInvariant),
             source);
         Assert.Matches(
@@ -60,14 +60,14 @@ public sealed class AotStage4D1BContractTests
         // Title/Message properties for the notice cards.
         IReadOnlyDictionary<string, int> usages = ReadLocalizedXamlUsages();
         Assert.Equal(7, usages.Count);
-        Assert.Equal(220, usages["toolkit:SettingsCard|HeaderKey"]);
-        Assert.Equal(182, usages["toolkit:SettingsCard|DescriptionKey"]);
-        Assert.Equal(35, usages["toolkit:SettingsExpander|HeaderKey"]);
-        Assert.Equal(21, usages["toolkit:SettingsExpander|DescriptionKey"]);
-        Assert.Equal(4, usages["InfoBar|HeaderKey"]);
-        Assert.Equal(4, usages["InfoBar|DescriptionKey"]);
+        Assert.Equal(219, usages["toolkit:SettingsCard|HeaderKey"]);
+        Assert.Equal(187, usages["toolkit:SettingsCard|DescriptionKey"]);
+        Assert.Equal(36, usages["toolkit:SettingsExpander|HeaderKey"]);
+        Assert.Equal(22, usages["toolkit:SettingsExpander|DescriptionKey"]);
         Assert.Equal(2, usages["TextBox|HeaderKey"]);
-        Assert.Equal(468, usages.Values.Sum());
+        Assert.Equal(6, usages["InfoBar|HeaderKey"]);
+        Assert.Equal(6, usages["InfoBar|DescriptionKey"]);
+        Assert.Equal(478, usages.Values.Sum());
     }
 
     [Fact]

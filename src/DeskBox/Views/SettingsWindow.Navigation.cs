@@ -24,6 +24,10 @@ namespace DeskBox.Views;
 
 public sealed partial class SettingsWindow
 {
+    // Sentinel tag for the single-line "no results" suggestion row; it must
+    // never reach navigation.
+    private const string SettingsSearchNoResultsTag = "__settings-search-no-results";
+
     private Storyboard? _settingsSearchHighlightStoryboard;
     private EventHandler<object>? _settingsSearchHighlightCompletedHandler;
     private FrameworkElement? _settingsSearchHighlightTarget;
@@ -138,14 +142,43 @@ public sealed partial class SettingsWindow
         }
 
         SettingsSearchResult[] matches = FindSettingsSearchMatches(normalizedQuery, 10);
+        if (matches.Length == 0)
+        {
+            // AutoSuggestBox guidance: with no matches, show a single-line
+            // "no results" row instead of a silently closed flyout. The
+            // sentinel SectionTag is guarded in QuerySubmitted/Activate.
+            SettingsSearchBox.ItemsSource = new object[]
+            {
+                new SettingsSearchResult(
+                    SettingsSearchNoResultsTag,
+                    _localizationService.T("Settings.Search.NoResults"),
+                    string.Empty,
+                    string.Empty,
+                    null,
+                    null)
+            };
+            SettingsSearchBox.IsSuggestionListOpen = true;
+            return;
+        }
+
         SettingsSearchBox.ItemsSource = matches.Cast<object>().ToArray();
-        SettingsSearchBox.IsSuggestionListOpen = matches.Length > 0;
+        SettingsSearchBox.IsSuggestionListOpen = true;
     }
 
     private IEnumerable<SettingsSearchResult> CreateSettingItemSearchResults()
     {
         foreach (SettingsSearchCatalogEntry entry in SettingsSearchCatalog.Entries)
         {
+            // Store-channel filter (route 1): the entries flagged by the
+            // policy only have UI in the direct-installer build, so their
+            // search results would dead-end in Store builds. The key set is
+            // pinned against the catalog by SettingsSearchChannelPolicyTests.
+            if (SettingsSearchChannelPolicy.IsHiddenInStore(entry.HeaderKey) &&
+                AppDistributionService.Current.IsMicrosoftStore)
+            {
+                continue;
+            }
+
             string destinationTag = NormalizeSettingsSectionTag(entry.SectionTag);
             if (!TryGetSectionRoute(
                     destinationTag,
@@ -221,7 +254,8 @@ public sealed partial class SettingsWindow
             result = FindSettingsSearchMatches(query, 1).FirstOrDefault();
         }
 
-        if (result is null)
+        if (result is null ||
+            string.Equals(result.SectionTag, SettingsSearchNoResultsTag, StringComparison.Ordinal))
         {
             return;
         }
@@ -1320,6 +1354,14 @@ public sealed partial class SettingsWindow
         FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.InfoBar>(
             "CloudBackupSettings", "CloudBackupSyncNoticeInfoBar");
 
+    private global::Microsoft.UI.Xaml.Controls.InfoBar? MusicSmtcNoticeInfoBar =>
+        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.InfoBar>(
+            "MusicSettings", "MusicSmtcNoticeInfoBar");
+
+    private global::Microsoft.UI.Xaml.Controls.InfoBar? StoreUninstallDataNoticeInfoBar =>
+        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.InfoBar>(
+            "CloudBackupSettings", "StoreUninstallDataNoticeInfoBar");
+
     private void PrepareDeferredNoticeInfoBars()
     {
         // ThemeResource severity brushes inside the InfoBar template fail to
@@ -1331,10 +1373,14 @@ public sealed partial class SettingsWindow
         // its section has been created.
         PinInformationalSeverityBrushes(GlobalHotkeyElevatedNoticeInfoBar);
         PinInformationalSeverityBrushes(Windows10CompatibilityInfoBar);
+        PinInformationalSeverityBrushes(MusicSmtcNoticeInfoBar);
+        PinInformationalSeverityBrushes(StoreUninstallDataNoticeInfoBar);
         ApplyNoticeMessageTypography(CloudBackupSyncNoticeInfoBar);
         ApplyNoticeMessageTypography(GlobalHotkeyElevatedNoticeInfoBar);
         ApplyNoticeMessageTypography(Windows10CompatibilityInfoBar);
         ApplyNoticeMessageTypography(AboutStoreNoticeInfoBar);
+        ApplyNoticeMessageTypography(MusicSmtcNoticeInfoBar);
+        ApplyNoticeMessageTypography(StoreUninstallDataNoticeInfoBar);
     }
 
     private void PinInformationalSeverityBrushes(InfoBar? infoBar)
@@ -1353,20 +1399,31 @@ public sealed partial class SettingsWindow
         }
     }
 
+    // Mirrors the library's InfoBarInformationalSeverity background
+    // (Microsoft.WinUI generic.xaml): Light = SystemFillColorAttentionBackground
+    // #80F6F6F6, Default/Dark = #08FFFFFF, HighContrast = SystemColorWindow.
+    // WinRT activations stay inside the method (never static initializers):
+    // headless test hosts touch this type without WinAppSDK activation.
+    private static Windows.UI.Color NoticeInfoBackgroundLight =>
+        Windows.UI.Color.FromArgb(0x80, 0xF6, 0xF6, 0xF6);
+    private static Windows.UI.Color NoticeInfoBackgroundDark =>
+        Windows.UI.Color.FromArgb(0x08, 0xFF, 0xFF, 0xFF);
+
     internal static void ApplyInformationalSeverityBrushes(InfoBar infoBar)
     {
-        if (Application.Current.Resources.TryGetValue(
-                "InfoBarInformationalSeverityBackgroundBrush", out object? background) &&
-            background is Brush backgroundBrush)
-        {
-            infoBar.Background = backgroundBrush;
-        }
-        if (Application.Current.Resources.TryGetValue(
-                "InfoBarInformationalSeverityForegroundBrush", out object? foreground) &&
-            foreground is Brush foregroundBrush)
-        {
-            infoBar.Foreground = foregroundBrush;
-        }
+        // Resolve per the notice's ActualTheme, never from
+        // Application.Current.Resources: that lookup serves themed keys from
+        // a stale dictionary on Windows 10 after a live theme switch, which
+        // painted the light informational wash over the dark theme (the
+        // Windows-11-only-correct mismatch). The template's default text
+        // colors already follow the theme, so only the background is pinned.
+        Windows.UI.Color background = new Windows.UI.ViewManagement.AccessibilitySettings().HighContrast
+            ? new Windows.UI.ViewManagement.UISettings().GetColorValue(
+                Windows.UI.ViewManagement.UIColorType.Background)
+            : infoBar.ActualTheme == ElementTheme.Dark
+                ? NoticeInfoBackgroundDark
+                : NoticeInfoBackgroundLight;
+        infoBar.Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(background);
     }
 
     // ── Notice InfoBar message typography ───────────────────────
