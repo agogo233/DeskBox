@@ -786,8 +786,9 @@ public sealed partial class WidgetManager
                     // The import writes the file directly, so the freshness
                     // ledger owns icon invalidation here (upstream 6314ecfa);
                     // a blanket clear would churn mapped-folder placeholders.
-                    await adapterFileSurface.ViewModel.RefreshFromConfigAsync(
-                        clearIconCacheBeforeHydration: false);
+                    // Kept on one line: IconFreshnessLedgerContractTests pins
+                    // this exact substring.
+                    await adapterFileSurface.ViewModel.RefreshFromConfigAsync(clearIconCacheBeforeHydration: false);
                     adapterFileSurface.RevealSavedItem(destinationPath);
                 }
             }
