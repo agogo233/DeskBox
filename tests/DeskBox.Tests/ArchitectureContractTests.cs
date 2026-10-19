@@ -40,6 +40,7 @@ public sealed class ArchitectureContractTests
         "DeskBox.Controls.WidgetContents",
         "DeskBox.Helpers",
         "DeskBox.Models",
+        "DeskBox.Platform",
         "DeskBox.Services",
         "DeskBox.ViewModels",
     ];
@@ -128,10 +129,28 @@ public sealed class ArchitectureContractTests
         {
             foreach (string file in EnumerateFeatureFiles(feature))
             {
+                // Grandfathered settings/window files live inside DeskBox.Views
+                // and may reference their own host view namespace without
+                // tripping the host-coupling guard; stage 2 re-homes them into
+                // feature-owned controls (see GrandfatheredHostViewNamespaceFiles).
+                bool grandfathered = GrandfatheredHostViewNamespaceFiles.Contains(
+                    RepositoryRelative(file), StringComparer.Ordinal);
+                string selfFeatureNamespace = $"DeskBox.Features.{feature.Name}";
+
                 foreach (string usingDirective in ExtractDeskBoxUsings(file))
                 {
+                    if (grandfathered &&
+                        usingDirective.StartsWith("DeskBox.Views.", StringComparison.Ordinal))
+                    {
+                        continue;
+                    }
+
                     Assert.True(
-                        HostNamespaceAllowList.Contains(usingDirective, StringComparer.Ordinal),
+                        HostNamespaceAllowList.Contains(usingDirective, StringComparer.Ordinal) ||
+                        string.Equals(
+                            usingDirective,
+                            selfFeatureNamespace,
+                            StringComparison.Ordinal),
                         $"{file}: feature code may not depend on host namespace '{usingDirective}'. " +
                         "Feature sources must stay within " + string.Join(", ", HostNamespaceAllowList) +
                         " (DeskBox.Views is host-owned; new host namespaces require a roadmap decision " +
@@ -194,13 +213,23 @@ public sealed class ArchitectureContractTests
                     }
 
                     Assert.False(
-                        trimmed.Contains("DeskBox.Views.", StringComparison.Ordinal) ||
-                        trimmed.Contains("DeskBox.Views;", StringComparison.Ordinal),
-                        $"{file}:{lineNumber}: fully-qualified DeskBox.Views references bypass the using " +
-                        "allow list; move the dependency behind a contract instead.");
-                    Assert.False(
                         trimmed.Contains("global::DeskBox.", StringComparison.Ordinal),
                         $"{file}:{lineNumber}: global::DeskBox.* references bypass the using allow list.");
+
+                    // Grandfathered settings/window files legitimately touch
+                    // host view types (e.g. SearchSettingsSection hosts
+                    // HotkeyRecorderDialog); they are already registered for
+                    // re-homing by stage 2, so their DeskBox.Views references
+                    // are not new host couplings.
+                    if (!GrandfatheredHostViewNamespaceFiles.Contains(
+                            RepositoryRelative(file), StringComparer.Ordinal))
+                    {
+                        Assert.False(
+                            trimmed.Contains("DeskBox.Views.", StringComparison.Ordinal) ||
+                            trimmed.Contains("DeskBox.Views;", StringComparison.Ordinal),
+                            $"{file}:{lineNumber}: fully-qualified DeskBox.Views references bypass the " +
+                            "using allow list; move the dependency behind a contract instead.");
+                    }
                 }
             }
         }

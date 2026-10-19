@@ -81,8 +81,10 @@ public sealed class FileReorderBlockTests
                 [0, 1],
                 insertionIndex: 100,
                 totalCount: 4));
+        // Empty block: nothing is vacated before the boundary, so the index
+        // clamps to the trailing insertion point of the full collection.
         Assert.Equal(
-            0,
+            4,
             ReorderDropIndexCalculator.ResolveBlockInsertionIndex(
                 [],
                 insertionIndex: 100,

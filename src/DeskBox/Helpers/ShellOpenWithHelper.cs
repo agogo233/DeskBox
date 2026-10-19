@@ -110,76 +110,99 @@ public static class ShellOpenWithHelper
             ShellOpenWithInterop.SHAssocEnumHandlers(
                 extension,
                 ShellOpenWithInterop.AssocFilterRecommended,
-                out ShellOpenWithInterop.ShellOpenWithEnumHandlers handlers);
-
-            var entries = new List<OpenWithHandlerEntry>();
-            var seen = new HashSet<string>(StringComparer.CurrentCulture);
-            var buffer = new IntPtr[1];
-            while (entries.Count < MaxEntries)
+                out IntPtr handlersPtr);
+            if (handlersPtr == IntPtr.Zero)
             {
-                handlers.Next(1, buffer, out uint fetched);
-                if (fetched == 0 || buffer[0] == IntPtr.Zero)
-                {
-                    break;
-                }
+                return [];
+            }
 
-                IntPtr handlerPtr = buffer[0];
-                try
+            var handlers = Marshal.GetObjectForIUnknown(handlersPtr)
+                as ShellOpenWithInterop.ShellOpenWithEnumHandlers;
+            if (handlers is null)
+            {
+                Marshal.Release(handlersPtr);
+                return [];
+            }
+
+            // The RCW owns the reference acquired by GetObjectForIUnknown;
+            // drop the raw reference from SHAssocEnumHandlers so the
+            // enumerator is released once on the RCW.
+            Marshal.Release(handlersPtr);
+            try
+            {
+                var entries = new List<OpenWithHandlerEntry>();
+                var seen = new HashSet<string>(StringComparer.CurrentCulture);
+                var buffer = new IntPtr[1];
+                while (entries.Count < MaxEntries)
                 {
-                    var handler = Marshal.GetObjectForIUnknown(handlerPtr)
-                        as ShellOpenWithInterop.ShellOpenWithAssocHandler;
-                    if (handler is null)
+                    handlers.Next(1, buffer, out uint fetched);
+                    if (fetched == 0 || buffer[0] == IntPtr.Zero)
                     {
-                        Marshal.Release(handlerPtr);
-                        continue;
+                        break;
                     }
 
-                    // The RCW owns one reference; drop the raw one from Next.
-                    Marshal.Release(handlerPtr);
-
-                    handler.GetUIName(out IntPtr namePtr);
-                    string? displayName = PtrToStringOrNull(namePtr);
-                    if (displayName is null)
-                    {
-                        Marshal.ReleaseComObject(handler);
-                        continue;
-                    }
-
-                    string? iconPath = null;
-                    int iconIndex = 0;
+                    IntPtr handlerPtr = buffer[0];
                     try
                     {
-                        handler.GetIconLocation(
-                            out IntPtr iconPtr,
-                            out iconIndex);
-                        iconPath = PtrToStringOrNull(iconPtr);
+                        var handler = Marshal.GetObjectForIUnknown(handlerPtr)
+                            as ShellOpenWithInterop.ShellOpenWithAssocHandler;
+                        if (handler is null)
+                        {
+                            Marshal.Release(handlerPtr);
+                            continue;
+                        }
+
+                        // The RCW owns one reference; drop the raw one from Next.
+                        Marshal.Release(handlerPtr);
+
+                        handler.GetUIName(out IntPtr namePtr);
+                        string? displayName = PtrToStringOrNull(namePtr);
+                        if (displayName is null)
+                        {
+                            Marshal.ReleaseComObject(handler);
+                            continue;
+                        }
+
+                        string? iconPath = null;
+                        int iconIndex = 0;
+                        try
+                        {
+                            handler.GetIconLocation(
+                                out IntPtr iconPtr,
+                                out iconIndex);
+                            iconPath = PtrToStringOrNull(iconPtr);
+                        }
+                        catch (COMException)
+                        {
+                            // No icon location is fine; the entry stays
+                            // text-only.
+                        }
+
+                        if (seen.Add(displayName))
+                        {
+                            entries.Add(new OpenWithHandlerEntry(
+                                handler,
+                                displayName,
+                                iconPath,
+                                iconIndex));
+                        }
+                        else
+                        {
+                            Marshal.ReleaseComObject(handler);
+                        }
                     }
                     catch (COMException)
                     {
-                        // No icon location is fine; the entry stays
-                        // text-only.
+                        // A single broken association must not take the menu down.
                     }
+                }
 
-                    if (seen.Add(displayName))
-                    {
-                        entries.Add(new OpenWithHandlerEntry(
-                            handler,
-                            displayName,
-                            iconPath,
-                            iconIndex));
-                    }
-                    else
-                    {
-                        Marshal.ReleaseComObject(handler);
-                    }
-                }
-                catch (COMException)
-                {
-                    // A single broken association must not take the menu down.
-                }
+                return entries;
             }
-
-            return entries;
+            finally
+            {
+                Marshal.ReleaseComObject(handlers);
+            }
         }
         catch (Exception ex)
         {
