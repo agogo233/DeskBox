@@ -61,6 +61,11 @@ public sealed class DeskBoxDiagnosticsBundleServiceTests : IDisposable
         Assert.Contains("\"startupLedger\"", diagnostics, StringComparison.Ordinal);
         Assert.Contains("\"stormGuardActive\": true", diagnostics, StringComparison.Ordinal);
         Assert.Contains("\"assessmentReason\"", diagnostics, StringComparison.Ordinal);
+        // The callback-radar section must survive source-generated
+        // serialization (the dictionary value type has no other coverage).
+        Assert.Contains("\"callbackRadar\"", diagnostics, StringComparison.Ordinal);
+        Assert.Contains("\"totalWindowOperationsInCallback\": 1", diagnostics, StringComparison.Ordinal);
+        Assert.Contains("\"SetWindowPos\": 1", diagnostics, StringComparison.Ordinal);
         Assert.DoesNotContain("settings.json", diagnostics, StringComparison.OrdinalIgnoreCase);
 
         // The crash-event report ships on every export — with events, empty,
@@ -226,7 +231,11 @@ public sealed class DeskBoxDiagnosticsBundleServiceTests : IDisposable
             StartupLedger: new DeskBoxStartupLedgerDiagnostic(
                 true,
                 "abnormal-exit-age=120s",
-                new DateTimeOffset(2026, 10, 13, 13, 49, 49, TimeSpan.Zero)));
+                new DateTimeOffset(2026, 10, 13, 13, 49, 49, TimeSpan.Zero)),
+            CallbackRadar: new DeskBoxCallbackRadarDiagnostic(
+                1,
+                new Dictionary<string, long> { ["SetWindowPos"] = 1 },
+                0));
     }
 
     private static async Task<string> ReadEntryAsync(ZipArchive archive, string name)

@@ -553,6 +553,14 @@ public static class DragDropPermissionService
 
     private static List<AppCompatEntry> GetRelevantAppCompatEntries(string currentExePath)
     {
+        // Fixed known-install locations only. Deliberately closed channels:
+        // the HKCU Run value used to be absorbed here, but any same-user
+        // process can rewrite it, which would make an elevated instance
+        // delete arbitrary HKLM AppCompat layers; and the historical
+        // any-directory "DeskBox.exe" filename fallback matched third-party
+        // exes with the same name. Custom install directories keep their
+        // stale layers (Repair reports them as unrelated); clearing those is
+        // the user's call, not a guessable side effect.
         var paths = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
             currentExePath,
@@ -563,12 +571,6 @@ public static class DragDropPermissionService
                 "DeskBox",
                 "DeskBox.exe")
         };
-
-        string? startupPath = ExtractExecutablePath(StartupService.GetRunValue() ?? string.Empty);
-        if (!string.IsNullOrWhiteSpace(startupPath))
-        {
-            paths.Add(startupPath);
-        }
 
         var entries = new List<AppCompatEntry>();
         // Both sides of the per-user branch (read and clear) go through
@@ -647,13 +649,10 @@ public static class DragDropPermissionService
 
     private static bool IsRelevantDeskBoxPath(string valueName, HashSet<string> relevantPaths)
     {
-        if (relevantPaths.Contains(valueName))
-        {
-            return true;
-        }
-
-        string fileName = Path.GetFileName(valueName);
-        return string.Equals(fileName, "DeskBox.exe", StringComparison.OrdinalIgnoreCase);
+        // Exact full-path matches against the known install locations only;
+        // see GetRelevantAppCompatEntries for why the historical filename
+        // fallback is gone.
+        return relevantPaths.Contains(valueName);
     }
 
     private static bool ContainsIncompatibleAppCompatToken(string? value)

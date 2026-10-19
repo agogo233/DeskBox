@@ -132,6 +132,16 @@ public sealed record DeskBoxHotkeyDiagnostic(
     int SearchModifiers,
     int SearchVirtualKey);
 
+/// <summary>
+/// Field-wide observability for the callback-isolation invariant (drag-freeze
+/// family): window operations that ran inside a native callback frame, per
+/// Win32 entry point, plus dispatcher posts dropped during shutdown.
+/// </summary>
+public sealed record DeskBoxCallbackRadarDiagnostic(
+    long TotalWindowOperationsInCallback,
+    IReadOnlyDictionary<string, long> WindowOperationCounts,
+    long PostAfterCallbackDropped);
+
 public sealed record DeskBoxDiagnosticSnapshot(
     int SchemaVersion,
     DateTimeOffset GeneratedAtUtc,
@@ -148,7 +158,8 @@ public sealed record DeskBoxDiagnosticSnapshot(
     DeskBoxWidgetManagerDiagnostic WidgetManager,
     IReadOnlyList<DeskBoxDisplayDiagnostic> Displays,
     ManagedStorageMigrationDiagnostic? StorageMigration = null,
-    DeskBoxStartupLedgerDiagnostic? StartupLedger = null);
+    DeskBoxStartupLedgerDiagnostic? StartupLedger = null,
+    DeskBoxCallbackRadarDiagnostic? CallbackRadar = null);
 
 [JsonSourceGenerationOptions(
     GenerationMode = JsonSourceGenerationMode.Metadata,

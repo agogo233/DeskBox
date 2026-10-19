@@ -50,7 +50,7 @@ public sealed class SearchHotkeyService : IDisposable, IHookHealthProbeTarget, I
         _settingsService = settingsService;
         _localizationService = localizationService;
         _invokeAsync = invokeAsync;
-        _subclassProc = WindowSubclassProc;
+        _subclassProc = CallbackDepth.WrapSubclassProc(WindowSubclassProc);
     }
 
     public bool IsRegistered => _isRegistered &&
@@ -391,6 +391,10 @@ public sealed class SearchHotkeyService : IDisposable, IHookHealthProbeTarget, I
             // leaving the system thinking Alt is still held.  This would cause
             // every subsequent press of the gesture key (e.g. 'D') to be
             // intercepted as Alt+D by RegisterHotKey, making the key appear dead.
+            // Deliberately synchronous (callback-isolation exemption, input
+            // family, not window family — see GlobalHotkeyService for the full
+            // rationale): deferring to "before the next input" would release a
+            // combination the user is actively holding.
             Win32Helper.ReleaseAllModifiers();
 
             if (App.UiDispatcherQueue.TryEnqueue(() =>

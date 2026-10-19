@@ -149,7 +149,7 @@ public abstract partial class WidgetWindowBase
             return;
         }
 
-        _groupWheelSubclassProc ??= GroupWheelSubclassProc;
+        _groupWheelSubclassProc ??= CallbackDepth.WrapSubclassProc(GroupWheelSubclassProc);
         _isGroupWheelSubclassInstalled = Win32Helper.SetWindowSubclass(
             HWnd,
             _groupWheelSubclassProc,

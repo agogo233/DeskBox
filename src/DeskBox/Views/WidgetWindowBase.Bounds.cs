@@ -129,7 +129,7 @@ public abstract partial class WidgetWindowBase
 
     private void InstallDesktopPinnedActivationGuard()
     {
-        _desktopPinnedActivationSubclassProc ??= DesktopPinnedActivationSubclassProc;
+        _desktopPinnedActivationSubclassProc ??= CallbackDepth.WrapSubclassProc(DesktopPinnedActivationSubclassProc);
         if (_isDesktopPinnedActivationSubclassInstalled)
         {
             return;
@@ -217,17 +217,17 @@ public abstract partial class WidgetWindowBase
 
         if (allowActivation)
         {
-            ActivateDesktopPinnedWindow(reason);
+            DeferDesktopPinnedActivation(reason);
         }
         else if (WasRecentlyNativeSuppressed())
         {
-            // The WM_MOUSEACTIVATE subclass already reasserted the desktop
-            // bottom state for this exact click; the routed event is the
+            // The WM_MOUSEACTIVATE subclass already scheduled the desktop
+            // bottom reassert for this exact click; the routed event is the
             // same press, not a new one.
         }
         else
         {
-            RestoreDesktopPinnedBottomState(reason);
+            DeferDesktopPinnedRestore(reason);
         }
     }
 
@@ -252,7 +252,7 @@ public abstract partial class WidgetWindowBase
         // Buttons that open an editor focus it programmatically after their
         // click event. That focus request is also an explicit text-entry action.
         WidgetLayerService.PrepareForDesktopPinnedKeyboardInput(HWnd);
-        ActivateDesktopPinnedWindow("keyboard-focus");
+        DeferDesktopPinnedActivation("keyboard-focus");
     }
 
     private static bool IsKeyboardInputTarget(object? source)
@@ -357,20 +357,96 @@ public abstract partial class WidgetWindowBase
             return;
         }
 
-        if (!_desktopPinnedInputActivationInProgress)
+        // Capture the in-flight flag at event time: when the deliberate
+        // activation path raises this event synchronously the flag is true,
+        // and that path's own restore/rebed already covers this activation.
+        bool deliberateActivationInFlight = _desktopPinnedInputActivationInProgress;
+        WindowActivationState state = args.WindowActivationState;
+        // The bottom restore and the sibling re-bed must land in the same
+        // dispatcher turn (#574: the group must never linger above covering
+        // applications between the two), so they defer together as one unit.
+        UiDispatch.PostAfterCallback(() =>
         {
-            RestoreDesktopPinnedBottomState(
-                $"window-{args.WindowActivationState}");
+            // IsDragging alone must NOT gate this unit: it is set
+            // synchronously inside the same press dispatch (BeginWindowDragCore
+            // runs right after the enqueue), so a bare check would kill every
+            // deferred unit raised by this click. Gate on real movement
+            // instead — owner surgery while the window is actually moving is
+            // the hazard, not the press-and-hold.
+            if (!Win32Helper.IsWindowInCurrentProcess(HWnd) ||
+                deliberateActivationInFlight ||
+                (IsDragging && HasMovedTitleBarDrag))
+            {
+                return;
+            }
+
+            RestoreDesktopPinnedBottomState($"window-{state}");
             // A native activation also promoted the whole owner band; re-bed
-            // the siblings in the same cycle so the group never lingers above
-            // covering applications (#574).
-            if (args.WindowActivationState == WindowActivationState.CodeActivated)
+            // the siblings in this same landing turn so the group never
+            // lingers above covering applications (#574).
+            if (state == WindowActivationState.CodeActivated)
             {
                 App.Current.WidgetManager?.RebedPinnedSiblingsAfterActivation(
                     HWnd,
                     "window-CodeActivated-siblings");
             }
-        }
+        });
+    }
+
+    /// <summary>
+    /// Defers the whole activation unit (busy flag, activation transaction,
+    /// bedding restore, sibling re-bed) off the current callback frame —
+    /// input-callback stacks must not run window surgery (drag-freeze
+    /// family). The foreground snapshot guard drops the unit if focus moved
+    /// to any other window between the callback and the landing turn: a late
+    /// activation must never steal a foreground the user has since given
+    /// away, and the in-method foreground check cannot see that on its own.
+    /// </summary>
+    private void DeferDesktopPinnedActivation(string reason)
+    {
+        IntPtr foregroundAtEnqueue = Win32Helper.GetForegroundWindow();
+        UiDispatch.PostAfterCallback(() =>
+        {
+            if (!Win32Helper.IsWindowInCurrentProcess(HWnd) ||
+                (IsDragging && HasMovedTitleBarDrag))
+            {
+                return;
+            }
+
+            IntPtr foregroundNow = Win32Helper.GetForegroundWindow();
+            if (foregroundNow != HWnd && foregroundNow != foregroundAtEnqueue)
+            {
+                App.LogVerbose(
+                    $"[ZOrder] {LogPrefix} deferred activation dropped " +
+                    $"reason={reason} foreground moved on " +
+                    $"hwnd=0x{HWnd.ToInt64():X}");
+                return;
+            }
+
+            ActivateDesktopPinnedWindow(reason);
+        });
+    }
+
+    /// <summary>Defers the bedding repair off the current callback frame with
+    /// window-liveness and drag guards; the decision that led here stays
+    /// synchronous. The drag guard matters because WM_MOUSEACTIVATE arrives
+    /// synchronously inside the same WM_LBUTTONDOWN dispatch that starts a
+    /// title-bar drag — the deferred unit can otherwise land mid-drag and
+    /// re-parent a window the user is moving.</summary>
+    private void DeferDesktopPinnedRestore(string reason)
+    {
+        UiDispatch.PostAfterCallback(() =>
+        {
+            // Drag guard gates on real movement (see the Activated handler):
+            // WM_MOUSEACTIVATE arrives inside the same WM_LBUTTONDOWN
+            // dispatch that starts a title-bar drag, and IsDragging is true
+            // before this unit can land.
+            if (Win32Helper.IsWindowInCurrentProcess(HWnd) &&
+                !(IsDragging && HasMovedTitleBarDrag))
+            {
+                RestoreDesktopPinnedBottomState(reason);
+            }
+        });
     }
 
     private void RestoreDesktopPinnedBottomState(string reason)
@@ -430,13 +506,22 @@ public abstract partial class WidgetWindowBase
             WidgetLayerService.ShouldSuppressPointerActivation(hWnd))
         {
             // MA_NOACTIVATE keeps the existing foreground application active
-            // but still lets the widget receive the mouse message. Reasserting
-            // the desktop owner here also repairs any stale owner/Z-order state
-            // without a visible raise-and-restore flash. The stamp lets the
-            // XAML routed handler recognize this same click and skip its own
-            // duplicate reassert.
+            // but still lets the widget receive the mouse message. The stamp
+            // lets the XAML routed handler recognize this same click and skip
+            // its own duplicate reassert; the stamp must be written in this
+            // frame because the routed event is dispatched right after the
+            // native message. The bedding surgery itself (owner rewrite +
+            // HWND_BOTTOM) is window work and runs one dispatcher turn later,
+            // off the win32k callback frame (drag-freeze family).
             _desktopPinnedNativeSuppressionTimestamp = DateTime.UtcNow.Ticks;
-            RestoreDesktopPinnedBottomState("native-pointer-suppressed");
+            UiDispatch.PostAfterCallback(() =>
+            {
+                if (Win32Helper.IsWindowInCurrentProcess(hWnd) &&
+                    !(IsDragging && HasMovedTitleBarDrag))
+                {
+                    RestoreDesktopPinnedBottomState("native-pointer-suppressed");
+                }
+            });
             return new IntPtr(Win32Helper.MA_NOACTIVATE);
         }
 

@@ -156,13 +156,32 @@ public partial class App
             ContextMenuMode = ContextMenuMode.SecondWindow,
             MenuActivation = PopupActivationMode.None,
             NoLeftClickDelay = true,
-            RightClickCommand = new RelayCommand(ShowTrayContextMenuFromTray),
+            RightClickCommand = new RelayCommand(() =>
+            {
+                CallbackDepth.Enter();
+                try
+                {
+                    ShowTrayContextMenuFromTray();
+                }
+                finally
+                {
+                    CallbackDepth.Exit();
+                }
+            }),
             LeftClickCommand = new RelayCommand(() =>
             {
-                if (WidgetManager is not null)
+                CallbackDepth.Enter();
+                try
                 {
-                    SafeFireAndForget(() => ToggleTrayWidgetsAsync(
-                        DeskBox.Services.TrayToggleRequestQueue.TrayIconSource));
+                    if (WidgetManager is not null)
+                    {
+                        SafeFireAndForget(() => ToggleTrayWidgetsAsync(
+                            DeskBox.Services.TrayToggleRequestQueue.TrayIconSource));
+                    }
+                }
+                finally
+                {
+                    CallbackDepth.Exit();
                 }
             })
         };
@@ -248,7 +267,14 @@ public partial class App
 
     /// <summary>Attempts per tray creation pass through the early-logon window
     /// where the taskbar may not exist yet (roughly the first 30 seconds after
-    /// logon in the field reports).</summary>
+    /// logon in the field reports). This cap governs tray ICON creation; the
+    /// context-menu flyout retry loop shares the constant but can never run it
+    /// out in the failure path — every assignment failure records a
+    /// TrayContextMenuModePolicy failure and the session degrades to the
+    /// native menu after the second, so the flyout loop's practical ceiling is
+    /// three attempts (~6 s). Do not tighten this constant to shrink that
+    /// loop; it would silently cut the icon-creation window instead
+    /// (drag-freeze review, 2026-10-14).</summary>
     private const int TrayCreationMaxAttempts = 15;
 
     private static readonly TimeSpan TrayCreationRetryDelay = TimeSpan.FromSeconds(2);
@@ -560,10 +586,61 @@ public partial class App
 
     private readonly TrayContextMenuModePolicy _trayContextMenuModePolicy = new();
 
+    /// <summary>Suppresses a second deferred menu open while the first is
+    /// still landing or blocking inside TrackPopupMenuEx's modal loop (the
+    /// loop pumps dispatcher items, so a naive re-enqueue would open a nested
+    /// menu). Monotonic TickCount64, not wall clock: an NTP resync jumping
+    /// the clock backwards would otherwise extend the bounded suppression by
+    /// the whole jump size. Bounded expiry so a lost finally cannot brick
+    /// the tray menu for the whole session.</summary>
+    private long _trayContextMenuReentrySuppressedUntilTick;
+
     private void ShowTrayContextMenuFromTray()
     {
         if (_trayIcon is null ||
             !Win32Helper.GetCursorPos(out var cursor))
+        {
+            return;
+        }
+
+        if (Environment.TickCount64 < _trayContextMenuReentrySuppressedUntilTick)
+        {
+            return;
+        }
+
+        var clickPoint = new DrawingPoint(cursor.X, cursor.Y);
+        // Tray commands run inside H.NotifyIcon's WndProc for the tray click.
+        // Building or showing the menu there re-enters win32k from a message
+        // callback (the drag-freeze family), so capture the click anchor now —
+        // the pointer can keep moving during the deferred turn — and open the
+        // menu one dispatcher turn later, outside the callback frame. The
+        // SetForegroundWindow + TrackPopupMenuEx pairing moves as one unit
+        // inside the library call, preserving dismiss-on-outside-click.
+        UiDispatch.PostAfterCallback(() =>
+        {
+            if (Environment.TickCount64 < _trayContextMenuReentrySuppressedUntilTick)
+            {
+                return;
+            }
+
+            _trayContextMenuReentrySuppressedUntilTick =
+                Environment.TickCount64 + 30_000;
+            try
+            {
+                ShowTrayContextMenuAt(clickPoint);
+            }
+            finally
+            {
+                _trayContextMenuReentrySuppressedUntilTick = 0;
+            }
+        });
+    }
+
+    private void ShowTrayContextMenuAt(DrawingPoint point)
+    {
+        // This lands one dispatcher turn after the tray click; the tray icon
+        // may have been recreated or torn down in between.
+        if (_trayIcon is not { } trayIcon)
         {
             return;
         }
@@ -573,7 +650,6 @@ public partial class App
             PrepareTrayContextMenu(_trayContextMenu);
         }
 
-        var point = new DrawingPoint(cursor.X, cursor.Y);
         try
         {
             point = GetTrayContextMenuAnchorPoint(point);
@@ -591,7 +667,7 @@ public partial class App
 
         try
         {
-            _trayIcon.ShowContextMenu(point);
+            trayIcon.ShowContextMenu(point);
             _trayContextMenuModePolicy.RecordSuccess();
         }
         catch (Exception ex) when (IsSecondWindowHostFailure(ex))
@@ -928,6 +1004,12 @@ public partial class App
         {
             return;
         }
+
+        // The left-click command runs inside H.NotifyIcon's WndProc; the
+        // toggle preamble (cancel animations, per-window restores) must not
+        // run on that callback frame. One yield leaves the frame before any
+        // window work; UiDispatch keeps running inline on the UI thread.
+        await Task.Yield();
 
         await WidgetManager.ToggleWidgetsFromTrayAsync(source);
         UpdateTrayLayerStateText(WidgetManager.WidgetsRaisedFromTray);

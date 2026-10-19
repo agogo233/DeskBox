@@ -55,7 +55,7 @@ internal sealed class AppLifecycleRecoveryWatcher : IDisposable
         _recoveryAction = recoveryAction;
         _endSessionAction = endSessionAction;
         _gateEventAction = gateEventAction;
-        _subclassProc = WindowSubclassProc;
+        _subclassProc = CallbackDepth.WrapSubclassProc(WindowSubclassProc);
         _timer = dispatcherQueue.CreateTimer();
         _timer.Interval = RecoveryDelay;
         _timer.IsRepeating = false;

@@ -46,7 +46,7 @@ public sealed class GlobalHotkeyService : IDisposable, IHookHealthProbeTarget, I
         _settingsService = settingsService;
         _localizationService = localizationService;
         _invokeAsync = invokeAsync;
-        _subclassProc = WindowSubclassProc;
+        _subclassProc = CallbackDepth.WrapSubclassProc(WindowSubclassProc);
     }
 
     public event Action? RegistrationChanged;
@@ -606,6 +606,13 @@ public sealed class GlobalHotkeyService : IDisposable, IHookHealthProbeTarget, I
         {
             // Clear Ctrl/Alt/Shift states that can become stuck in RDP. The
             // reserved Win+Space path owns its key-up state and never uses this.
+            // Deliberately synchronous (callback-isolation exemption, input
+            // family, not window family): none of the radar-tracked Win32
+            // entry points (SetWindowPos/ShowWindow/SetForegroundWindow/
+            // SetWindowLongPtr) is touched here. Deferring to "before the next
+            // input" would instead release a modifier combination the user is
+            // actively holding — F7 followed by an immediate Ctrl+C would fire
+            // as bare keys.
             Win32Helper.ReleaseAllModifiers();
         }
 

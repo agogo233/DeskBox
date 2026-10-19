@@ -46,7 +46,7 @@ public sealed partial class DesktopOrganizationWindow : Window
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(AppTitleBar);
 
-        _windowSubclassProc = WindowSubclassProc;
+        _windowSubclassProc = CallbackDepth.WrapSubclassProc(WindowSubclassProc);
         _hWnd = WindowNative.GetWindowHandle(this);
         WindowId windowId = Win32Interop.GetWindowIdFromWindow(_hWnd);
         _appWindow = AppWindow.GetFromWindowId(windowId);

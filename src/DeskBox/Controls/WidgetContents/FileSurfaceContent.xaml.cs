@@ -1035,7 +1035,7 @@ public sealed partial class FileSurfaceContent :
             return;
         }
 
-        MenuFlyout flyout = item is WidgetStackItem stack
+        FlyoutBase flyout = item is WidgetStackItem stack
             ? CreateStackFlyout(stack)
             : GetSelectedItems().Count > 1
                 ? CreateMultiSelectionFlyout()
@@ -1062,13 +1062,46 @@ public sealed partial class FileSurfaceContent :
                 ItemsList.SelectedItems.Remove(item);
             };
         }
-        FrameworkElement target =
-            FindItemElement(e.OriginalSource) ??
-            sender as FrameworkElement ??
-            Root;
         try
         {
-            flyout.ShowAt(target, e.GetPosition(target));
+            // Engine-owned placement at the invocation point. The target
+            // is a zero-size proxy at the cursor point, not the icon
+            // container: when this flyout flips upward (lower half of the
+            // screen) the engine re-anchors the menu horizontally to the
+            // target RECT's left edge, parking the whole menu left of the
+            // icon; a degenerate 0x0 rect leaves the engine only the
+            // point, so its flip/slide/work-area logic stays and the
+            // rect-anchoring drift goes. Root padding is compensated:
+            // child margins lay out in the padded content box.
+            Windows.Foundation.Point point = e.GetPosition(Root);
+            if (PredictsUpwardFlip(flyout))
+            {
+                // Up-flip drops the primary strip window with its TOP at
+                // the point, hanging the ~80px strip below the cursor and
+                // over the clicked icon; the native Shell menu bottoms
+                // out AT the pointer. Pre-lifting the anchor by the strip
+                // height makes the flipped menu end at the cursor.
+                point.Y -= UpFlipStripLiftDip;
+            }
+
+            var anchor = new Border
+            {
+                Width = 0,
+                Height = 0,
+                HorizontalAlignment = HorizontalAlignment.Left,
+                VerticalAlignment = VerticalAlignment.Top,
+                Margin = new Thickness(
+                    point.X - Root.Padding.Left,
+                    point.Y - Root.Padding.Top,
+                    0,
+                    0),
+                IsHitTestVisible = false
+            };
+            Root.Children.Add(anchor);
+            flyout.Closed += (_, _) => Root.Children.Remove(anchor);
+            flyout.ShowAt(
+                anchor,
+                new FlyoutShowOptions { Placement = FlyoutPlacementMode.Bottom });
         }
         catch
         {
@@ -1079,6 +1112,48 @@ public sealed partial class FileSurfaceContent :
             throw;
         }
         e.Handled = true;
+    }
+
+    /// <summary>Strip window height measured on the up-flipped flyout
+    /// (physical px at scale 1; the anchor shift works in DIP).</summary>
+    private const double UpFlipStripLiftDip = 80;
+
+    /// <summary>
+    /// Whether the engine will have to open the menu upward: no room for
+    /// the estimated full menu (rows + strip) below the cursor inside the
+    /// containing monitor's work area. Matching the engine's flip decision
+    /// matters only near the boundary, where either direction fits
+    /// visually; a rough row-count estimate is therefore enough.
+    /// </summary>
+    private bool PredictsUpwardFlip(FlyoutBase flyout)
+    {
+        if (flyout is not CommandBarFlyout commandBar ||
+            !Win32Helper.GetCursorPos(out Win32Helper.POINT cursor))
+        {
+            return false;
+        }
+
+        double scale = Root.XamlRoot?.RasterizationScale ?? 1;
+        if (scale <= 0)
+        {
+            scale = 1;
+        }
+
+        int separators = commandBar.SecondaryCommands
+            .OfType<AppBarSeparator>()
+            .Count();
+        int rows = commandBar.SecondaryCommands.Count - separators;
+        double estimatedMenuHeight =
+            52 + rows * 38 + separators * 9 + UpFlipStripLiftDip;
+
+        return Win32Helper.GetMonitorWorkAreaInfos()
+            .FirstOrDefault(area =>
+                cursor.X >= area.Monitor.Left &&
+                cursor.X < area.Monitor.Right &&
+                cursor.Y >= area.Monitor.Top &&
+                cursor.Y < area.Monitor.Bottom)
+            is { WorkArea: { } work } &&
+            cursor.Y + estimatedMenuHeight * scale > work.Bottom;
     }
 
     private void Items_DragStarting(

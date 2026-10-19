@@ -205,7 +205,7 @@ public sealed class SettingsCopyAndHierarchyTests
             ["Widget.CollapseBehavior.Smart"] = "悬停自动展开",
             ["Settings.Capsule.Overrides.FollowGlobal"] = "恢复默认",
             ["Widget.OpenStorageFolder"] = "打开格子文件夹",
-            ["Widget.ShowInExplorer"] = "在文件资源管理器中显示",
+            ["Widget.ShowInExplorer"] = "打开文件所在的位置",
             ["Search.Menu.AttachToTodo"] = "添加到待办",
             ["QuickCapture.SaveToRecords"] = "保存为随记",
             ["QuickCapture.PinToRecords"] = "固定这条随记",

@@ -1677,16 +1677,19 @@ public sealed class FileSurfaceParityContractTests
             FindRepositoryRoot(),
             "src/DeskBox/Controls/WidgetContents/FileSurfaceContent.SelectionAndMenus.cs"));
 
+        // Windows 11 background layout: View / Sort by / Refresh /
+        // Paste / New / widget-specific tail. Updated with the context
+        // menu v3 batch (Win11 alignment).
         string[] markers =
         [
+            "var view = new MenuFlyoutSubItem",
+            "var sortBy = new MenuFlyoutSubItem",
             "CreateMenuItem(\"Common.Refresh\"",
             "CreateMenuItem(\"Common.Paste\"",
-            "CreateMenuItem(\"Common.NewFolder\"",
-            "\"Widget.OpenStorageFolder\"",
+            "flyout.Items.Add(CreateNewSubMenu(hasMappedFolder))",
             "flyout.Items.Add(hostItems.TitleStyleItem)",
-            "var viewAndSort = new MenuFlyoutSubItem",
             "flyout.Items.Add(CreateStackSettingsMenu())",
-            "flyout.Items.Add(new MenuFlyoutSeparator())",
+            "\"Widget.OpenStorageFolder\"",
             "flyout.Items.Add(hostItems.CloseWidgetItem)"
         ];
 

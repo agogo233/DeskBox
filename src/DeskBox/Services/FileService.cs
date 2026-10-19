@@ -2810,15 +2810,31 @@ public sealed partial class FileService
     }
 
     /// <summary>
-    /// Show a file in Windows Explorer with it selected.
+    /// Show a file in Windows Explorer with it selected. On a shortcut,
+    /// "open file location" means the TARGET's folder (like the native
+    /// menu); unresolvable targets — url shortcuts, broken links, shell
+    /// namespace items — fall back to the shortcut's own folder.
     /// </summary>
     public static void ShowInExplorer(WidgetItem item)
     {
         var path = item.Path;
-        if (!string.IsNullOrEmpty(path))
+        if (string.IsNullOrEmpty(path))
         {
-            Win32Helper.ShowInExplorer(path);
+            return;
         }
+
+        if (ShortcutHelper.IsShortcutPath(path))
+        {
+            string? target = ShortcutHelper.Resolve(path)?.TargetPath;
+            if (!string.IsNullOrEmpty(target) &&
+                (File.Exists(target) || Directory.Exists(target)))
+            {
+                Win32Helper.ShowInExplorer(target);
+                return;
+            }
+        }
+
+        Win32Helper.ShowInExplorer(path);
     }
 
     public enum OpenItemResult

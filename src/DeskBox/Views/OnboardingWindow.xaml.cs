@@ -52,7 +52,7 @@ public sealed partial class OnboardingWindow : Window
         _settingsService = settingsService;
         _localizationService = localizationService;
         _stepIndex = Math.Clamp(initialStep, 0, StepCount - 1);
-        _windowSubclassProc = WindowSubclassProc;
+        _windowSubclassProc = CallbackDepth.WrapSubclassProc(WindowSubclassProc);
         InitializeComponent();
         _localizationService.LanguageChanged += OnLanguageChanged;
         _settingsService.SettingsChanged += OnFeatureWidgetSettingsChanged;

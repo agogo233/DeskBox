@@ -43,7 +43,7 @@ public sealed class ShellContextMenuCompatibilityContractTests
             menuBuilder,
             StringComparison.Ordinal);
         Assert.Contains(
-            "await actions.ShowSystemContextMenuAsync(item);",
+            "await actions.ShowSystemContextMenuAsync(item)",
             menuBuilder,
             StringComparison.Ordinal);
 

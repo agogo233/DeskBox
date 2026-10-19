@@ -115,6 +115,13 @@ internal static class ShellContextMenuProxy
         int screenY,
         string? renameLabel = null)
     {
+        // Callers arrive on input-callback frames (RightTapped / Shift+F10);
+        // the server cold start below can spawn the proxy process, which must
+        // not happen on that frame. SemaphoreSlim's uncontended WaitAsync
+        // completes synchronously, so an explicit yield is required to leave
+        // the callback before EnsureServerAsync can run (drag-freeze family).
+        await Task.Yield();
+
         string normalizedPath = NormalizePath(path);
         string? normalizedLabel = string.IsNullOrWhiteSpace(renameLabel)
             ? null

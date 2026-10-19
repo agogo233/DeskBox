@@ -66,7 +66,7 @@ public sealed partial class ContentWidgetWindow
 
     private void InstallNativeFileDropBridge(bool registerDropTarget = true)
     {
-        _nativeFileDropSubclassProc ??= NativeFileDropSubclassProc;
+        _nativeFileDropSubclassProc ??= CallbackDepth.WrapSubclassProc(NativeFileDropSubclassProc);
         if (!_isNativeFileDropSubclassInstalled)
         {
             _isNativeFileDropSubclassInstalled = Win32Helper.SetWindowSubclass(
@@ -107,6 +107,7 @@ public sealed partial class ContentWidgetWindow
                 target.DragOverEvent += NativeFileDropTarget_DragOverEvent;
                 target.DragLeaveEvent += NativeFileDropTarget_DragLeaveEvent;
                 target.LaunchDropHandler = HandleNativeLaunchDrop;
+                target.LaunchTargetPathProbe = () => _nativeFileDropLaunchTarget?.Path;
                 target.UndisplayablePathProbe = IsNativeFileDropPathUndisplayable;
                 target.SameVolumeProbe = IsNativeDropOnSameVolume;
                 target.ImportBusyProbe = IsNativeDropImportBusy;
@@ -1090,13 +1091,16 @@ public sealed partial class ContentWidgetWindow
     }
 
     /// <summary>
-    /// Runs synchronously inside the OLE Drop callback: when the pointer is on
-    /// an application-shortcut tile, the dropped files are opened with the
+    /// Runs synchronously inside the OLE Drop callback when the pointer is on
+    /// an application-shortcut tile: the dropped files are opened with the
     /// application the shortcut points at. A shortcut that cannot launch
     /// consumes the gesture: the user asked to open the file with that
     /// application, so the fallback is a notification, never the import that
     /// would move the file. Only a drop that no shortcut owned (NotAttempted)
-    /// stays an ordinary import.
+    /// stays an ordinary import. The gesture claim, target capture, and OLE
+    /// completion effect are decided synchronously here; the process launch
+    /// itself hops one dispatcher turn so the callback frame never spawns a
+    /// process (drag-freeze family).
     /// </summary>
     private ShellDropLaunchResult HandleNativeLaunchDrop(
         NativeDropLaunchRequest request)
@@ -1125,42 +1129,94 @@ public sealed partial class ContentWidgetWindow
             return ShellDropLaunchResult.AlreadyResolved;
         }
 
-        bool launched = ShortcutFileLauncher.TryLaunchWithFiles(
-            launchTarget.Path,
-            request.Paths);
+        // Claim the gesture on this thread: the legacy WM_DROPFILES message
+        // for the same release can arrive before queued UI work would run,
+        // and it must not turn this outcome into an import. With the launch
+        // deferred, the claim has to happen inside the callback frame —
+        // before OnDrop returns — or that race reopens.
+        string shortcutPath = launchTarget.Path;
+        string applicationName = launchTarget.Name;
+        IReadOnlyList<string> droppedPaths = request.Paths;
+        bool containsTemporaryFiles = request.ContainsTemporaryFiles;
         _nativeFileDropItemTarget = null;
         _nativeFileDropLaunchTarget = null;
-        string applicationName = launchTarget.Name;
         _lastXamlFileDropUtc = DateTimeOffset.UtcNow;
-        // Claim the gesture on this thread: the legacy WM_DROPFILES message for
-        // the same release can arrive before queued UI work would run, and it
-        // must not turn this outcome into an import.
         MarkLaunchConsumedForCurrentContent();
         RunOnNativeFileDropUiThread(file =>
         {
             file.ClearDragSessionVisualState();
+        });
+        UiDispatch.PostAfterCallback(() =>
+            LaunchDroppedFilesDeferred(
+                shortcutPath,
+                applicationName,
+                droppedPaths,
+                containsTemporaryFiles));
+
+        // The completion effect is decided optimistically: the shortcut owned
+        // this gesture and a Link receipt never deletes source files, so a
+        // launch that fails after the fact is reported by the refusal toast
+        // instead of retroactively rewriting the OLE outcome.
+        return ShellDropLaunchResult.Launched(NativeDropEffectPolicy.Link, 0);
+    }
+
+    /// <summary>
+    /// The deferred half of the shortcut launch: runs one dispatcher turn
+    /// after the drop callback returned. Only paths that exist on disk reach
+    /// the command line — a synthetic CF_HDROP can carry arbitrary
+    /// flag-shaped strings ("/k", "-Command") that quoted-argument
+    /// passing would forward to the launched application as argv tokens.
+    /// </summary>
+    private void LaunchDroppedFilesDeferred(
+        string shortcutPath,
+        string applicationName,
+        IReadOnlyList<string> droppedPaths,
+        bool containsTemporaryFiles)
+    {
+        string[] existingPaths = droppedPaths
+            .Where(System.IO.File.Exists)
+            .ToArray();
+        if (existingPaths.Length == 0)
+        {
+            App.Log(
+                "[ShortcutLaunch] Refused launch: no dropped path exists on " +
+                $"disk for '{shortcutPath}'");
+            RunOnNativeFileDropUiThread(file =>
+                file.ShowShortcutLaunchRefusedFeedback(applicationName));
+            if (containsTemporaryFiles)
+            {
+                // The recursive delete leaves the dispatcher turn; this unit
+                // only landed here to stay off the OLE callback frame.
+                IReadOnlyList<string> refusedPaths = droppedPaths;
+                _ = Task.Run(() => CleanupNativeTemporaryDropFiles(refusedPaths));
+            }
+
+            return;
+        }
+
+        bool launched = ShortcutFileLauncher.TryLaunchWithFiles(
+            shortcutPath,
+            existingPaths);
+        RunOnNativeFileDropUiThread(file =>
+        {
             if (!launched)
             {
                 file.ShowShortcutLaunchRefusedFeedback(applicationName);
             }
         });
-        if (launched && request.ContainsTemporaryFiles)
+        if (launched && containsTemporaryFiles)
         {
             // The launched application may read the materialized virtual files
             // lazily, so the import path's synchronous VirtualDrops cleanup is
             // deferred past a generous startup window instead.
-            IReadOnlyList<string> temporaryPaths = request.Paths;
             _ = Task.Delay(TimeSpan.FromSeconds(20))
-                .ContinueWith(_ => CleanupNativeTemporaryDropFiles(temporaryPaths));
+                .ContinueWith(_ => CleanupNativeTemporaryDropFiles(droppedPaths));
         }
-        else if (request.ContainsTemporaryFiles)
+        else if (containsTemporaryFiles)
         {
-            CleanupNativeTemporaryDropFiles(request.Paths);
+            IReadOnlyList<string> failedLaunchPaths = droppedPaths;
+            _ = Task.Run(() => CleanupNativeTemporaryDropFiles(failedLaunchPaths));
         }
-
-        return launched
-            ? ShellDropLaunchResult.Launched(NativeDropEffectPolicy.Link, 0)
-            : ShellDropLaunchResult.Failed(0);
     }
 
     private void MarkLaunchConsumedForCurrentContent()
@@ -1299,9 +1355,14 @@ public sealed partial class ContentWidgetWindow
     private void QueueNativeRightButtonDropChoice(
         NativeDropIntentEventArgs args)
     {
+        // Capture before enqueueing: the caller clears
+        // _nativeFileDropLaunchTarget synchronously right after this method
+        // returns, so a closure reading the field at dispatch time always
+        // saw null and the "open with" menu item never appeared.
+        WidgetItem? capturedLaunchTarget = _nativeFileDropLaunchTarget;
         if (!DispatcherQueue.TryEnqueue(async () =>
-            {
-                WidgetItem? launchTarget = _nativeFileDropLaunchTarget;
+        {
+                WidgetItem? launchTarget = capturedLaunchTarget;
                 NativeRightDropChoice choice =
                     await ShowNativeRightButtonDropChoiceAsync(args, launchTarget);
                 if (choice == NativeRightDropChoice.Cancel)
@@ -1795,41 +1856,9 @@ public sealed partial class ContentWidgetWindow
     private static void CleanupNativeTemporaryDropFiles(
         IReadOnlyList<string> paths)
     {
-        string temporaryRoot = Path.GetFullPath(Path.Combine(
-            Path.GetTempPath(),
-            "DeskBox",
-            "VirtualDrops"))
-            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) +
-            Path.DirectorySeparatorChar;
-
-        foreach (string directory in paths
-                     .Select(Path.GetDirectoryName)
-                     .Where(directory => !string.IsNullOrWhiteSpace(directory))
-                     .Select(directory => Path.GetFullPath(directory!))
-                     .Distinct(StringComparer.OrdinalIgnoreCase))
-        {
-            string normalizedDirectory = directory
-                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) +
-                Path.DirectorySeparatorChar;
-            if (!normalizedDirectory.StartsWith(
-                    temporaryRoot,
-                    StringComparison.OrdinalIgnoreCase))
-            {
-                continue;
-            }
-
-            try
-            {
-                if (Directory.Exists(directory))
-                {
-                    Directory.Delete(directory, recursive: true);
-                }
-            }
-            catch (Exception ex)
-            {
-                App.Log(
-                    $"[DropTarget] Failed to clean grouped virtual drop directory: {ex.Message}");
-            }
-        }
+        // Shared implementation lives with the materialization worker so the
+        // refusal branches in NativeDropTarget can clean up orphaned drops
+        // with the same temp-root whitelist.
+        NativeDropMaterializationWorker.CleanupVirtualDropDirectories(paths);
     }
 }

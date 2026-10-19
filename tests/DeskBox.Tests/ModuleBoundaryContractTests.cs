@@ -543,7 +543,12 @@ public sealed class ModuleBoundaryContractTests
         // atomic write. No user-file mutation.
         ["src/DeskBox/Services/WidgetTitleIconAssetStore.cs"] = 4,
         ["src/DeskBox/ViewModels/TodoWidgetViewModel.DetailAndAttachments.cs"] = 1,
-        ["src/DeskBox/Views/ContentWidgetWindow.NativeDragDrop.cs"] = 1,
+        // 2026-10-14: the VirtualDrops temp-root delete moved verbatim from
+        // ContentWidgetWindow.NativeDragDrop.cs (entry removed) into the
+        // shared materialization worker so refusal branches can clean up too.
+        // Relocation, not a new violation — total unchanged, whitelist guard
+        // included in the moved code.
+        ["src/DeskBox/Helpers/NativeDropMaterializationWorker.cs"] = 1,
         ["src/DeskBox/Views/SearchPopupWindow.xaml.cs"] = 2,
         ["src/DeskBox/Views/SettingsWindow.Feedback.cs"] = 1,
     };

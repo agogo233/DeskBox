@@ -118,9 +118,89 @@ public sealed class WidgetZOrderRestoreContractTests
         Assert.Contains("TryAllowDesktopPinnedPointerActivation", routedHandler, StringComparison.Ordinal);
         Assert.Contains("IsKeyboardInputTarget(args.OriginalSource)", routedHandler, StringComparison.Ordinal);
         Assert.Contains("PrepareForDesktopPinnedKeyboardInput", routedHandler, StringComparison.Ordinal);
-        Assert.Contains("RestoreDesktopPinnedBottomState", routedHandler, StringComparison.Ordinal);
-        Assert.Contains("ActivateDesktopPinnedWindow", routedHandler, StringComparison.Ordinal);
+        // Since the callback-isolation batch the routed handler schedules the
+        // activation/restore units off the input-callback frame instead of
+        // running them inline; the units themselves stay pinned by the
+        // keyboard-input test's activate slice and the deferral test below.
+        Assert.Contains("DeferDesktopPinnedRestore(reason)", routedHandler, StringComparison.Ordinal);
+        Assert.Contains("DeferDesktopPinnedActivation(reason)", routedHandler, StringComparison.Ordinal);
         Assert.DoesNotContain("args.Handled = true", routedHandler, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DesktopPinnedWindowWork_IsDeferredOutOfCallbackFrames()
+    {
+        string bounds = File.ReadAllText(TestPaths.FromRepository(
+            "src/DeskBox/Views/WidgetWindowBase.Bounds.cs"));
+        string subclass = SliceMethod(
+            bounds,
+            "private IntPtr DesktopPinnedActivationSubclassProc",
+            "// ── Bounds management");
+        string deferActivation = SliceMethod(
+            bounds,
+            "private void DeferDesktopPinnedActivation",
+            "private void DeferDesktopPinnedRestore");
+        string deferRestore = SliceMethod(
+            bounds,
+            "private void DeferDesktopPinnedRestore",
+            "private void RestoreDesktopPinnedBottomState");
+
+        // The WM_MOUSEACTIVATE answer and the suppression stamp stay
+        // synchronous (the routed event follows in the same click); the
+        // bedding surgery leaves the callback frame.
+        Assert.Contains("UiDispatch.PostAfterCallback", subclass, StringComparison.Ordinal);
+        Assert.Contains(
+            "_desktopPinnedNativeSuppressionTimestamp = DateTime.UtcNow.Ticks;",
+            subclass,
+            StringComparison.Ordinal);
+        Assert.Contains("Win32Helper.MA_NOACTIVATE", subclass, StringComparison.Ordinal);
+        Assert.Contains("IsWindowInCurrentProcess(hWnd)", subclass, StringComparison.Ordinal);
+        Assert.Contains("IsDragging", subclass, StringComparison.Ordinal);
+
+        // Landing guards on the deferred activation: window liveness plus
+        // process ownership plus the drag guard; the foreground snapshot —
+        // a late activation must never steal a foreground the user gave away
+        // during the deferred turn — is taken OUTSIDE the landing lambda
+        // (inside it the guard would always pass).
+        Assert.Contains("UiDispatch.PostAfterCallback", deferActivation, StringComparison.Ordinal);
+        int snapshotIndex = deferActivation.IndexOf(
+            "IntPtr foregroundAtEnqueue = Win32Helper.GetForegroundWindow();",
+            StringComparison.Ordinal);
+        int enqueueIndex = deferActivation.IndexOf(
+            "UiDispatch.PostAfterCallback",
+            StringComparison.Ordinal);
+        Assert.True(snapshotIndex >= 0 && snapshotIndex < enqueueIndex,
+            "The foreground snapshot must be taken before enqueueing.");
+        Assert.Contains("IsWindowInCurrentProcess(HWnd)", deferActivation, StringComparison.Ordinal);
+        Assert.Contains("IsDragging", deferActivation, StringComparison.Ordinal);
+        Assert.Contains("ActivateDesktopPinnedWindow(reason)", deferActivation, StringComparison.Ordinal);
+
+        Assert.Contains("UiDispatch.PostAfterCallback", deferRestore, StringComparison.Ordinal);
+        Assert.Contains("IsWindowInCurrentProcess(HWnd)", deferRestore, StringComparison.Ordinal);
+        // The restore call itself must stay inside the deferred closure —
+        // emptying the lambda would otherwise pass every other pin.
+        Assert.Contains(
+            "RestoreDesktopPinnedBottomState(reason);",
+            deferRestore,
+            StringComparison.Ordinal);
+
+        // The native-activation handler defers restore and re-bed as ONE
+        // landing unit (#574 same-cycle invariant), with the in-flight flag
+        // captured at event time.
+        string activatedHandler = SliceMethod(
+            bounds,
+            "private void WidgetWindowBase_ActivatedForDesktopPinnedLayer",
+            "private void DeferDesktopPinnedActivation");
+        Assert.Contains("UiDispatch.PostAfterCallback", activatedHandler, StringComparison.Ordinal);
+        Assert.Contains("deliberateActivationInFlight", activatedHandler, StringComparison.Ordinal);
+        int restoreIndex = activatedHandler.IndexOf(
+            "RestoreDesktopPinnedBottomState",
+            StringComparison.Ordinal);
+        int rebedIndex = activatedHandler.IndexOf(
+            "RebedPinnedSiblingsAfterActivation",
+            StringComparison.Ordinal);
+        Assert.True(restoreIndex >= 0 && rebedIndex > restoreIndex,
+            "Restore must run before the sibling re-bed inside the same unit.");
     }
 
     [Fact]

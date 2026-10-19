@@ -181,7 +181,40 @@ public sealed partial class ContentWidgetWindow
         if (ShouldOpenTitleBarFlyout(e.OriginalSource) &&
             !Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Control))
         {
-            App.Current.WidgetManager?.ActivateAllVisibleWidgetsFromTitle(HWnd);
+            // Raising the whole group (band ordering + foreground) is window
+            // surgery and must not run on the pointer-pressed callback frame
+            // (drag-freeze family). The deferral sits at this call site only:
+            // the manager's raise sequence itself stays atomic so the reassert
+            // path never splits across turns. The foreground snapshot guard
+            // drops the raise if the user moved focus elsewhere during the
+            // deferred turn; the drag guard skips it when the press turned
+            // into a drag before the unit landed.
+            IntPtr foregroundAtEnqueue = Win32Helper.GetForegroundWindow();
+            IntPtr windowHandle = HWnd;
+            UiDispatch.PostAfterCallback(() =>
+            {
+                // The drag guard gates on real movement: IsDragging is set
+                // synchronously by BeginWindowDragCore later in THIS press
+                // dispatch, so a bare check would drop the raise forever.
+                if (!Win32Helper.IsWindowInCurrentProcess(windowHandle) ||
+                    (IsDragging && HasMovedTitleBarDrag))
+                {
+                    return;
+                }
+
+                IntPtr foregroundNow = Win32Helper.GetForegroundWindow();
+                if (foregroundNow != windowHandle &&
+                    foregroundNow != foregroundAtEnqueue)
+                {
+                    App.LogVerbose(
+                        "[ZOrder] Deferred title-bar group raise dropped: " +
+                        "foreground moved on");
+                    return;
+                }
+
+                App.Current.WidgetManager?.ActivateAllVisibleWidgetsFromTitle(
+                    windowHandle);
+            });
         }
         if (_config.IsPositionLocked || IsCompactTransitionActive) return;
         BeginWindowDragCore(e, ContentWidgetShell.TitleBar);
@@ -357,6 +390,16 @@ public sealed partial class ContentWidgetWindow
         // A long-hidden release dropped the decoded custom background; the
         // surface is cheap to rebuild from disk on the way back in.
         RecoverCustomBackgroundIfReleased();
+        // Deliberately synchronous (callback-isolation exemption): deferring
+        // this reassert one dispatcher turn turns its SetForegroundWindow
+        // (active) from a no-op — the window is still the foreground when the
+        // handler runs — into a REAL foreground switch against whichever
+        // sibling the raise batch activated next. Each switch raises another
+        // Activated event, whose deferred reassert switches again: a 3ms
+        // activation ping-pong ring across the whole group (2026-10-15
+        // incident, 1805 band-split transactions during one raise). The
+        // manager's own guards (session flag, foreground ownership, the
+        // 400ms reassert suppression) bound the synchronous form.
         App.Current.WidgetManager?.ReassertRaisedWidgetGroupAfterDeskBoxActivation(
             HWnd,
             "content-window-activated");

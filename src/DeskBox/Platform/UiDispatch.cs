@@ -305,6 +305,89 @@ internal static class UiDispatch
     }
 
     /// <summary>
+    /// Runs the action on the dispatcher queue instead of the caller's stack.
+    /// Unlike <see cref="RunOrDefer"/> this never runs inline while Ready:
+    /// native callback contexts (subclass procs, OLE drop-target methods,
+    /// tray icon commands) use it to leave the callback frame before touching
+    /// window state — the drag-freeze family's core invariant. While Headless
+    /// on the origin thread there is no callback to escape and no queue to
+    /// post to, so the action runs inline; test hosts keep the same inline
+    /// fiction as the rest of this class. Shutdown drops the action and
+    /// counts it: callback work must never run on a tearing-down dispatcher.
+    /// Human-pace events only: each call costs a dispatcher post (~µs plus
+    /// one closure allocation) — never call this from DragOver or any
+    /// frame-rate path (ninth-round performance review, 2026-10-15).
+    /// </summary>
+    public static void PostAfterCallback(Action action)
+    {
+        ArgumentNullException.ThrowIfNull(action);
+
+        Decision decision;
+        DispatcherQueue? enqueueTarget;
+        lock (Gate)
+        {
+            decision = DecideNoLock();
+            enqueueTarget = _queue;
+        }
+
+        switch (decision)
+        {
+            case Decision.RunInline:
+                DispatcherQueue? readyQueue = enqueueTarget;
+                if (readyQueue is not null)
+                {
+                    // Ready + dispatcher thread: enqueue so the work leaves the
+                    // callback frame. Headless/test-host inline has no queue by
+                    // definition (DecideNoLock returned RunInline without one).
+                    if (!readyQueue.TryEnqueue(() => action()))
+                    {
+                        Interlocked.Increment(ref _postAfterCallbackDroppedCount);
+                        App.Log("[UiDispatch] TryEnqueue rejected a PostAfterCallback action.");
+                    }
+                }
+                else
+                {
+                    action();
+                }
+
+                break;
+
+            case Decision.Enqueue:
+                if (!enqueueTarget!.TryEnqueue(() => action()))
+                {
+                    Interlocked.Increment(ref _postAfterCallbackDroppedCount);
+                    App.Log("[UiDispatch] TryEnqueue rejected a PostAfterCallback action.");
+                }
+
+                break;
+
+            case Decision.Defer:
+                // A callback firing while headless off-origin replays after
+                // MarkReady, which is already after any callback frame.
+                DeferCore<bool>(() =>
+                {
+                    action();
+                    return Task.FromResult(true);
+                });
+                break;
+
+            case Decision.Skip:
+                Interlocked.Increment(ref _headlessSkipCount);
+                break;
+
+            case Decision.Shutdown:
+            default:
+                Interlocked.Increment(ref _postAfterCallbackDroppedCount);
+                break;
+        }
+    }
+
+    public static long PostAfterCallbackDroppedCount =>
+        Volatile.Read(ref _postAfterCallbackDroppedCount);
+
+    private static long _postAfterCallbackDroppedCount;
+
+    /// <summary>
     /// Legacy-helper observability removed in stage 2 together with the
     /// null-inline helpers. Skip/defer counters below remain as permanent
     /// observability.
@@ -323,6 +406,7 @@ internal static class UiDispatch
             _headlessSkipCount = 0;
             _deferredCount = 0;
             _deferredDroppedCount = 0;
+            _postAfterCallbackDroppedCount = 0;
         }
     }
 

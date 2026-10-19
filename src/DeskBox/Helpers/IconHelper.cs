@@ -1732,7 +1732,18 @@ public static class IconHelper
         }
     }
 
-    private static Task<BitmapImage?> CreateBitmapImageAsync(
+    /// <summary>
+    /// Menu-sized indexed icon as PNG bytes, extracted in-process
+    /// (SHDefExtractIcon); safe to call from background threads. Used for
+    /// Open With app entries, where the extraction starts when the menu is
+    /// built so the icons are ready by the time the submenu opens on hover.
+    /// </summary>
+    internal static byte[]? GetIndexedIconPngBytes(
+        string filePath,
+        int iconIndex,
+        int size) => TryExtractHighResIndexedIcon(filePath, iconIndex, size);
+
+    internal static Task<BitmapImage?> CreateBitmapImageAsync(
         Microsoft.UI.Dispatching.DispatcherQueue dispatcher,
         byte[]? bytes,
         int decodePixelWidth = 0)

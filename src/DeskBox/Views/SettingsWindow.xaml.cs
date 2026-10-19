@@ -265,7 +265,7 @@ public sealed partial class SettingsWindow : Window
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(AppTitleBar);
 
-        _windowSubclassProc = WindowSubclassProc;
+        _windowSubclassProc = CallbackDepth.WrapSubclassProc(WindowSubclassProc);
         _hWnd = WindowNative.GetWindowHandle(this);
         var windowId = Microsoft.UI.Win32Interop.GetWindowIdFromWindow(_hWnd);
         _appWindow = AppWindow.GetFromWindowId(windowId);

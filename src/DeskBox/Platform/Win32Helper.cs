@@ -211,9 +211,9 @@ public static partial class Win32Helper
     public const int SW_SHOWNORMAL = 1;
     public const int SW_SHOWNOACTIVATE = 4;
 
-    [LibraryImport("user32.dll", SetLastError = true)]
+    [LibraryImport("user32.dll", EntryPoint = "SetWindowPos", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    public static partial bool SetWindowPos(
+    private static partial bool SetWindowPosNative(
         IntPtr hWnd,
         IntPtr hWndInsertAfter,
         int X,
@@ -221,6 +221,29 @@ public static partial class Win32Helper
         int cx,
         int cy,
         uint uFlags);
+
+    /// <summary>
+    /// Tracked wrapper for the window-position P/Invoke: reports itself to the
+    /// callback-depth radar when called from inside a native callback frame
+    /// (subclass procs, OLE drop callbacks, tray commands). All SetWindowPos
+    /// traffic in the app must go through here so the radar sees all of it.
+    /// </summary>
+    public static bool SetWindowPos(
+        IntPtr hWnd,
+        IntPtr hWndInsertAfter,
+        int X,
+        int Y,
+        int cx,
+        int cy,
+        uint uFlags)
+    {
+        if (CallbackDepth.Depth > 0)
+        {
+            CallbackDepth.RecordWindowOperation();
+        }
+
+        return SetWindowPosNative(hWnd, hWndInsertAfter, X, Y, cx, cy, uFlags);
+    }
 
     // ── DeferWindowPos: atomic multi-window position batch ──────────
     // Moving N windows through one HDWP transaction commits all positions
@@ -241,13 +264,37 @@ public static partial class Win32Helper
         int cy,
         uint uFlags);
 
-    [LibraryImport("user32.dll", SetLastError = true)]
+    [LibraryImport("user32.dll", EntryPoint = "EndDeferWindowPos", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    public static partial bool EndDeferWindowPos(IntPtr hWinPosInfo);
+    private static partial bool EndDeferWindowPosNative(IntPtr hWinPosInfo);
 
-    [LibraryImport("user32.dll", SetLastError = true)]
+    /// <summary>Tracked commit point for a DeferWindowPos batch; see
+    /// <see cref="SetWindowPos(IntPtr, IntPtr, int, int, int, int, uint)"/>.</summary>
+    public static bool EndDeferWindowPos(IntPtr hWinPosInfo)
+    {
+        if (CallbackDepth.Depth > 0)
+        {
+            CallbackDepth.RecordWindowOperation();
+        }
+
+        return EndDeferWindowPosNative(hWinPosInfo);
+    }
+
+    [LibraryImport("user32.dll", EntryPoint = "ShowWindow", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    public static partial bool ShowWindow(IntPtr hWnd, int nCmdShow);
+    private static partial bool ShowWindowNative(IntPtr hWnd, int nCmdShow);
+
+    /// <summary>Tracked wrapper; see
+    /// <see cref="SetWindowPos(IntPtr, IntPtr, int, int, int, int, uint)"/>.</summary>
+    public static bool ShowWindow(IntPtr hWnd, int nCmdShow)
+    {
+        if (CallbackDepth.Depth > 0)
+        {
+            CallbackDepth.RecordWindowOperation();
+        }
+
+        return ShowWindowNative(hWnd, nCmdShow);
+    }
 
     public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
 
@@ -294,9 +341,21 @@ public static partial class Win32Helper
     [return: MarshalAs(UnmanagedType.Bool)]
     public static partial bool AllowSetForegroundWindow(uint processId);
 
-    [LibraryImport("user32.dll")]
+    [LibraryImport("user32.dll", EntryPoint = "SetForegroundWindow")]
     [return: MarshalAs(UnmanagedType.Bool)]
-    public static partial bool SetForegroundWindow(IntPtr hWnd);
+    private static partial bool SetForegroundWindowNative(IntPtr hWnd);
+
+    /// <summary>Tracked wrapper; see
+    /// <see cref="SetWindowPos(IntPtr, IntPtr, int, int, int, int, uint)"/>.</summary>
+    public static bool SetForegroundWindow(IntPtr hWnd)
+    {
+        if (CallbackDepth.Depth > 0)
+        {
+            CallbackDepth.RecordWindowOperation();
+        }
+
+        return SetForegroundWindowNative(hWnd);
+    }
 
     [LibraryImport("user32.dll")]
     public static partial IntPtr WindowFromPoint(POINT point);
@@ -310,6 +369,21 @@ public static partial class Win32Helper
     [LibraryImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static partial bool IsWindow(IntPtr hWnd);
+
+    /// <summary>True when the window still exists AND belongs to this
+    /// process — the landing guard for deferred window work. A bare
+    /// IsWindow check accepts a recycled HWND that now belongs to another
+    /// process; a stale deferred unit must never operate on that.</summary>
+    public static bool IsWindowInCurrentProcess(IntPtr hWnd)
+    {
+        if (!IsWindow(hWnd))
+        {
+            return false;
+        }
+
+        GetWindowThreadProcessId(hWnd, out uint processId);
+        return processId == (uint)Environment.ProcessId;
+    }
 
     [LibraryImport("user32.dll", EntryPoint = "FindWindowExW", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
     public static partial IntPtr FindWindowEx(IntPtr hWndParent, IntPtr hWndChildAfter, string? lpszClass, string? lpszWindow);
@@ -393,7 +467,20 @@ public static partial class Win32Helper
     public static partial IntPtr GetWindowLongPtr(IntPtr hWnd, int nIndex);
 
     [LibraryImport("user32.dll", EntryPoint = "SetWindowLongPtrW", SetLastError = true)]
-    public static partial IntPtr SetWindowLongPtr(IntPtr hWnd, int nIndex, IntPtr dwNewLong);
+    private static partial IntPtr SetWindowLongPtrNative(IntPtr hWnd, int nIndex, IntPtr dwNewLong);
+
+    /// <summary>Tracked wrapper (owner/ex-style rewrites are window
+    /// surgery); see
+    /// <see cref="SetWindowPos(IntPtr, IntPtr, int, int, int, int, uint)"/>.</summary>
+    public static IntPtr SetWindowLongPtr(IntPtr hWnd, int nIndex, IntPtr dwNewLong)
+    {
+        if (CallbackDepth.Depth > 0)
+        {
+            CallbackDepth.RecordWindowOperation();
+        }
+
+        return SetWindowLongPtrNative(hWnd, nIndex, dwNewLong);
+    }
 
     [LibraryImport("kernel32.dll")]
     public static partial void SetLastError(uint dwErrCode);
@@ -1482,6 +1569,36 @@ public static partial class Win32Helper
         uint message,
         UIntPtr wParam,
         IntPtr lParam);
+
+    // ── OLE apartment marshaling for the deferred virtual-drop worker ──
+    // The native drop target hands its IDataObject to a dedicated MTA thread
+    // for virtual-file materialization; these are the official cross-thread
+    // marshaling primitives (see CoMarshalInterThreadInterfaceInStream docs).
+
+    public static readonly Guid IDataObjectComInterfaceId = new(
+        "0000010E-0000-0000-C000-000000000046");
+
+    [LibraryImport("ole32.dll")]
+    public static partial int CoMarshalInterThreadInterfaceInStream(
+        in Guid riid,
+        IntPtr punk,
+        out IntPtr ppStm);
+
+    [LibraryImport("ole32.dll")]
+    public static partial int CoGetInterfaceAndReleaseStream(
+        IntPtr pStm,
+        in Guid riid,
+        out IntPtr ppv);
+
+    public const uint CoinitMultithreaded = 0x0;
+
+    [LibraryImport("ole32.dll")]
+    public static partial int CoInitializeEx(
+        IntPtr pvReserved,
+        uint dwCoInit);
+
+    [LibraryImport("ole32.dll")]
+    public static partial void CoUninitialize();
 
     public delegate IntPtr SubclassProc(
         IntPtr hWnd,

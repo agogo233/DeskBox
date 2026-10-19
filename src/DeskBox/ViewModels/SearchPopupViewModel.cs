@@ -1140,14 +1140,38 @@ public sealed partial class SearchPopupViewModel : ObservableObject, IDisposable
             case SearchResultKind.File:
                 if (!string.IsNullOrWhiteSpace(item.DetailPath))
                 {
-                    if (DeskBox.Platform.Win32Helper.OpenFileOrChooseApp(
-                            OwnerWindowHandle,
-                            item.DetailPath))
+                    string filePath = item.DetailPath;
+                    IntPtr ownerHandle = OwnerWindowHandle;
+                    // Search execution handlers run inside KeyDown / DoubleTapped
+                    // / PointerReleased callback frames; the shell open is a
+                    // cross-process Explorer call with no timeout and must
+                    // leave the frame by one dispatcher turn — the same
+                    // discipline as FileSurfaceContent.Opening's yield
+                    // (drag-freeze family). The popup commits optimistically;
+                    // a failed open is logged instead of reopening the popup.
+                    DeskBox.Platform.UiDispatch.PostAfterCallback(() =>
                     {
-                        CommitExecution(item);
-                        HidePopupCallback?.Invoke();
-                        return true;
-                    }
+                        try
+                        {
+                            bool opened =
+                                DeskBox.Platform.Win32Helper.OpenFileOrChooseApp(
+                                    ownerHandle,
+                                    filePath);
+                            if (!opened)
+                            {
+                                App.Log(
+                                    "[SearchPopup] Deferred open returned no " +
+                                    $"handler path='{filePath}'");
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            App.Log($"[SearchPopup] Deferred open failed: {ex.Message}");
+                        }
+                    });
+                    CommitExecution(item);
+                    HidePopupCallback?.Invoke();
+                    return true;
                 }
                 break;
 
@@ -1155,7 +1179,18 @@ public sealed partial class SearchPopupViewModel : ObservableObject, IDisposable
                 // Folders always open in Explorer.
                 if (!string.IsNullOrWhiteSpace(item.DetailPath))
                 {
-                    OpenPath(item.DetailPath);
+                    string folderPath = item.DetailPath;
+                    DeskBox.Platform.UiDispatch.PostAfterCallback(() =>
+                    {
+                        try
+                        {
+                            OpenPath(folderPath);
+                        }
+                        catch (Exception ex)
+                        {
+                            App.Log($"[SearchPopup] Deferred folder open failed: {ex.Message}");
+                        }
+                    });
                     CommitExecution(item);
                     HidePopupCallback?.Invoke();
                     return true;
@@ -1164,7 +1199,20 @@ public sealed partial class SearchPopupViewModel : ObservableObject, IDisposable
 
             case SearchResultKind.Action:
                 CommitExecution(item, recordResult: false);
-                ExecuteAction(item.ActionId);
+                // Actions open windows (settings / todo / quick capture) —
+                // same callback-isolation rule as the File/Folder branches
+                // above; the window work leaves the input frame.
+                DeskBox.Platform.UiDispatch.PostAfterCallback(() =>
+                {
+                    try
+                    {
+                        ExecuteAction(item.ActionId);
+                    }
+                    catch (Exception ex)
+                    {
+                        App.Log($"[SearchPopup] Deferred action failed: {ex.Message}");
+                    }
+                });
                 return true;
 
             case SearchResultKind.Todo:
@@ -1193,22 +1241,31 @@ public sealed partial class SearchPopupViewModel : ObservableObject, IDisposable
         try
         {
             string path = item.DetailPath;
-            if (item.Kind == SearchResultKind.Folder)
+            // GetParent is pure path arithmetic. The explorer spawn leaves the
+            // input-callback frame (drag-freeze family); direct-open is only
+            // for drive roots whose parent cannot be selected in.
+            bool openDirectly = item.Kind == SearchResultKind.Folder &&
+                string.IsNullOrWhiteSpace(Directory.GetParent(path)?.FullName);
+            DeskBox.Platform.UiDispatch.PostAfterCallback(() =>
             {
-                string? parent = Directory.GetParent(path)?.FullName;
-                if (!string.IsNullOrWhiteSpace(parent))
+                try
                 {
-                    System.Diagnostics.Process.Start("explorer.exe", $"/select,\"{path}\"");
+                    if (openDirectly)
+                    {
+                        OpenPath(path);
+                    }
+                    else
+                    {
+                        System.Diagnostics.Process.Start(
+                            "explorer.exe",
+                            $"/select,\"{path}\"");
+                    }
                 }
-                else
+                catch (Exception ex)
                 {
-                    OpenPath(path);
+                    App.Log($"[SearchPopup] Failed to open result location: {ex.Message}");
                 }
-            }
-            else
-            {
-                System.Diagnostics.Process.Start("explorer.exe", $"/select,\"{path}\"");
-            }
+            });
 
             CommitExecution(item);
             HidePopupCallback?.Invoke();

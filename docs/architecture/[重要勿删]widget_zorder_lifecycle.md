@@ -194,7 +194,14 @@ SetWindowPos(hwnd, HWND_NOTOPMOST, ..., SWP_NOACTIVATE | SWP_SHOWWINDOW);
 
 ### 坑 #6：瞬态置顶函数被误当持久置顶用
 - `BringWindowTemporarilyToFront`（先 TOPMOST 再 NOTOPMOST）只保证"浮到普通带顶部"，调用返回后窗口**不是** TopMost。`StartTopMostSafetyTimer` 一进来就查 `IsWindowTopMost`，不是持久置顶会直接退出——安全网对瞬态浮起无效，别指望它兜底。
-- `BringGroupTemporarilyToFront` 内部的"全员 TopMost → 逐个清除"序列必须保持原子（同步执行），往中间插入 await 会留下持久置顶残留。
+- `BringGroupTemporarilyToFront` 内部的"全员 TopMost → 逐个清除"序列必须保持原子（同步执行），往中间插入 await 会留下持久置顶残留。2026-10-14 回调隔离批起，推迟只发生在**调用点**（标题栏按下场景把整个 `ActivateAllVisibleWidgetsFromTitle` 调用推迟一帧）；函数内部的三连（排序 + `BringWindowToFront` + `SetForegroundWindow`）永远同帧，reassert 路径（`ApplyRaisedGroupReassertOrder`）因此不分帧——在函数体内加任何推迟都是回归。
+
+### 坑 #10（新）：回调帧内的窗口手术与"迟到激活抢前台"
+2026-10-14 回调隔离批（拖拽卡死族）之后的新边界，总则在 file_drag 契约 §9.23：
+- DesktopPinned 家族的窗口手术（激活、落床、rebed）一律经 `DeferDesktopPinnedActivation`/`DeferDesktopPinnedRestore` 推迟出回调帧；`WM_MOUSEACTIVATE` 的**返回值判定与 `_desktopPinnedNativeSuppressionTimestamp` 盖章保持同步**（routed 事件靠它识别同一次点击），只有手术出帧。
+- 落床 restore 与 rebed 必须**同一落地单元**（#574 同周期不变式；`WidgetZOrderRestoreContractTests.DesktopPinnedActivation_RebedsSiblingsInTheSameCycle` 钉着）。
+- 迟到激活守卫：入队时快照 `GetForegroundWindow`，落地时前台"既非本 HWND 亦非快照值"即放弃——方法体内的 `foreground != HWnd` 复查挡不住用户在推迟窗口内把前台给了别人。
+- 托盘左键 toggle 入口的 `Task.Yield` 使抬升决策输入（`_foregroundAtRaiseTime`、§3.3 的 +160ms 抑制窗与回落锚点）在 yield 后**重采样**；采样语义="抬升决策时刻"而非"点击时刻"。
 
 ### 坑 #7：监视器的抑制窗/代际（generation）被意外延长或失效
 - `_suppressTrayLayerRestoreUntilUtc` 目前只有唤起时 +160ms 一处赋值。新增赋值点要克制——它直接推迟回落。

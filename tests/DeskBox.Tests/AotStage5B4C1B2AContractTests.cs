@@ -83,8 +83,13 @@ public sealed class AotStage5B4C1B2AContractTests
         Assert.Contains("CreateMultiSelectionFlyout()", probe, StringComparison.Ordinal);
         Assert.Contains("Widget.MoveBackToDesktop", probe, StringComparison.Ordinal);
         Assert.Contains("_hostWindowHandle.ToInt64()", probe, StringComparison.Ordinal);
-        Assert.Contains("MenuFlyoutItemAutomationPeer", probe, StringComparison.Ordinal);
-        Assert.Contains("PatternInterface.Invoke", probe, StringComparison.Ordinal);
+        Assert.Contains("AotContextMenuProbe.InvokeProvider", probe, StringComparison.Ordinal);
+        Assert.Contains(
+            "PatternInterface.Invoke",
+            ReadRepositoryFile(
+                "src/DeskBox/Controls/WidgetContents/" +
+                "FileSurfaceContent.AotContextMenuProbe.cs"),
+            StringComparison.Ordinal);
         Assert.Contains("IInvokeProvider", probe, StringComparison.Ordinal);
         Assert.Contains("invokeProvider.Invoke()", probe, StringComparison.Ordinal);
         Assert.Contains("FeedbackRequested += OnFeedbackRequested", probe, StringComparison.Ordinal);
