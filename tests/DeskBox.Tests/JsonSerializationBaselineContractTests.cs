@@ -29,7 +29,7 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
             ["src/DeskBox/App.AotTodoNotificationLifecycleSmoke.cs"] = 1,
             ["src/DeskBox/App.AotTodoNotificationActivationSmoke.cs"] = 1,
             ["src/DeskBox/App.AotTodoNotificationForwardingSmoke.cs"] = 1,
-            ["src/DeskBox/Services/AppUpdateService.cs"] = 2,
+            ["src/DeskBox/Services/AppUpdateService.cs"] = 3,
             ["src/DeskBox/Services/CitySearchService.cs"] = 1,
             ["src/DeskBox/Services/DeskBoxAttachmentHealthService.cs"] = 1,
             ["src/DeskBox/Services/DeskBoxDataBackupService.cs"] = 12,
@@ -45,6 +45,7 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
             ["src/DeskBox/Services/ManagedStorageMigrationService.cs"] = 2,
             ["src/DeskBox/Services/NativeNotificationActivationEnvelopeStore.cs"] = 2,
             ["src/DeskBox/Services/QuickCaptureStore.cs"] = 2,
+            ["src/DeskBox/Services/RecoveryOfferStore.cs"] = 2,
             ["src/DeskBox/Services/SearchHistoryService.cs"] = 2,
             ["src/DeskBox/Services/SettingsMigrationService.cs"] = 2,
             ["src/DeskBox/Services/SettingsService.cs"] = 3,
@@ -82,8 +83,8 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
             Assert.Equal(expectedCount, actual[path]);
         }
 
-        Assert.Equal(42, actual.Count);
-        Assert.Equal(97, actual.Values.Sum());
+        Assert.Equal(43, actual.Count);
+        Assert.Equal(100, actual.Values.Sum());
 
         string[] expectedContextOwners =
         [
@@ -112,6 +113,7 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
             "src/DeskBox/Services/MusicSettingsStore.cs",
             "src/DeskBox/Services/NativeNotificationActivationEnvelopeStore.cs",
             "src/DeskBox/Services/QuickCaptureStore.cs",
+            "src/DeskBox/Services/RecoveryOfferStore.cs",
             "src/DeskBox/Services/SearchHistoryService.cs",
             "src/DeskBox/Services/SettingsService.cs",
             "src/DeskBox/Services/StartupSessionLedger.cs",
@@ -134,7 +136,7 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
             .Order()
             .ToArray();
 
-        Assert.Equal(38, actualContextOwners.Length);
+        Assert.Equal(39, actualContextOwners.Length);
         Assert.Equal(expectedContextOwners, actualContextOwners);
     }
 
@@ -167,17 +169,19 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
         string diagnostics = ReadSource(
             "src/DeskBox/Services/DeskBoxDiagnosticsBundleService.cs");
 
-        string[] expectedTypeInfoReferences =
-        [
-            "AppUpdateJsonContext.Default.UpdateManifest",
-            "AppUpdateJsonContext.Default.GitHubRelease",
-            "WeatherJsonContext.Default.PredefinedCityList",
-            "WeatherJsonContext.Default.GeocodingResult",
-            "WeatherJsonContext.Default.OpenMeteoWeather",
-            "WeatherJsonContext.Default.MsnWeather",
-            "LocalizationJsonContext.Default.LocalizedStrings",
-            "DiagnosticsJsonContext.Default.DiagnosticSnapshot"
-        ];
+        var expectedTypeInfoReferences = new Dictionary<string, int>(StringComparer.Ordinal)
+        {
+            // Two UpdateManifest call sites: the update-check flow and the
+            // content-manifest flow both read through the generated type.
+            ["AppUpdateJsonContext.Default.UpdateManifest"] = 2,
+            ["AppUpdateJsonContext.Default.GitHubRelease"] = 1,
+            ["WeatherJsonContext.Default.PredefinedCityList"] = 1,
+            ["WeatherJsonContext.Default.GeocodingResult"] = 1,
+            ["WeatherJsonContext.Default.OpenMeteoWeather"] = 1,
+            ["WeatherJsonContext.Default.MsnWeather"] = 1,
+            ["LocalizationJsonContext.Default.LocalizedStrings"] = 1,
+            ["DiagnosticsJsonContext.Default.DiagnosticSnapshot"] = 1
+        };
         string allPhaseOneSources = string.Join(
             Environment.NewLine,
             appUpdate,
@@ -186,10 +190,13 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
             localization,
             diagnostics);
 
-        foreach (string reference in expectedTypeInfoReferences)
+        foreach ((string reference, int expectedCount) in expectedTypeInfoReferences)
         {
-            Assert.Single(
-                Regex.Matches(allPhaseOneSources, Regex.Escape(reference)).Cast<Match>());
+            Assert.Equal(
+                expectedCount,
+                Regex.Matches(
+                    allPhaseOneSources,
+                    Regex.Escape(reference)).Count);
         }
 
         Assert.DoesNotContain("JsonSerializerOptions", allPhaseOneSources, StringComparison.Ordinal);

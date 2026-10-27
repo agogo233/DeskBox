@@ -42,7 +42,18 @@ public sealed class ReleaseNotesKnownVersionsTests
         // every 1.5.9 machine.
         string current = AppUpdateService.GetCurrentAppVersion();
         Assert.NotEqual("0.0.0", current);
-        Assert.Equal(current, ReleaseNotesService.KnownReleaseVersions[0]);
+        if (Version.TryParse(current, out _))
+        {
+            // Stable release build: the newest known release is the one
+            // currently shipping.
+            Assert.Equal(current, ReleaseNotesService.KnownReleaseVersions[0]);
+        }
+        else
+        {
+            // Development train (e.g. "1.6.0-dev"): not yet a release, so it
+            // must not appear on the version rail.
+            Assert.DoesNotContain(current, ReleaseNotesService.KnownReleaseVersions);
+        }
     }
 
     [Fact]
