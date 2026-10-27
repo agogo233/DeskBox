@@ -74,6 +74,21 @@ public sealed class FeatureWidgetsSettingsCoordinatorTests : IDisposable
     }
 
     [Fact]
+    public void SetManagedDropAction_KeepsShortcutOutsideDesktop()
+    {
+        var settings = new SettingsService(_root);
+        var coordinator = new FeatureWidgetsSettingsCoordinator(settings);
+        var editor = new FeatureWidgetsSettingsViewModel(
+            coordinator, _ => throw new InvalidOperationException("unexpected localization"));
+
+        Assert.True(editor.SetManagedDropAction(
+            SettingsService.ManagedDropActionShortcutOutsideDesktop));
+        Assert.Equal(
+            SettingsService.ManagedDropActionShortcutOutsideDesktop,
+            settings.Settings.FileWidget.ManagedDropAction);
+    }
+
+    [Fact]
     public void WeatherWrites_FollowTheSharedPolicy_AndSkipUnchangedSaves()
     {
         var settings = new SettingsService(_root);

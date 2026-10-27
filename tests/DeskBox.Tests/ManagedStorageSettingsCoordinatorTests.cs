@@ -52,6 +52,28 @@ public sealed class ManagedStorageSettingsCoordinatorTests : IDisposable
     }
 
     [Fact]
+    public void SetManagedDropAction_KeepsShortcutOutsideDesktopAndSnapshotRoundTrips()
+    {
+        var settings = new SettingsService(_root);
+        var coordinator = new ManagedStorageSettingsCoordinator(settings);
+        var editor = new ManagedStorageSettingsViewModel(coordinator, static key => key);
+
+        Assert.True(coordinator.SetManagedDropAction(
+            SettingsService.ManagedDropActionShortcutOutsideDesktop));
+        Assert.Equal(
+            SettingsService.ManagedDropActionShortcutOutsideDesktop,
+            settings.Settings.FileWidget.ManagedDropAction);
+        Assert.Equal(
+            SettingsService.ManagedDropActionShortcutOutsideDesktop,
+            coordinator.ReadManagedStoragePresentation().DropAction);
+
+        editor.SyncPresentation();
+        Assert.Equal(
+            SettingsService.ManagedDropActionShortcutOutsideDesktop,
+            editor.DropAction);
+    }
+
+    [Fact]
     public async Task RootPathWrite_RoundTripsThroughDisk()
     {
         var settings = new SettingsService(_root);

@@ -226,7 +226,7 @@ public sealed class SettingsService
     public const string ManagedDropActionCopy = Contracts.ManagedDropActions.Copy;
     public const string ManagedDropActionFollowWindows = Contracts.ManagedDropActions.FollowWindows;
     public const string ManagedDropActionShortcutOutsideDesktop =
-        "ShortcutOutsideDesktop";
+        Contracts.ManagedDropActions.ShortcutOutsideDesktop;
     public const string ManagedDragOutActionMove = Contracts.ManagedDropActions.Move;
     public const string ManagedDragOutActionCopy = Contracts.ManagedDropActions.Copy;
     public const string ManagedDragOutActionFollowWindows = Contracts.ManagedDropActions.FollowWindows;
@@ -2247,6 +2247,18 @@ settings.FocusClickedWidgetOnRaise = false;
         };
     }
 
+    public static string NormalizeManagedDropAction(string? dropAction)
+    {
+        return dropAction switch
+        {
+            ManagedDropActionMove => ManagedDropActionMove,
+            ManagedDropActionCopy => ManagedDropActionCopy,
+            ManagedDropActionFollowWindows => ManagedDropActionFollowWindows,
+            ManagedDropActionShortcutOutsideDesktop => ManagedDropActionShortcutOutsideDesktop,
+            _ => ManagedDropActionMove
+        };
+    }
+
     public static bool TryGetLayoutDensityPresetValues(
         string? preset,
         out LayoutDensityPresetValues values) =>
@@ -2825,12 +2837,10 @@ settings.FocusClickedWidgetOnRaise = false;
             changed = true;
         }
 
-        if (!string.Equals(settings.ManagedDropAction, ManagedDropActionMove, StringComparison.Ordinal) &&
-            !string.Equals(settings.ManagedDropAction, ManagedDropActionCopy, StringComparison.Ordinal) &&
-            !string.Equals(settings.ManagedDropAction, ManagedDropActionFollowWindows, StringComparison.Ordinal) &&
-            !string.Equals(settings.ManagedDropAction, ManagedDropActionShortcutOutsideDesktop, StringComparison.Ordinal))
+        string normalizedManagedDropAction = NormalizeManagedDropAction(settings.ManagedDropAction);
+        if (!string.Equals(settings.ManagedDropAction, normalizedManagedDropAction, StringComparison.Ordinal))
         {
-            settings.ManagedDropAction = ManagedDropActionMove;
+            settings.ManagedDropAction = normalizedManagedDropAction;
             changed = true;
         }
 

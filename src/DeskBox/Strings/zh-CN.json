@@ -627,7 +627,7 @@
   "WidgetContent.Weather.StatusLabel": "已实现",
   "Settings.Material.Mica": "云母",
   "Music.Title": "音乐",
-  "Settings.DropAction.Description": "复制或移动原文件，或跟随 Windows 默认(默认为移动)。",
+  "Settings.DropAction.Description": "复制或移动原文件、跟随 Windows 默认（移动），或将桌面文件移动、为其余文件创建快捷方式。",
   "Settings.DropAction.InfoTip.Title": "拖入还有哪些行为?",
   "Settings.DropAction.InfoTip.Description": "**程序文件**: 拖入 .exe 等程序文件时，移动或复制的是文件本身。\n\n**创建快捷方式**: 按住 Alt(或 Ctrl+Shift)拖入，可改为创建快捷方式，原文件保持不动。\n\n**同名文件**: 不会覆盖，会生成“文件名 (2)”的新副本。",
   "Settings.QuickCapture.ClipboardReason.EmptyOrUnsupported": "内容为空或格式不支持",

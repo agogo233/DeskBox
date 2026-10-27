@@ -752,7 +752,7 @@
   "Widget.DragOutTip.AfterCopy.NoModifiers": "Copied",
   "Widget.DragOutTip.AfterMove": "Moved. Hold Ctrl while dragging to copy",
   "Widget.DragOutTip.AfterMove.NoModifiers": "Moved",
-  "Settings.DropAction.Description": "Copy or move the original files, or follow the Windows default (move).",
+  "Settings.DropAction.Description": "Copy or move the original files, follow the Windows default (move), or move desktop files and create shortcuts for the rest.",
   "Settings.DropAction.InfoTip.Title": "What else does drag-in do?",
   "Settings.DropAction.InfoTip.Description": "**Program files**: Dragging in .exe and similar files moves or copies the file itself.\n\n**Create a shortcut**: Hold Alt (or Ctrl+Shift) while dragging to create a shortcut instead; the original stays put.\n\n**Name collisions**: Files are never overwritten — a new copy named “file name (2)” is created.",
   "Settings.DropAction.Move": "Move",

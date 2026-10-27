@@ -12,6 +12,7 @@ public static class ManagedDropActions
     public const string Copy = "Copy";
     public const string Move = "Move";
     public const string FollowWindows = "FollowWindows";
+    public const string ShortcutOutsideDesktop = "ShortcutOutsideDesktop";
 }
 
 /// <summary>

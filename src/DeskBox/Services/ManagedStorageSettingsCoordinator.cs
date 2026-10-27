@@ -109,12 +109,8 @@ public sealed class ManagedStorageSettingsCoordinator : IManagedStorageSettings
         return true;
     }
 
-    private static string NormalizeDropAction(string? action) => action switch
-    {
-        ManagedDropActions.Copy => ManagedDropActions.Copy,
-        ManagedDropActions.FollowWindows => ManagedDropActions.FollowWindows,
-        _ => ManagedDropActions.Move
-    };
+    private static string NormalizeDropAction(string? action) =>
+        SettingsService.NormalizeManagedDropAction(action);
 
     // Drag-out falls back to FollowWindows, not Move: advertising no
     // preferred effect keeps the receiver's native default and never hands

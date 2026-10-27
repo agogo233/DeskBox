@@ -365,14 +365,7 @@ public sealed class FeatureWidgetsSettingsCoordinator : IFeatureWidgetsSettings
     public bool SetManagedDropAction(string? action)
     {
         ThrowIfStopped();
-        string normalized = action switch
-        {
-            SettingsService.ManagedDropActionCopy =>
-                SettingsService.ManagedDropActionCopy,
-            SettingsService.ManagedDropActionFollowWindows =>
-                SettingsService.ManagedDropActionFollowWindows,
-            _ => SettingsService.ManagedDropActionMove
-        };
+        string normalized = SettingsService.NormalizeManagedDropAction(action);
         FileWidgetSettingsSlice fileWidget = _settings.Settings.FileWidget;
         if (string.Equals(
                 fileWidget.ManagedDropAction,

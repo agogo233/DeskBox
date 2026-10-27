@@ -97,6 +97,19 @@ public sealed class FileSettingsEditorTests : IDisposable
     }
 
     [Fact]
+    public void ReadSnapshot_KeepsShortcutOutsideDesktopValue()
+    {
+        (_, _, ManagedStorageSettingsViewModel storage) =
+            CreateEditors(
+                _root,
+                settings =>
+                    settings.Settings.FileWidget.ManagedDropAction =
+                        ManagedDropActions.ShortcutOutsideDesktop);
+
+        Assert.Equal(ManagedDropActions.ShortcutOutsideDesktop, storage.DropAction);
+    }
+
+    [Fact]
     public void FileDisplay_UserEdits_WriteThroughTheCoordinatorAndPersist()
     {
         (SettingsService settings, FileDisplaySettingsViewModel display, _) = CreateEditors(_root);
@@ -281,13 +294,15 @@ public sealed class FileSettingsEditorTests : IDisposable
         (_, _, ManagedStorageSettingsViewModel storage) = CreateEditors(_root);
 
         SettingsOption[] options = [.. storage.AvailableDropActionOptions];
-        Assert.Equal(3, options.Length);
+        Assert.Equal(4, options.Length);
         Assert.Equal(ManagedDropActions.Copy, options[0].Value);
         Assert.Equal(ManagedDropActions.Move, options[1].Value);
         Assert.Equal(ManagedDropActions.FollowWindows, options[2].Value);
+        Assert.Equal(ManagedDropActions.ShortcutOutsideDesktop, options[3].Value);
         Assert.Equal("Settings.DropAction.Copy", options[0].DisplayName);
         Assert.Equal("Settings.DropAction.Move", options[1].DisplayName);
         Assert.Equal("Settings.DropAction.System", options[2].DisplayName);
+        Assert.Equal("Settings.DropAction.ShortcutOutsideDesktop", options[3].DisplayName);
     }
 
     [Fact]
@@ -320,6 +335,7 @@ public sealed class FileSettingsEditorTests : IDisposable
         Assert.Equal(ManagedDropActions.Copy, SettingsService.ManagedDropActionCopy);
         Assert.Equal(ManagedDropActions.Move, SettingsService.ManagedDropActionMove);
         Assert.Equal(ManagedDropActions.FollowWindows, SettingsService.ManagedDropActionFollowWindows);
+        Assert.Equal(ManagedDropActions.ShortcutOutsideDesktop, SettingsService.ManagedDropActionShortcutOutsideDesktop);
     }
 
     [Fact]

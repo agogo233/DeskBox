@@ -1984,6 +1984,21 @@ public sealed class SettingsServiceTests : IDisposable
         return JsonSerializer.Serialize(value, type, s_jsonOptions);
     }
 
+    [Theory]
+    [InlineData(ManagedDropActions.Move, ManagedDropActions.Move)]
+    [InlineData(ManagedDropActions.Copy, ManagedDropActions.Copy)]
+    [InlineData(ManagedDropActions.FollowWindows, ManagedDropActions.FollowWindows)]
+    [InlineData(ManagedDropActions.ShortcutOutsideDesktop, ManagedDropActions.ShortcutOutsideDesktop)]
+    [InlineData(null, ManagedDropActions.Move)]
+    [InlineData("", ManagedDropActions.Move)]
+    [InlineData("move", ManagedDropActions.Move)]
+    [InlineData(" ShortcutOutsideDesktop ", ManagedDropActions.Move)]
+    [InlineData("Nonsense", ManagedDropActions.Move)]
+    public void NormalizeManagedDropAction_UsesMoveAsSafeDefault(string? value, string expected)
+    {
+        Assert.Equal(expected, SettingsService.NormalizeManagedDropAction(value));
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_tempRoot))
