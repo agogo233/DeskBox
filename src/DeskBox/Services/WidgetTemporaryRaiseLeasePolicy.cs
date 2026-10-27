@@ -2,8 +2,7 @@ namespace DeskBox.Services;
 
 internal readonly record struct WidgetTemporaryRaiseLease(
     IReadOnlyList<IntPtr>? WindowHandles,
-    long Generation,
-    bool AbsoluteSettle = false)
+    long Generation)
 {
     public IReadOnlyList<IntPtr> ActiveWindowHandles =>
         WindowHandles ?? Array.Empty<IntPtr>();
@@ -45,8 +44,7 @@ internal static class WidgetTemporaryRaiseLeasePolicy
 
     public static WidgetTemporaryRaiseLease Acquire(
         WidgetTemporaryRaiseLease current,
-        IEnumerable<IntPtr> windowHandles,
-        bool absoluteSettle = false)
+        IEnumerable<IntPtr> windowHandles)
     {
         List<IntPtr> handles = current.ActiveWindowHandles
             .Concat(windowHandles)
@@ -61,7 +59,7 @@ internal static class WidgetTemporaryRaiseLeasePolicy
         long generation = current.Generation == long.MaxValue
             ? 1
             : current.Generation + 1;
-        return new WidgetTemporaryRaiseLease(handles, generation, absoluteSettle);
+        return new WidgetTemporaryRaiseLease(handles, generation);
     }
 
     public static bool OwnsGeneration(
@@ -76,7 +74,7 @@ internal static class WidgetTemporaryRaiseLeasePolicy
         long generation)
     {
         return OwnsGeneration(current, generation)
-            ? new WidgetTemporaryRaiseLease([], current.Generation, current.AbsoluteSettle)
+            ? new WidgetTemporaryRaiseLease([], current.Generation)
             : current;
     }
 
@@ -92,6 +90,6 @@ internal static class WidgetTemporaryRaiseLeasePolicy
         List<IntPtr> remaining = current.ActiveWindowHandles
             .Where(handle => handle != windowHandle)
             .ToList();
-        return new WidgetTemporaryRaiseLease(remaining, current.Generation, current.AbsoluteSettle);
+        return new WidgetTemporaryRaiseLease(remaining, current.Generation);
     }
 }

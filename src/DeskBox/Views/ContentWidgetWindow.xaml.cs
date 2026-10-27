@@ -996,7 +996,7 @@ IsHideAnimationRunning = true;
         HoldTemporaryTopMost();
     }
 
-    public void ForceRestoreDesktopLayerFromManager(bool absoluteDesktopBottom = false)
+    public void ForceRestoreDesktopLayerFromManager()
     {
         if (!Visible)
         {
@@ -1007,7 +1007,7 @@ IsHideAnimationRunning = true;
         // whole group is returning to its resting layer, so ending the lease
         // here keeps later interaction elevates working after the teardown.
         EndExpandedWidgetLayerLease();
-        RestoreDesktopLayer(force: true, absoluteDesktopBottom: absoluteDesktopBottom);
+        RestoreDesktopLayer(force: true);
         _contentHost.OnDeactivated();
     }
 

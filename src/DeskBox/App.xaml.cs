@@ -1964,8 +1964,7 @@ RunCriticalStartupStep("widget-manager", () =>
             $"[Startup] Applying deferred widget desktop layer " +
             $"explorerReady={explorerDesktopReady}");
         widgetManager.RefreshVisibleWidgetDesktopLayers(
-            "startup-explorer-desktop-ready",
-            absoluteDesktopBottom: true);
+            "startup-explorer-desktop-ready");
     }
 
     private void InitializeGlobalHotkeyService(LocalizationService localizationService)

@@ -114,7 +114,7 @@ internal interface IDesktopWidgetWindow
     void CompleteCoordinatedMoveBoundsPreview();
     void ApplyCoordinatedMoveBoundsFallback(Windows.Graphics.RectInt32 bounds);
     void CompleteCoordinatedMoveParticipation(bool hasMoved, bool isSource);
-    void ForceRestoreDesktopLayerFromManager(bool absoluteDesktopBottom = false);
+    void ForceRestoreDesktopLayerFromManager();
     void RestoreDesktopLayerFromManager();
     Task WaitForFirstPresentedFrameAsync(CancellationToken cancellationToken);
     void SetGroupDropPreview(
@@ -779,14 +779,12 @@ public sealed partial class WidgetManager :
         RefreshVisibleWidgetDesktopLayers("layer-mode-changed");
     }
 
-    public void RefreshVisibleWidgetDesktopLayers(
-        string reason,
-        bool absoluteDesktopBottom = false)
+    public void RefreshVisibleWidgetDesktopLayers(string reason)
     {
         if (!HasUiThreadAccess())
         {
             UiDispatch.RunOrDefer(
-                () => RefreshVisibleWidgetDesktopLayers(reason, absoluteDesktopBottom));
+                () => RefreshVisibleWidgetDesktopLayers(reason));
             return;
         }
 
@@ -817,12 +815,6 @@ public sealed partial class WidgetManager :
             return;
         }
 
-        // A tray raise or an in-flight interaction that lands inside the
-        // startup settle window must not be flattened to the desktop bottom;
-        // fall back to the relative policy.
-        bool absolute = absoluteDesktopBottom &&
-            !_widgetsRaisedFromTray &&
-            !IsWidgetInteractionActive;
         ClearTemporaryRaiseLease(reason);
         foreach (var window in GetLoadedDesktopWindows())
         {
@@ -833,7 +825,7 @@ public sealed partial class WidgetManager :
 
             try
             {
-                window.ForceRestoreDesktopLayerFromManager(absolute);
+                window.ForceRestoreDesktopLayerFromManager();
             }
             catch (Exception ex)
             {
@@ -996,7 +988,7 @@ public sealed partial class WidgetManager :
         }
         else if (configs.Count > 0)
         {
-            RaiseVisibleWidgetsTemporarily("startup-restore", absoluteSettle: true);
+            RaiseVisibleWidgetsTemporarily("startup-restore");
             _sessionManager.MarkDesktopResting("restore-widgets");
             QueueVisibleGroupedFileIconRecoveryAfterStartup();
         }

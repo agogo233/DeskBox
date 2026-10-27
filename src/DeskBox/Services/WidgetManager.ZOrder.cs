@@ -822,13 +822,11 @@ public sealed partial class WidgetManager
 
     private long TrackTemporarilyRaisedWidgets(
         IEnumerable<IntPtr> windowHandles,
-        string reason,
-        bool absoluteSettle = false)
+        string reason)
     {
         _temporaryRaiseLease = WidgetTemporaryRaiseLeasePolicy.Acquire(
             _temporaryRaiseLease,
-            windowHandles,
-            absoluteSettle);
+            windowHandles);
         App.LogVerbose(
             $"[ZOrder] TemporaryRaise acquired reason={reason} " +
             $"generation={_temporaryRaiseLease.Generation} " +
@@ -922,18 +920,9 @@ public sealed partial class WidgetManager
 
         IReadOnlyList<IntPtr> handles =
             _temporaryRaiseLease.ActiveWindowHandles.ToList();
-        bool absoluteSettle = _temporaryRaiseLease.AbsoluteSettle;
         _temporaryRaiseLease = WidgetTemporaryRaiseLeasePolicy.Release(
             _temporaryRaiseLease,
             generation);
-        if (absoluteSettle)
-        {
-            IntPtr settleForeground = Win32Helper.GetForegroundWindow();
-            App.Log(
-                $"[ZOrder] Startup settle absolute generation={generation} " +
-                $"foreground=0x{settleForeground.ToInt64():X} " +
-                $"class={GetWindowClassNameSafe(settleForeground)}");
-        }
 
         Dictionary<IntPtr, IDesktopWidgetWindow> windowsByHandle =
             GetLoadedDesktopWindows()
@@ -951,7 +940,7 @@ public sealed partial class WidgetManager
 
             try
             {
-                window.ForceRestoreDesktopLayerFromManager(absoluteSettle);
+                window.ForceRestoreDesktopLayerFromManager();
                 restored++;
             }
             catch (Exception ex)
@@ -1198,18 +1187,7 @@ public sealed partial class WidgetManager
                 $"{window.Identity.ShortSurfaceId}@{window.RestingAnimationBounds.Top:F0}"));
     }
 
-    public void BringAllVisibleWidgetsToFront(IntPtr exceptHwnd = default)
-    {
-        foreach (var window in GetLoadedDesktopWindows())
-        {
-            if (window.Visible && window.WindowHandle != exceptHwnd)
-            {
-                WidgetLayerService.BringToFront(window.WindowHandle);
-            }
-        }
-    }
-
-    private void RaiseVisibleWidgetsTemporarily(string reason, bool absoluteSettle = false)
+    private void RaiseVisibleWidgetsTemporarily(string reason)
     {
         if (WidgetLayerService.UsesDesktopPinnedMode())
         {
@@ -1227,8 +1205,7 @@ public sealed partial class WidgetManager
 
         long generation = TrackTemporarilyRaisedWidgets(
             windows.Select(window => window.WindowHandle),
-            reason,
-            absoluteSettle);
+            reason);
         bool applied = WidgetLayerService.ApplyPeerOrderHighestToLowest(
             windows.Select(window => window.WindowHandle).ToList());
         QueueTemporaryRaisedWidgetRestore(
@@ -1747,18 +1724,6 @@ public sealed partial class WidgetManager
         var className = new System.Text.StringBuilder(256);
         int length = Win32Helper.GetClassName(hWnd, className, className.Capacity);
         return length > 0 && predicate(className.ToString());
-    }
-
-    private static string GetWindowClassNameSafe(IntPtr hWnd)
-    {
-        if (hWnd == IntPtr.Zero)
-        {
-            return "none";
-        }
-
-        var className = new System.Text.StringBuilder(256);
-        int length = Win32Helper.GetClassName(hWnd, className, className.Capacity);
-        return length > 0 ? className.ToString() : "unknown";
     }
 
     private static Win32Helper.POINT? TryGetCursorPosition()

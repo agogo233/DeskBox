@@ -226,7 +226,7 @@ public abstract partial class WidgetWindowBase
                Win32Helper.GetAncestor(foregroundWindow, Win32Helper.GA_ROOTOWNER) == HWnd;
     }
 
-    protected void RestoreDesktopLayer(bool force = false, bool absoluteDesktopBottom = false)
+    protected void RestoreDesktopLayer(bool force = false)
     {
         if (!WidgetTemporaryRaiseLeasePolicy.CanRestoreDesktopLayer(
                 Visible,
@@ -253,7 +253,7 @@ public abstract partial class WidgetWindowBase
         }
 
         CancelPendingDesktopLayerRestore();
-        ClearTopMostOnly(absoluteDesktopBottom);
+        ClearTopMostOnly();
         ApplyBackdropPreference();
     }
 
@@ -265,36 +265,24 @@ public abstract partial class WidgetWindowBase
         RestoreDesktopLayerWhenIdle = false;
     }
 
-    protected void ClearTopMostOnly(bool absoluteDesktopBottom = false)
+    protected void ClearTopMostOnly()
     {
         IsRaisedFromManager = false;
-        if (absoluteDesktopBottom)
+        IntPtr foreground = WidgetLayerService.ClearTopMostPreservingForeground(
+            HWnd,
+            out RelativeLayerRestoreDisposition disposition);
+        // PreservePeerOrder deliberately leaves the window at its current
+        // level: raised before the restore, still raised after it. Marking
+        // it bedded here would blind the Deactivated funnel that owns its
+        // later descent (the flyout-Esc lingering window). The placed
+        // branches (DesktopBottom / BehindForeground) end on a resting
+        // window.
+        if (disposition != RelativeLayerRestoreDisposition.PreservePeerOrder)
         {
-            // Startup settle: ignore the foreground owner and rest directly on
-            // the desktop layer so widgets cannot stay floating above apps when
-            // a login-time window still holds the foreground.
             IsAtDesktopLayer = true;
-            WidgetLayerService.MoveToDesktopBottom(HWnd);
-            App.LogVerbose($"[ZOrder] {LogPrefix} ClearTopMostOnly absolute hwnd=0x{HWnd.ToInt64():X}");
         }
-        else
-        {
-            IntPtr foreground = WidgetLayerService.ClearTopMostPreservingForeground(
-                HWnd,
-                out RelativeLayerRestoreDisposition disposition);
-            // PreservePeerOrder deliberately leaves the window at its current
-            // level: raised before the restore, still raised after it. Marking
-            // it bedded here would blind the Deactivated funnel that owns its
-            // later descent (the flyout-Esc lingering window). The placed
-            // branches (DesktopBottom / BehindForeground) end on a resting
-            // window.
-            if (disposition != RelativeLayerRestoreDisposition.PreservePeerOrder)
-            {
-                IsAtDesktopLayer = true;
-            }
 
-            App.LogVerbose($"[ZOrder] {LogPrefix} ClearTopMostOnly hwnd=0x{HWnd.ToInt64():X} fg=0x{foreground.ToInt64():X} disposition={disposition}");
-        }
+        App.LogVerbose($"[ZOrder] {LogPrefix} ClearTopMostOnly hwnd=0x{HWnd.ToInt64():X} fg=0x{foreground.ToInt64():X} disposition={disposition}");
         App.Current.WidgetManager?.QueueIdleWidgetZOrderNormalization(
             $"{LogPrefix}-desktop-layer-restored");
     }
