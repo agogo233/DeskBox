@@ -1,6 +1,7 @@
 #if DESKBOX_NATIVE_AOT
 using System.Diagnostics.CodeAnalysis;
 using System.Threading;
+using DeskBox.Helpers;
 
 namespace DeskBox.Services;
 

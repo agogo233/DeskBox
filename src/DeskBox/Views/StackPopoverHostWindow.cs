@@ -211,6 +211,23 @@ internal sealed class StackPopoverHostWindow : Window
             return;
         }
 
+        // A parked popover can be dragged out of the TOPMOST band by
+        // owner-following z transactions on its owner widget (SetWindowPos
+        // without SWP_NOOWNERZORDER — live-captured 2026-10-21 with the bit
+        // stripped). Re-assert the band on every reveal so the popover's z
+        // contract is deterministic instead of depending on which funnel ran
+        // last; when already in the band this is a cheap no-reorder insert.
+        _ = Win32Helper.SetWindowPos(
+            WindowHandle,
+            Win32Helper.HWND_TOPMOST,
+            0,
+            0,
+            0,
+            0,
+            Win32Helper.SWP_NOMOVE |
+                Win32Helper.SWP_NOSIZE |
+                Win32Helper.SWP_NOACTIVATE);
+
         // Position-only reveal. The caller decides whether the prepared tree
         // can move immediately (first/same-stack open) or after two committed
         // composition frames (switching between cached stacks).

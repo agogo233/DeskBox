@@ -321,6 +321,9 @@ public sealed partial class SettingsWindow : Window
             return;
         }
 
+        // A fresh reveal re-arms the floating update-activity card: its
+        // dismissal is per window session (the PowerToys pattern).
+        ViewModel.BeginUpdateActivitySession();
         // Reveal-time calibration: a missed ColorValuesChanged (or any other
         // break in the refresh chain) can never leave the window visibly
         // frozen on a stale theme.
@@ -453,6 +456,9 @@ public sealed partial class SettingsWindow : Window
         }
 
         _isClosed = true;
+        // The app-scoped update service outlives this window; its download
+        // event mirror must not keep the view model alive.
+        ViewModel.DetachFromUpdateService();
         global::DeskBox.Views.Dialogs.HotkeyRecorderDialog.ShutdownActiveRecorder();
         WindowsCompatibilityService.ReleaseTitleBarExtensions(this, _appWindow);
         UpdateSearchSettingsActivity();

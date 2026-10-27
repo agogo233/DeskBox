@@ -243,13 +243,18 @@ public sealed partial class OnboardingWindow : Window
     }
 
     /// <summary>
-    /// Crossfades the copy column with element-property storyboards (Opacity +
-    /// RenderTransform.Y): the outgoing panel fades while the incoming one
-    /// fades in with a soft 6px rise — a real cross-dissolve with no blank
-    /// gap. Storyboards are used instead of raw visual animations because the
-    /// incoming panel was just uncollapsed and its visual can still be
-    /// rebuilt under StartAnimation, silently dropping the animation and
-    /// leaving the panel blank until the completion timeout snaps it on.
+    /// Swaps the copy column in a single layout pass: the outgoing panel
+    /// collapses immediately so the incoming one renders straight at its
+    /// final vertically-centered position. The previous cross-dissolve kept
+    /// both panels laid out for ~460ms — the Grid cell stayed at the taller
+    /// outgoing height, so the incoming copy first appeared at the outgoing
+    /// title's offset and then visibly jumped when the cell re-centered on
+    /// collapse. A short opacity-only fade (at the final position, no offset)
+    /// keeps the swap from reading as a hard cut. Storyboards are used
+    /// instead of raw visual animations because the incoming panel was just
+    /// uncollapsed and its visual can still be rebuilt under StartAnimation,
+    /// silently dropping the animation and leaving the panel blank until the
+    /// completion timeout snaps it on.
     /// </summary>
     private void PlayTextColumnSwap(
         FrameworkElement outgoing,
@@ -259,52 +264,25 @@ public sealed partial class OnboardingWindow : Window
         {
             outgoing.Visibility = Visibility.Collapsed;
             incoming.Opacity = 1;
-            incoming.RenderTransform = null;
             _isAnimating = false;
             return;
         }
 
-        outgoing.IsHitTestVisible = false;
-        incoming.IsHitTestVisible = true;
+        outgoing.Visibility = Visibility.Collapsed;
         incoming.Opacity = 0;
-        incoming.RenderTransform = new TranslateTransform { Y = 6 };
 
         var storyboard = new Storyboard();
-
-        var fadeOut = new DoubleAnimation
-        {
-            To = 0,
-            Duration = new Duration(TimeSpan.FromMilliseconds(150)),
-            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseIn }
-        };
-        Storyboard.SetTarget(fadeOut, outgoing);
-        Storyboard.SetTargetProperty(fadeOut, nameof(UIElement.Opacity));
 
         var fadeIn = new DoubleAnimation
         {
             To = 1,
-            BeginTime = TimeSpan.FromMilliseconds(60),
-            Duration = new Duration(TimeSpan.FromMilliseconds(260)),
+            Duration = new Duration(TimeSpan.FromMilliseconds(180)),
             EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
         };
         Storyboard.SetTarget(fadeIn, incoming);
         Storyboard.SetTargetProperty(fadeIn, nameof(UIElement.Opacity));
 
-        var riseIn = new DoubleAnimation
-        {
-            To = 0,
-            BeginTime = TimeSpan.FromMilliseconds(60),
-            Duration = new Duration(TimeSpan.FromMilliseconds(300)),
-            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
-        };
-        Storyboard.SetTarget(riseIn, incoming);
-        Storyboard.SetTargetProperty(
-            riseIn,
-            "(UIElement.RenderTransform).(TranslateTransform.Y)");
-
-        storyboard.Children.Add(fadeOut);
         storyboard.Children.Add(fadeIn);
-        storyboard.Children.Add(riseIn);
         storyboard.Begin();
 
         int generation = ++_transitionGeneration;
@@ -319,19 +297,15 @@ public sealed partial class OnboardingWindow : Window
         FrameworkElement incoming,
         int generation)
     {
-        await Task.Delay(460);
+        await Task.Delay(220);
         if (_isClosed || generation != _transitionGeneration)
         {
             return;
         }
 
         // Land base values first, then release the storyboard's hold so the
-        // panels settle without a post-animation snap.
-        outgoing.Visibility = Visibility.Collapsed;
-        outgoing.Opacity = 1;
-        outgoing.IsHitTestVisible = true;
+        // panel settles without a post-animation snap.
         incoming.Opacity = 1;
-        incoming.RenderTransform = null;
         storyboard.Stop();
         _isAnimating = false;
     }
@@ -358,6 +332,9 @@ public sealed partial class OnboardingWindow : Window
 
         switch (_stepIndex)
         {
+            case 1:
+                SetupDropStep();
+                break;
             case 2:
                 SetupSummonStep();
                 break;

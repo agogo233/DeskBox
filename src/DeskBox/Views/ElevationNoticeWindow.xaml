@@ -33,12 +33,39 @@
             Grid.Row="1"
             VerticalScrollBarVisibility="Auto"
             VerticalAlignment="Top">
-            <TextBlock
-                x:Name="BodyText"
-                FontSize="14"
-                LineHeight="22"
-                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                TextWrapping="Wrap" />
+            <StackPanel>
+                <TextBlock
+                    x:Name="BodyText"
+                    FontSize="14"
+                    LineHeight="22"
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    TextWrapping="Wrap" />
+                <StackPanel
+                    x:Name="DetailsPanel"
+                    Visibility="Collapsed"
+                    Spacing="10"
+                    Margin="0,16,0,0">
+                    <TextBlock
+                        x:Name="DetailsHeaderText"
+                        FontSize="14"
+                        FontWeight="SemiBold"
+                        Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                        TextWrapping="Wrap" />
+                    <TextBlock
+                        x:Name="DetailsBodyText"
+                        FontSize="13"
+                        LineHeight="21"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        TextWrapping="Wrap" />
+                    <Button
+                        x:Name="CopyRegCommandButton"
+                        Click="CopyRegCommandButton_Click"
+                        Visibility="Collapsed" />
+                    <HyperlinkButton
+                        x:Name="LearnMoreLink"
+                        FontSize="13" />
+                </StackPanel>
+            </StackPanel>
         </ScrollViewer>
 
         <StackPanel
@@ -46,6 +73,14 @@
             Orientation="Horizontal"
             Spacing="8"
             HorizontalAlignment="Right">
+            <Button
+                x:Name="OpenSecpolButton"
+                Click="OpenSecpolButton_Click"
+                Visibility="Collapsed" />
+            <Button
+                x:Name="OpenUacSettingsButton"
+                Click="OpenUacSettingsButton_Click"
+                Visibility="Collapsed" />
             <Button
                 x:Name="ExitButton"
                 Click="ExitButton_Click"

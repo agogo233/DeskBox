@@ -1,5 +1,69 @@
 # Changelog
 
+## 1.5.9 - 2026-10-23
+
+### English
+
+#### New features
+
+- **A recovery offer when your configuration gets wiped.** If DeskBox starts with missing or corrupted settings and a valid automatic backup survived, a one-time prompt shows the backup's date and widget count and offers to restore it or start fresh; closing the prompt also counts as starting fresh, and the question never returns. Until you choose, scheduled automatic backups stay paused (manual "back up now" keeps working, and the pending backup cannot be pushed out of retention) with a reminder at most once per app run, and the settings page now discloses that snapshots in a custom backup folder must be restored manually after a wipe.
+- **Windows 11-native right-click menus for files.** A single-column menu whose rows each carry an inline icon, laid out in Explorer's classic order and rendered directly on acrylic (the tray menu shares the material); an "Open with" submenu lists real associated apps — including UWP ones — with their icons and a "Choose another app" fallback; the blank-area menu gains a "New" submenu (folder plus ShellNew-registered types) and separate "View"/"Sort by" submenus; in list view only the icon-and-name block of a row right-clicks into the file's menu — the rest of the row opens the blank-area menu (and clears the selection) exactly like Explorer, so "View → Icons" is always reachable; a right-button drag on blank space runs Explorer's marquee selection, opening the context menu for whatever it swept — and the marquee starts from a list row's blank remainder with either button, never stealing the item drag from the icon-and-name block; the New list itself now mirrors Explorer exactly: every registration layout Windows and installers use (including the Office one), one row per file type sorted by extension, OS-localized labels, ready-made "新建…" file names, valid empty ZIPs, and each row carrying its file type's application icon — plus a "Shortcut" row that creates the placeholder and opens its properties to finish it. Native ZIP support covers compress (with tar variants and multi-select) and extract-all. Namespace shortcuts (This PC, Recycle Bin, Control Panel) inherit their target's verbs — the Recycle Bin shortcut can be emptied right from its menu (greyed out when already empty), every item gains "Create shortcut", and options Windows never offered there (Open file location, Compress) are hidden.
+- **The Recycle Bin shortcut in a box accepts drops as deletes.** Drag files onto it — from the desktop, Explorer, or another box — and they go to the Recycle Bin with the same confirmation Windows itself would show; the shortcut's empty/full icon updates right after you empty the bin or drop something in.
+- **Drag Shell locations into boxes to create shortcuts.** Dropping Recycle Bin, This PC, and similar Explorer locations onto a box now creates a working shortcut, with toast feedback when the source has nothing to offer or is busy.
+- **A redesigned first-run experience.** The onboarding opens with a three-piece logo assembly animation and a file-drop scene, and shows the real managed storage path with move/paste hints.
+- **Expanded widgets can shrink twice as small** — the minimum size drops from 50 to 25 DIP.
+- **Selected file names expand like the desktop.** In double-click-to-open mode, the trimmed name of the one selected file grows downward right where it is — no tile moves, and the expanded label is what stays selected. One more click on that expanded name starts an inline rename, just like a slow click on the Windows desktop.
+- **Korean language support.** The interface, installer, and first-run experience now ship in Korean alongside the existing 12 languages; the system locale is honored automatically.
+- **A calmer, more capable updater.** Update checks run once a day on a wall-clock anchor that survives sleep, and back off for two hours after a failure. The update toast's buttons now act: "Update now" goes straight into the one-click flow and "What's new" opens the release notes, which also open automatically after an update (inline release copy first, the GitHub tag as fallback). Updates can download in the background — metered connections are skipped — with a ready toast when the package is local, a status badge that follows each stage, version navigation across the full published history in the update log (identical on every machine, offline-readable once viewed), and an activity card in the corner of the settings window while anything is in flight; background download and update notifications each get their own switch (on by default).
+- **A clear notice on fully elevated desktops.** When the whole desktop runs with administrator privileges — UAC disabled, the built-in Administrator account, or a company-managed machine — a one-time startup notice explains that dragging files out of widgets is a Windows-level limitation in that state (dragging in works) and shows the exact way back: the secpol.msc policy on Pro, the FilterAdministratorToken registry value on Home, or signing in with a standard account, with a copyable command and a toast fallback. The drag-drop diagnostics in settings attribute the same situation, and an acknowledged notice never returns.
+- **The tray icon can be hidden.** A "Hidden" style joins the tray icon options: no icon is created at startup, a runtime switch takes effect immediately, and the icon stays gone through taskbar recreation.
+
+#### Fixes
+
+- Drags no longer freeze the app in callback-heavy moments — tray commands, virtual-file drops, shortcut launch drags; the right-click drag chooser no longer loses its "Open with" entry, and drag-launched shortcuts only accept command lines that point to files on disk.
+- A short widget docked to the screen edge no longer jumps to a corner on every reveal: the "wildly offscreen" test now measures the work-area overlap, so edge-docked bars and strips are not mistaken for lost windows.
+- Widget positions survive display-topology changes: a stale layout snapshot can no longer overwrite the user's latest placement, and fallback "shelter" geometry is never promoted to authoritative intent.
+- Switching group tabs no longer leaves the capsule slow to expand on re-entry: the swapped-in member's expansion layout is warmed at urgent priority while the capsule settles, and the hover-expand wait has a real hard cap again.
+- Hover-revealed buttons are removed from the Tab order — an invisible focus ring can no longer trigger them with the spacebar.
+- Shortcut "Open file location" now opens the target's location; executables no longer offer an "Open with" the system would reject; the "Choose another app" dialog actually opens, and the app-enumeration crash behind it is fixed.
+- Right-click menu positioning lands on the cursor across edge, lower-screen, and centered scenarios without drifting or covering the icon.
+- Revealing a widget shortly after hiding it no longer stutters: the memory trim that follows a hide now waits 30 seconds instead of 3 and skips small gains, so a quick hide-and-show round trip stops paying the quarter-second page-in.
+- Idle memory reclaim behaves again: the first trim of each idle stretch lands seconds after you stop interacting, and repeat trims inside the same stretch back off to a five-minute safety cadence — ending the twenty-second trim-and-refault churn that could sit on a noticeable slice of a CPU core with widgets on screen.
+- Right-clicking a todo item and hovering into the color submenu no longer terminates the app on Windows 11 25H2: the unselected color dot is now drawn as pure geometry instead of a glyph pinned to a font whose file 25H2 removed while leaving its registration behind — the first measure of that menu failed fatally.
+- Menus opened from a stack popover no longer render beneath it: while such a flyout is open, its bridge window is lifted into the topmost band alongside the popover, so the menu stays clickable.
+- Per-widget backgrounds and title icons no longer keep showing the previous image after being changed: assets now load through a stream backed by a source-keyed cache, sidestepping the framework's URI-keyed image cache that has no eviction.
+
+### 中文
+
+#### 新功能
+
+- **配置被清空后的恢复提议。** DeskBox 启动时若发现设置缺失或损坏、且有一份有效的自动备份幸存，会弹出一次性询问窗（列明备份时间与格子数量）：可从备份恢复，也可全新开始；直接关窗同样视为全新开始，此后不再追问。做出选择前定时自动备份保持暂停（手动“立即备份”不受影响，待决议的备份也不会被保留策略挤出），每次运行至多提醒一次；设置页同时披露：自定义备份目录中的快照不会被自动提议，需手动从“备份与还原 > 本机快照”恢复。
+- **文件右键菜单换装 Windows 11 原生形态。** 单竖列菜单、每行行内图标，按资源管理器经典序排列，直出毛玻璃材质（托盘菜单同享）；「打开方式」子菜单列出真实关联应用（含 UWP）并带图标，尾部「选择其他应用」兜底；空白处菜单新增「新建」子菜单（文件夹 + ShellNew 注册表同源项），「查看」「排序」拆分独立子菜单；列表视图下仅行内「图标+名称」区块右键弹出文件菜单，行的其余部分右键打开空白处菜单（并清除选中）——与资源管理器一致，「查看 → 图标」随时可点；空白处右键拖动即资源管理器式跑马圈选，松开弹出作用于圈选结果的菜单；圈选从列表行的空白部分即可起手（左右键皆可，且不会抢走图标+名称区的文件拖拽）；新建列表本身与资源管理器完全同源：覆盖 Windows 与安装器实际使用的全部注册布局（含 Office 布局）、每类型一行并按扩展名排序、标签取系统本地化文案、新建文件直接用注册的「新建…」现成名（新建的 ZIP 是合法空档）、每行带该文件类型的应用图标——另增「快捷方式」行：创建占位链接并打开其属性页完成目标填写。原生 ZIP 支持压缩（含 tar 变体与多选打包）与全部解压缩。命名空间快捷方式（此电脑/回收站/控制面板）继承目标动词——回收站快捷方式可直接「清空回收站」（已空时置灰），全部条目新增「创建快捷方式」，Windows 本就不提供的目标选项（打开文件位置、压缩）相应隐藏。
+- **格子内的回收站快捷方式成为删除投放目标。** 从桌面、资源管理器或其它格子把文件拖到回收站快捷方式上即移入回收站（确认框与 Windows 一致）；清空回收站或投放后，快捷方式的空/满图标即时刷新。
+- **Shell 位置拖入格子即建快捷方式。** 回收站、此电脑等资源管理器位置拖到格子上直接创建可用快捷方式；来源无内容或正忙时给出 toast 提示。
+- **开屏引导全新改版。** 三块拼片 logo 组装动画开场，文件投放场景演示，展示真实托管存储路径及移动/粘贴提示。
+- **展开格子可缩得更小**——最小尺寸从 50 降至 25 DIP。
+- **选中文件名像桌面一样展开。** 双击打开模式下，唯一选中文件的截断名称就地向下展开——格子布局纹丝不动，展开层即选中区；再点击一次展开的名称即进入就地重命名，与 Windows 桌面上的慢双击重命名一致。
+- **新增韩语界面。** 界面、安装器与开屏引导新增韩语，与既有 12 种语言并列；系统区域设置为韩语时自动跟随。
+- **更从容的更新体验。** 更新检查以墙钟锚点每天一次（睡眠后不漂移），失败后退避两小时；更新 Toast 的按钮真正可点——「立即更新」直达一键流程、「查看更新内容」直开更新日志，更新完成后下次启动自动弹出更新内容（官网内联优先、GitHub tag 兜底）。更新支持后台下载（计费网络自动跳过），下载完成弹就绪 Toast，状态徽章全程跟随，更新日志窗可按版本浏览完整发布历史（所有机器一致，看过的版本离线可读），设置窗右下角在更新进行时显示活动浮层；后台下载与更新通知各有独立开关（默认开启）。
+- **全提权桌面的清晰告知。** 当整个桌面以管理员权限运行——UAC 关闭、内置 Administrator 账户或公司管理的电脑——启动时一次性弹窗说明此状态下「拖出格子」是 Windows 层限制（拖入不受影响），并给出确切恢复路径：专业版的 secpol.msc 策略、家庭版的 FilterAdministratorToken 注册表值或改用标准账户登录，附可复制的命令与 toast 兜底；设置里的拖放诊断同步给出同类归因，已确认的通知不再打扰。
+- **托盘图标可以隐藏。** 托盘图标样式新增「隐藏」：启动即不创建图标，运行时切换立即生效，任务栏重建后也不会复活。
+
+#### 修复
+
+- 拖拽不再在回调密集场景卡死（托盘命令、虚拟文件投放、快捷方式拖启动）；右键拖放选择菜单不再丢失「打开方式」选项；拖启动的快捷方式只接受指向磁盘真实存在文件的命令行。
+- 贴屏幕边缘的矮格子不再每次唤出跳到角落：「严重离屏」判定改为按工作区交集测量，贴边的长条/窄条不再被误认成丢失窗口。
+- 格子位置扛得住显示器拓扑变化：过期布局快照无法再覆盖用户最近一次手动摆放，兜底"避难"几何也永不冒充用户意图。
+- 切换分组标签后胶囊不再迟迟不展开：换入成员的展开布局在胶囊落定期间以紧急优先级预热，悬停展开的等待重新有了真正的硬上限。
+- 悬停才显现的按钮移出 Tab 键序——不可见的焦点环不再能凭空格误触发。
+- 快捷方式「打开文件位置」改为打开目标所在位置；可执行文件不再展示注定被系统拒绝的「打开方式」；「选择其他应用」切实可用，其背后的枚举硬崩溃一并修复。
+- 右键菜单定位在贴边、下屏、居中等场景都落在光标处，不再漂移或遮盖图标。
+- 隐藏后马上唤出不再卡顿：隐藏后的内存修剪宽限从 3 秒放宽到 30 秒并跳过小额修剪，快速隐藏/唤出的来回不再付出约四分之一秒的内存回迁。
+- 闲置内存回收回到“停手几秒就降”：每个闲置时段的首次修剪在安静期后立刻执行，同时段内的后续修剪退为 5 分钟兜底节律——终结此前约 20 秒一次“修剪—回迁”空转（常驻格子时可吃掉可观的 CPU）。
+- 待办格子右键「颜色标记」子菜单不再在 Windows 11 25H2 上闪退：未选中的颜色圆点改为纯几何绘制，不再钉在 25H2 已删除文件却残留注册表项的字体上——该菜单首次度量即致命失败并终止进程。
+- 叠放弹窗上打开的菜单不再被压在弹窗下面：弹窗内菜单打开期间，其桥接窗口被抬入置顶带与弹窗同层，菜单始终可点。
+- 每格背景与标题图标换图后不再残留旧图：资产图片改为经流式加载并按来源键缓存，绕开框架按键缓存且无法逐出的 URI 图像缓存。
+
 ## 1.5.8 - 2026-10-14
 
 ### English

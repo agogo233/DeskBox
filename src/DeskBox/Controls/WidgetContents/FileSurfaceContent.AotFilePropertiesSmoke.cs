@@ -30,9 +30,9 @@ public sealed partial class FileSurfaceContent
         UpdateSelectionCommandBar();
         RefreshItemSelectionVisuals();
 
-        CommandBarFlyout flyout = CreateItemFlyout(target);
+        MenuFlyout flyout = CreateItemFlyout(target);
         string propertiesText = T("Common.Properties");
-        AppBarButton propertiesItem = AotContextMenuProbe.FindButton(
+        MenuFlyoutItem propertiesItem = AotContextMenuProbe.FindItem(
             flyout,
             propertiesText);
         int propertiesIndex = AotContextMenuProbe.IndexOf(flyout, propertiesItem);
@@ -99,7 +99,7 @@ public sealed partial class FileSurfaceContent
                 _hostWindowHandle.ToInt64(),
                 AotContextMenuProbe.Count(flyout),
                 propertiesIndex,
-                propertiesItem.Label,
+                propertiesItem.Text,
                 propertiesItem.IsEnabled,
                 AutomationInvoked: true,
                 feedback?.DeduplicationKey ?? string.Empty,

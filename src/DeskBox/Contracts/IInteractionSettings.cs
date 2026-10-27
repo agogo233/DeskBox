@@ -108,6 +108,9 @@ public interface IInteractionSettings
     // unchanged values skip the redundant save.
     void SetAutoStart(bool value);
     void SetAutoCheckForUpdates(bool value);
+    void SetShowReleaseNotesAfterUpdate(bool value);
+    void SetAutoDownloadUpdates(bool value);
+    void SetShowUpdateToastNotification(bool value);
     void SetSilentStartup(bool value);
 
     void SetDoubleClickToOpen(bool value);

@@ -116,15 +116,6 @@ public sealed class AppUpdateServiceTests : IDisposable
     }
 
     [Theory]
-    [InlineData("**拖拽更加可靠。** 使用 `RequestedOperation`。", "拖拽更加可靠。 使用 RequestedOperation。")]
-    [InlineData("## Highlights\n- Read [details](https://deskbox.fun/download)\n- Fixed alignment", "Highlights Read details Fixed alignment")]
-    [InlineData(null, "")]
-    public void UpdateSummaryPreview_ShowsReadableText(string? markdown, string expected)
-    {
-        Assert.Equal(expected, SettingsViewModel.GetUpdateSummaryPreview(markdown));
-    }
-
-    [Theory]
     [InlineData("1.2.1", "1.2.2", true)]
     [InlineData("1.2.1", "v1.2.2", true)]
     [InlineData("1.2.1", "1.2.2-beta.1", true)]
@@ -417,6 +408,50 @@ public sealed class AppUpdateServiceTests : IDisposable
             out _));
     }
 
+    [Fact]
+    public async Task ContentManifestFetch_AcceptsNotesOnlyManifest_AndRejectsInstallerOnlyManifest()
+    {
+        // The Store channel's synthesized manifest carries a
+        // ms-windowsstore:// download target; the display path must accept a
+        // manifest that has notes but no installer link at all.
+        string notesOnlyJson =
+            """{"schemaVersion":1,"channel":"stable","version":"1.5.9","releaseNotesUrl":"https://github.com/Tianyu199509/DeskBox/releases/tag/v1.5.9"}""";
+        string installerOnlyJson =
+            """{"schemaVersion":1,"channel":"stable","version":"1.5.9","downloadUrl":"https://deskbox.fun/DeskBox_Setup.exe","sha256":"aa"}""";
+
+        var notesClient = CreateHttpClient(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(notesOnlyJson, Encoding.UTF8, "application/json")
+        });
+        AppUpdateManifest? accepted = await AppUpdateService.FetchContentManifestAsync(
+            "https://deskbox.fun/update/stable.json", notesClient, CancellationToken.None);
+        Assert.NotNull(accepted);
+        Assert.Equal("1.5.9", accepted!.Version);
+        Assert.True(AppUpdateManifest.IsSafeReleaseNotesUrl(accepted.ReleaseNotesUrl));
+
+        var installerClient = CreateHttpClient(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(installerOnlyJson, Encoding.UTF8, "application/json")
+        });
+        AppUpdateManifest? rejected = await AppUpdateService.FetchContentManifestAsync(
+            "https://deskbox.fun/update/stable.json", installerClient, CancellationToken.None);
+        Assert.Null(rejected);
+    }
+
+    [Fact]
+    public void ReleaseNotesOnlyManifest_PointsAtGitHubTagForExactVersion()
+    {
+        AppUpdateManifest manifest = AppUpdateService.CreateReleaseNotesOnlyManifest("1.5.9");
+
+        Assert.Equal("1.5.9", manifest.Version);
+        Assert.Equal(
+            "https://github.com/Tianyu199509/DeskBox/releases/tag/v1.5.9",
+            manifest.ReleaseNotesUrl);
+        Assert.True(AppUpdateManifest.IsSafeReleaseNotesUrl(manifest.ReleaseNotesUrl));
+        Assert.True(manifest.HasReleaseNotesOrUrl);
+        Assert.False(AppUpdateService.IsManifestUsable(manifest));
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_tempRoot))
@@ -496,6 +531,7 @@ public sealed class AppUpdateServiceTests : IDisposable
         { LocalizationService.LanguageArabic, "arabic" },
         { LocalizationService.LanguageBengali, "bengali" },
         { LocalizationService.LanguageRussian, "russian" },
+        { LocalizationService.LanguageKorean, "korean" },
     };
 
     [Theory]

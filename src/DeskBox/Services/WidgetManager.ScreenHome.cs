@@ -48,6 +48,9 @@ public sealed partial class WidgetManager
         // A committed placement invalidates outstanding move-all undo tokens
         // (H3): their snapshots no longer describe current placement intent.
         _placementGeneration++;
+        // The deliberate-placement clock: profile activation arbitrates
+        // against this stamp (a stored entry that predates it loses).
+        config.LastUserPlacementUtc = DateTimeOffset.UtcNow;
 
         WidgetScreenInfo display = FindDisplayByMaxIntersection(screens, hostBounds);
         var workArea = new Windows.Graphics.RectInt32(

@@ -280,6 +280,7 @@ public sealed class SettingsService
     public const string LanguageArabic = "ar-SA";
     public const string LanguageBengali = "bn-BD";
     public const string LanguageRussian = "ru-RU";
+    public const string LanguageKorean = "ko-KR";
     public const double DefaultWidgetWidth = 280;
     public const double DefaultWidgetHeight = 400;
     public const bool DefaultGlobalHotkeyEnabled = true;
@@ -287,8 +288,13 @@ public sealed class SettingsService
         Models.HotkeyActivationKind.Chord;
     public const int DefaultGlobalHotkeyModifiers = (int)Models.HotkeyModifierKeys.None;
     public const int DefaultGlobalHotkeyKey = (int)Windows.System.VirtualKey.F7;
-    public const double MinWidgetWidth = 50;
-    public const double MinWidgetHeight = 50;
+    // The preferred minimum every expanded-widget gate clamps to (the
+    // interactive resize floor, restore/sanitize clamps, and the default
+    // size range). Must stay above WidgetElasticLayout's 20-dip absolute
+    // floor so the elastic projection never fights the gates. Halved from
+    // 50 on 2026-10-20 so expanded widgets can be shrunk further.
+    public const double MinWidgetWidth = 25;
+    public const double MinWidgetHeight = 25;
     public const double DefaultIconSize = 30;
     public const double MinIconSize = 24;
     public const double MaxIconSize = 56;
@@ -411,8 +417,13 @@ public const int DefaultSearchMaxResults = 100;
                 [nameof(AppSettings.OnboardingStepIndex)] = DefaultPreferencePreservationReason.RuntimeState,
                 [nameof(AppSettings.CompletedOnboardingVersion)] = DefaultPreferencePreservationReason.RuntimeState,
                 [nameof(AppSettings.HasResolvedInitialFileWidgetSetup)] = DefaultPreferencePreservationReason.RuntimeState,
+                [nameof(AppSettings.FullyElevatedNoticeAcknowledgedUtcTicks)] = DefaultPreferencePreservationReason.RuntimeState,
                 [nameof(AppSettings.LastQuickCaptureFileWidgetId)] = DefaultPreferencePreservationReason.RuntimeState,
                 [nameof(AppSettings.LastUpdateCheckAt)] = DefaultPreferencePreservationReason.RuntimeState,
+                [nameof(AppSettings.ShowReleaseNotesAfterUpdate)] = DefaultPreferencePreservationReason.UserChoice,
+                [nameof(AppSettings.LastRunVersion)] = DefaultPreferencePreservationReason.RuntimeState,
+                [nameof(AppSettings.AutoDownloadUpdates)] = DefaultPreferencePreservationReason.UserChoice,
+                [nameof(AppSettings.ShowUpdateToastNotification)] = DefaultPreferencePreservationReason.UserChoice,
                 [nameof(AppSettings.SchemaVersion)] = DefaultPreferencePreservationReason.RuntimeState
             };
 
@@ -2488,7 +2499,7 @@ settings.FocusClickedWidgetOnRaise = false;
         }
 
         if (settings.Language is not (LanguageSystem or LanguageChinese or LanguageChineseTraditional or LanguageEnglish or LanguageJapanese or LanguageGerman or LanguagePortuguese
-            or LanguageHindi or LanguageSpanish or LanguageFrench or LanguageArabic or LanguageBengali or LanguageRussian))
+            or LanguageHindi or LanguageSpanish or LanguageFrench or LanguageArabic or LanguageBengali or LanguageRussian or LanguageKorean))
         {
             settings.Language = LanguageSystem;
             changed = true;

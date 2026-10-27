@@ -126,82 +126,144 @@
                     <!-- persistent soft glow -->
                     <Ellipse x:Name="SceneHalo" Canvas.Left="40" Canvas.Top="90" Width="280" Height="280" Opacity="0.55" Fill="{StaticResource SceneGlowSkyBrush}" />
 
-                    <!-- Step 1 hero: DeskBox mark -->
-                    <Image
+                    <!-- Step 1 hero: DeskBox mark. The logo is sliced into its
+                         three slabs (back/mid/front — deskbox-mark-slab-*.svg,
+                         paths and gradients verbatim from Assets/deskbox.svg)
+                         so the assembly loop can fan, permute, and restack
+                         them; zero translation = the exact logo. Group-level
+                         loop motion lives on SceneMarkGroup so Set() keeps
+                         transitioning only the outer SceneMark. -->
+                    <Grid
                         x:Name="SceneMark"
                         Canvas.Left="116"
                         Canvas.Top="146"
                         Width="128"
-                        Height="128"
-                        Source="ms-appx:///Assets/deskbox.svg"/>
-
-                    <!-- Step 2 hero: box + flying file -->
-                    <Border
-                        x:Name="SceneDropBoxHalo"
-                        Canvas.Left="85"
-                        Canvas.Top="125"
-                        Width="190"
-                        Height="160"
-                        Background="{ThemeResource AccentFillColorDefaultBrush}"
-                        CornerRadius="24"
-                        Opacity="0"/>
-                    <Border
-                        x:Name="SceneDropBox"
-                        Canvas.Left="105"
-                        Canvas.Top="145"
-                        Width="150"
-                        Height="120"
-                        Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                        BorderBrush="{ThemeResource AccentFillColorDefaultBrush}"
-                        BorderThickness="2"
-                        CornerRadius="18"
-                        Opacity="0">
-                        <!-- Brand storage svg (box + file) replaces the emoji hero;
-                             WidgetTitleIcon clamps to 34px so the Image goes direct. -->
-                        <Image
-                            Width="72"
-                            Height="72"
-                            HorizontalAlignment="Center"
-                            VerticalAlignment="Center"
-                            Source="/Assets/WidgetTitleIcons/managed-storage.svg"/>
-                    </Border>
-                    <Border
-                        x:Name="SceneFileToken"
-                        Canvas.Left="36"
-                        Canvas.Top="292"
-                        Width="62"
-                        Height="78"
-                        Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                        BorderThickness="1"
-                        CornerRadius="8"
-                        Padding="9"
-                        Opacity="0">
-                        <Grid RowDefinitions="Auto,*" RowSpacing="8">
-                            <!-- Solid txt-style file mark: the dog-ear and text lines are
-                                 carved in the window-base color so the page reads filled
-                                 in every theme. -->
-                            <Canvas Width="20" Height="24" HorizontalAlignment="Center">
-                                <Path
-                                    Fill="{ThemeResource TextFillColorPrimaryBrush}"
-                                    Data="M0,0 H14 L20,6 V24 H0 Z"/>
-                                <Path
-                                    Fill="{ThemeResource SolidBackgroundFillColorBaseBrush}"
-                                    Data="M14,0 L20,6 L14,6 Z M3,9.5 H13 V10.9 H3 Z M3,13 H13 V14.4 H3 Z M3,16.5 H10.5 V17.9 H3 Z"/>
-                            </Canvas>
-                            <Border Grid.Row="1" Height="4" VerticalAlignment="Bottom" Background="{ThemeResource TextFillColorSecondaryBrush}" CornerRadius="2" Opacity="0.5"/>
+                        Height="128">
+                        <Grid x:Name="SceneMarkGroup">
+                            <Image x:Name="SceneMarkSlab0" Source="ms-appx:///Assets/deskbox-mark-slab-0.svg"/>
+                            <Image x:Name="SceneMarkSlab1" Source="ms-appx:///Assets/deskbox-mark-slab-1.svg"/>
+                            <Image x:Name="SceneMarkSlab2" Source="ms-appx:///Assets/deskbox-mark-slab-2.svg"/>
                         </Grid>
-                    </Border>
-                    <Border
-                        x:Name="SceneMoveBadge"
-                        Canvas.Left="196"
-                        Canvas.Top="248"
-                        Padding="12,6"
-                        Background="{ThemeResource AccentFillColorDefaultBrush}"
-                        CornerRadius="10"
-                        Opacity="0">
-                        <TextBlock FontSize="12.5" FontWeight="SemiBold" Foreground="{ThemeResource TextOnAccentFillColorPrimaryBrush}" svc:Localized.Key="Onboarding.Scene.MoveBadge"/>
-                    </Border>
+                    </Grid>
+
+                    <!-- Step 2 hero: scattered desktop files get inhaled into the
+                         box, form an icon-view row inside it, and the path chip
+                         reveals where they land. The wrapper carries the group
+                         breathe while Set() transitions the wrapper as a whole;
+                         SceneDropBox/SceneMoveBadge keep their pinned names. -->
+                    <Canvas x:Name="SceneDropHero" Canvas.Left="50" Canvas.Top="100" Width="260" Height="220" Opacity="0">
+                        <Border
+                            x:Name="SceneDropBoxHalo"
+                            Canvas.Left="35"
+                            Canvas.Top="25"
+                            Width="190"
+                            Height="160"
+                            Background="{ThemeResource AccentFillColorDefaultBrush}"
+                            CornerRadius="24"
+                            Opacity="0"/>
+                        <Border
+                            x:Name="SceneDropBox"
+                            Canvas.Left="55"
+                            Canvas.Top="45"
+                            Width="150"
+                            Height="120"
+                            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                            BorderThickness="1.5"
+                            CornerRadius="18">
+                            <!-- The storage art hands its interior over to the icon
+                                 row as the files land; real shell file-type icons
+                                 (Assets/OnboardingScene, extracted once) — no
+                                 hand-drawn glyphs. -->
+                            <Grid>
+                                <Image
+                                    x:Name="SceneDropBoxArt"
+                                    Width="46"
+                                    Height="46"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    Source="/Assets/WidgetTitleIcons/managed-storage.svg"/>
+                                <StackPanel
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    Orientation="Horizontal"
+                                    Spacing="8">
+                                    <Border x:Name="SceneDropSlot1" Width="36" Height="36" CornerRadius="9" Opacity="0"
+                                        Background="{ThemeResource CardBackgroundFillColorSecondaryBrush}"
+                                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                                        BorderThickness="1">
+                                        <Image Width="22" Height="22" Source="ms-appx:///Assets/OnboardingScene/file-txt.png"/>
+                                    </Border>
+                                    <Border x:Name="SceneDropSlot2" Width="36" Height="36" CornerRadius="9" Opacity="0"
+                                        Background="{ThemeResource CardBackgroundFillColorSecondaryBrush}"
+                                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                                        BorderThickness="1">
+                                        <Image Width="22" Height="22" Source="ms-appx:///Assets/OnboardingScene/file-zip.png"/>
+                                    </Border>
+                                    <Border x:Name="SceneDropSlot3" Width="36" Height="36" CornerRadius="9" Opacity="0"
+                                        Background="{ThemeResource CardBackgroundFillColorSecondaryBrush}"
+                                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                                        BorderThickness="1">
+                                        <Image Width="22" Height="22" Source="ms-appx:///Assets/OnboardingScene/file-jpg.png"/>
+                                    </Border>
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+                        <Border
+                            x:Name="SceneMoveBadge"
+                            Canvas.Left="146"
+                            Canvas.Top="148"
+                            Padding="12,6"
+                            Background="{ThemeResource AccentFillColorDefaultBrush}"
+                            CornerRadius="10"
+                            Opacity="0">
+                            <TextBlock FontSize="12.5" FontWeight="SemiBold" Foreground="{ThemeResource TextOnAccentFillColorPrimaryBrush}" svc:Localized.Key="Onboarding.Scene.MoveBadge"/>
+                        </Border>
+                        <Border
+                            x:Name="ScenePathChip"
+                            Canvas.Left="10"
+                            Canvas.Top="175"
+                            Width="240"
+                            Height="36"
+                            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                            BorderThickness="1"
+                            CornerRadius="10"
+                            Padding="16,0"
+                            Opacity="0">
+                            <TextBlock
+                                x:Name="ScenePathChipText"
+                                FontSize="12"
+                                FontWeight="SemiBold"
+                                Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                TextAlignment="Center"
+                                TextTrimming="CharacterEllipsis"/>
+                        </Border>
+                        <Ellipse x:Name="ScenePathParticle" Canvas.Left="125" Canvas.Top="150" Width="10" Height="10" Fill="{ThemeResource AccentFillColorDefaultBrush}" Opacity="0"/>
+                    </Canvas>
+                    <!-- Scattered desktop-file tokens: real shell icons + localized
+                         example names. Scatter reads from positions only — no
+                         rotation (Fluent motion keeps icons upright). -->
+                    <Grid x:Name="SceneFileToken" Canvas.Left="24" Canvas.Top="250" Width="64" Opacity="0">
+                        <StackPanel Spacing="2">
+                            <Image Width="32" Height="32" HorizontalAlignment="Center" Source="ms-appx:///Assets/OnboardingScene/file-txt.png"/>
+                            <TextBlock FontSize="11" Foreground="{ThemeResource TextFillColorPrimaryBrush}" MaxWidth="64" TextAlignment="Center" TextTrimming="CharacterEllipsis" svc:Localized.Key="Onboarding.Scene.FileName1"/>
+                        </StackPanel>
+                    </Grid>
+                    <Grid x:Name="SceneFileToken2" Canvas.Left="86" Canvas.Top="282" Width="64" Opacity="0">
+                        <StackPanel Spacing="2">
+                            <Image Width="32" Height="32" HorizontalAlignment="Center" Source="ms-appx:///Assets/OnboardingScene/file-zip.png"/>
+                            <TextBlock FontSize="11" Foreground="{ThemeResource TextFillColorPrimaryBrush}" MaxWidth="64" TextAlignment="Center" TextTrimming="CharacterEllipsis" svc:Localized.Key="Onboarding.Scene.FileName2"/>
+                        </StackPanel>
+                    </Grid>
+                    <Grid x:Name="SceneFileToken3" Canvas.Left="34" Canvas.Top="318" Width="64" Opacity="0">
+                        <StackPanel Spacing="2">
+                            <Image Width="32" Height="32" HorizontalAlignment="Center" Source="ms-appx:///Assets/OnboardingScene/file-jpg.png"/>
+                            <TextBlock FontSize="11" Foreground="{ThemeResource TextFillColorPrimaryBrush}" MaxWidth="64" TextAlignment="Center" TextTrimming="CharacterEllipsis" svc:Localized.Key="Onboarding.Scene.FileName3"/>
+                        </StackPanel>
+                    </Grid>
 
                     <!-- Step 3 hero: keycap -->
                     <Grid x:Name="SceneKeycapHost" Canvas.Left="90" Canvas.Top="150" Width="180" Height="120" Opacity="0">
@@ -418,12 +480,43 @@
                     <StackPanel x:Name="Step2Panel" Spacing="16" Visibility="Collapsed">
                         <TextBlock Style="{StaticResource StepTitleText}" svc:Localized.Key="Onboarding.Step2.Title"/>
                         <TextBlock Style="{StaticResource StepBodyText}" svc:Localized.Key="Onboarding.Step2.Body"/>
+                        <!-- Destination card: shows the real managed root plus a
+                             localized example subfolder. Path changes live in
+                             Settings → 文件格子 (AppearanceDetail hosts the
+                             managed-storage cards), so the button only jumps
+                             there — no inline path editing. -->
                         <Border Style="{StaticResource SettingCard}" Margin="0,6,0,0">
-                            <Grid ColumnDefinitions="Auto,*" ColumnSpacing="11">
-                                <FontIcon VerticalAlignment="Top" Margin="0,1,0,0" FontSize="16" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" Glyph="&#xE946;"/>
-                                <TextBlock Grid.Column="1" Style="{StaticResource HintRow}" svc:Localized.Key="Onboarding.Step2.Note"/>
+                            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="11">
+                                <StackPanel Spacing="3">
+                                    <TextBlock Style="{StaticResource HintRow}" svc:Localized.Key="Onboarding.Step2.PathLabel"/>
+                                    <TextBlock
+                                        x:Name="Step2PathValue"
+                                        FontSize="13.5"
+                                        FontWeight="SemiBold"
+                                        Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                                        TextTrimming="CharacterEllipsis"/>
+                                    <TextBlock Style="{StaticResource HintRow}" svc:Localized.Key="Onboarding.Step2.PathSub"/>
+                                </StackPanel>
+                                <Button
+                                    x:Name="Step2PathChangeButton"
+                                    Grid.Column="1"
+                                    MinHeight="32"
+                                    Padding="16,6"
+                                    VerticalAlignment="Center"
+                                    Click="Step2PathChange_Click"
+                                    Style="{ThemeResource AccentButtonStyle}"
+                                    svc:Localized.AutomationNameKey="Onboarding.Step2.ChangeInSettings"
+                                    svc:Localized.Key="Onboarding.Step2.ChangeInSettings"/>
                             </Grid>
                         </Border>
+                        <StackPanel Orientation="Horizontal" Spacing="9">
+                            <FontIcon VerticalAlignment="Center" FontSize="16" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" Glyph="&#xE73E;"/>
+                            <TextBlock Style="{StaticResource HintRow}" TextWrapping="Wrap" svc:Localized.Key="Onboarding.Step2.Hint1"/>
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Spacing="9">
+                            <FontIcon VerticalAlignment="Center" FontSize="16" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" Glyph="&#xE73E;"/>
+                            <TextBlock Style="{StaticResource HintRow}" TextWrapping="Wrap" svc:Localized.Key="Onboarding.Step2.Hint2"/>
+                        </StackPanel>
                     </StackPanel>
 
                     <!-- Step 3 -->

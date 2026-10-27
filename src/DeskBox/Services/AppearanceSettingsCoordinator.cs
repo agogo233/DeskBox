@@ -16,6 +16,7 @@ public sealed class AppearanceSettingsCoordinator : IAppearanceSettings
     private const string TrayIconStyleColorful = "Colorful";
     private const string TrayIconStyleBlack = "Black";
     private const string TrayIconStyleWhite = "White";
+    private const string TrayIconStyleHidden = "Hidden";
 
     private readonly SettingsService _settings;
     private bool _stopped;
@@ -105,7 +106,8 @@ public sealed class AppearanceSettingsCoordinator : IAppearanceSettings
     public string ReadTrayIconStyle()
     {
         string style = _settings.Settings.Core.TrayIconStyle;
-        return style is TrayIconStyleColorful or TrayIconStyleBlack or TrayIconStyleWhite
+        return style is TrayIconStyleColorful or TrayIconStyleBlack or
+            TrayIconStyleWhite or TrayIconStyleHidden
             ? style
             : TrayIconStyleSystem;
     }
@@ -113,7 +115,8 @@ public sealed class AppearanceSettingsCoordinator : IAppearanceSettings
     public void SetTrayIconStyle(string? style)
     {
         ThrowIfStopped();
-        string normalized = style is TrayIconStyleColorful or TrayIconStyleBlack or TrayIconStyleWhite
+        string normalized = style is TrayIconStyleColorful or TrayIconStyleBlack or
+            TrayIconStyleWhite or TrayIconStyleHidden
             ? style
             : TrayIconStyleSystem;
         CoreSettingsSlice core = _settings.Settings.Core;

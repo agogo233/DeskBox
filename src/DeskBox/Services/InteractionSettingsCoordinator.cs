@@ -81,6 +81,33 @@ public sealed class InteractionSettingsCoordinator : IInteractionSettings
         _settings.SaveDebounced();
     }
 
+    public void SetShowReleaseNotesAfterUpdate(bool value)
+    {
+        ThrowIfStopped();
+        CoreSettingsSlice core = _settings.Settings.Core;
+        if (core.ShowReleaseNotesAfterUpdate == value) return;
+        core.ShowReleaseNotesAfterUpdate = value;
+        _settings.SaveDebounced();
+    }
+
+    public void SetAutoDownloadUpdates(bool value)
+    {
+        ThrowIfStopped();
+        CoreSettingsSlice core = _settings.Settings.Core;
+        if (core.AutoDownloadUpdates == value) return;
+        core.AutoDownloadUpdates = value;
+        _settings.SaveDebounced();
+    }
+
+    public void SetShowUpdateToastNotification(bool value)
+    {
+        ThrowIfStopped();
+        CoreSettingsSlice core = _settings.Settings.Core;
+        if (core.ShowUpdateToastNotification == value) return;
+        core.ShowUpdateToastNotification = value;
+        _settings.SaveDebounced();
+    }
+
     public void SetSilentStartup(bool value)
     {
         ThrowIfStopped();

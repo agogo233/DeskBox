@@ -6761,7 +6761,7 @@ try {
 
     $expectedLocales = @(
         "zh-CN", "zh-TW", "en-US", "ja-JP", "de-DE", "pt-BR",
-        "hi-IN", "es-ES", "fr-FR", "ar-SA", "bn-BD", "ru-RU")
+        "hi-IN", "es-ES", "fr-FR", "ar-SA", "bn-BD", "ru-RU", "ko-KR")
     $locales = @($smokeResult.locales)
     if ($locales.Count -ne $expectedLocales.Count) {
         throw "Managed UI smoke locale count mismatch."

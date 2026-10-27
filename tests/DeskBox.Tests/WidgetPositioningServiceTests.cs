@@ -486,4 +486,95 @@ public sealed class WidgetPositioningServiceTests
         Assert.InRange(fallbackBounds.X, primary100.X, primary100.X + primary100.Width - fallbackBounds.Width);
         Assert.InRange(fallbackBounds.Y, primary100.Y, primary100.Y + primary100.Height - fallbackBounds.Height);
     }
+
+    /// <summary>
+    /// The wild-offscreen gate of EnsureVisible must measure the window's
+    /// work-area overlap, not the window's near-edge coordinate. The
+    /// previous edge form treated any window shorter than 48px docked to an
+    /// edge as fully offscreen — a 41px-tall expanded strip glued to the
+    /// bottom jumped to the (32,32) fallback spot on every tray-reveal
+    /// topology re-resolve (2026-10-20).
+    /// </summary>
+    [Fact]
+    public void EnsureVisible_ShortStripDockedToBottomEdge_StaysPut()
+    {
+        var workArea = new RectInt32(0, 0, 1920, 1032);
+
+        // The exact repro geometry: top edge at 984, 41px tall, fully inside
+        // the work area's last 48px band.
+        RectInt32 kept = WidgetPositioningService.EnsureVisible(
+            new RectInt32(1320, 984, 576, 41), workArea);
+
+        Assert.Equal(1320, kept.X);
+        Assert.Equal(984, kept.Y);
+    }
+
+    [Fact]
+    public void EnsureVisible_NarrowStripDockedToRightEdge_StaysPut()
+    {
+        var workArea = new RectInt32(0, 0, 1920, 1032);
+
+        RectInt32 kept = WidgetPositioningService.EnsureVisible(
+            new RectInt32(1879, 100, 41, 300), workArea);
+
+        Assert.Equal(1879, kept.X);
+        Assert.Equal(100, kept.Y);
+    }
+
+    [Fact]
+    public void EnsureVisible_FullyOutside_FallsBackToWorkAreaOffset()
+    {
+        var workArea = new RectInt32(0, 0, 1920, 1032);
+
+        // Fully below the work area (e.g. parked by a slide-out animation).
+        RectInt32 below = WidgetPositioningService.EnsureVisible(
+            new RectInt32(1320, 1100, 576, 41), workArea);
+        Assert.Equal(32, below.X);
+        Assert.Equal(32, below.Y);
+
+        // Fully above it.
+        RectInt32 above = WidgetPositioningService.EnsureVisible(
+            new RectInt32(1320, -60, 576, 41), workArea);
+        Assert.Equal(32, above.X);
+        Assert.Equal(32, above.Y);
+
+        // Fully to the right of it.
+        RectInt32 right = WidgetPositioningService.EnsureVisible(
+            new RectInt32(2000, 100, 576, 41), workArea);
+        Assert.Equal(32, right.X);
+        Assert.Equal(32, right.Y);
+    }
+
+    [Fact]
+    public void EnsureVisible_BarelyPeekingSliver_FallsBack()
+    {
+        var workArea = new RectInt32(0, 0, 1920, 1032);
+
+        // A 300px-tall window with only 20px still inside the bottom edge:
+        // the overlap is a minority sliver, not the window's whole body.
+        RectInt32 sliver = WidgetPositioningService.EnsureVisible(
+            new RectInt32(1320, 1012, 576, 300), workArea);
+        Assert.Equal(32, sliver.X);
+        Assert.Equal(32, sliver.Y);
+
+        // Same for a wide window peeking 20px from the right edge.
+        RectInt32 sideSliver = WidgetPositioningService.EnsureVisible(
+            new RectInt32(1900, 100, 600, 300), workArea);
+        Assert.Equal(32, sideSliver.X);
+        Assert.Equal(32, sideSliver.Y);
+    }
+
+    [Fact]
+    public void EnsureVisible_TallWindowStraddlingBottom_ClampsNotFallsBack()
+    {
+        var workArea = new RectInt32(0, 0, 1920, 1032);
+
+        // A normal window overlapping the bottom band but mostly inside
+        // must take the gentle clamp path, never the fallback.
+        RectInt32 clamped = WidgetPositioningService.EnsureVisible(
+            new RectInt32(1320, 900, 576, 200), workArea);
+
+        Assert.Equal(1320, clamped.X);
+        Assert.Equal(832, clamped.Y); // 1032 - 200
+    }
 }

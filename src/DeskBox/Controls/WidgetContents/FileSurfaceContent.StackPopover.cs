@@ -55,6 +55,7 @@ public sealed partial class FileSurfaceContent
     private bool _stackPopoverIsListMode;
     private bool _stackPopoverContextMenuOpen;
     private bool _stackPopoverSystemContextMenuOpen;
+    private Services.FlyoutBridgeBandPromoter? _popoverFlyoutBandPromoter;
     private bool _stackPopoverDragActive;
     private bool _stackPopoverCleanupPending;
     private long _stackPopoverShowGeneration;
@@ -592,6 +593,9 @@ public sealed partial class FileSurfaceContent
             _stackPopoverPopupClosing = false;
             _stackPopoverCleanupPending = false;
             _stackPopoverItemsView.SelectedItems.Clear();
+            // While the popover owns interaction, a lingering main-surface
+            // selection must not keep an expanded label under the popover.
+            CollapseMainSurfaceNameExpansion();
             bool switchingStacks =
                 _stackPopoverItems.Count > 0 &&
                 !string.Equals(
@@ -1056,6 +1060,10 @@ public sealed partial class FileSurfaceContent
         view.RightTapped += Items_RightTapped;
         view.SelectionChanged += Items_SelectionChanged;
         view.CharacterReceived += Root_CharacterReceived;
+        view.AddHandler(
+            UIElement.PointerWheelChangedEvent,
+            new PointerEventHandler(StackPopoverItems_PointerWheelDuringExpansion),
+            handledEventsToo: true);
         _stackPopoverPreviewKeyHandler =
             new KeyEventHandler(ItemsView_PreviewKeyDown);
         view.AddHandler(
@@ -1064,6 +1072,15 @@ public sealed partial class FileSurfaceContent
             handledEventsToo: true);
         RegisterScrollBarActivityTracking(view);
         return view;
+    }
+
+    private void StackPopoverItems_PointerWheelDuringExpansion(
+        object sender, PointerRoutedEventArgs e)
+    {
+        // The popover's expanded-label overlay is positioned against the
+        // popover viewport; wheel scrolling invalidates it, so collapse
+        // instead of chasing the item.
+        HideNameExpansion(isPopoverView: true);
     }
 
     private void StackPopoverItemsView_Loaded(
@@ -2035,6 +2052,11 @@ public sealed partial class FileSurfaceContent
             view.SelectedItems.Clear();
         }
 
+        // The popover no longer owns interaction, so a lingering main-surface
+        // sole selection may expand its label again; refresh from the now
+        // active main view.
+        UpdateItemSurfaceVisuals();
+
         if (_stackPopoverSurface is { } surface)
         {
             surface.DataContext = null;
@@ -2302,6 +2324,7 @@ public sealed partial class FileSurfaceContent
         _stackPopoverReorderIndicator = null;
         _stackPopoverSelectionOverlay = null;
         _stackPopoverSelectionRectangle = null;
+        ReleaseStackPopoverNameExpansionOverlay();
         _stackPopoverSelectionHost = null;
         _stackPopoverLayout = null;
         _stackPopoverReorderInsertionIndex = -1;
@@ -2384,6 +2407,39 @@ public sealed partial class FileSurfaceContent
         {
             HideStackPopoverForReuse();
         }
+
+        SchedulePopoverDismissIfDeactivated();
+    }
+
+    /// <summary>
+    /// The popover's light dismiss rides a fresh Activated→Deactivated
+    /// transition, and the menu-round flag deliberately blocks that
+    /// transition while a context menu is open. An outside click that
+    /// dismisses the menu fires Deactivated BEFORE the flyout's Closed
+    /// resets the flag, so the one transition the dismiss needed is
+    /// consumed and no new one follows — the popover is already
+    /// deactivated. Re-evaluate once activation settles after every menu
+    /// round: when the host no longer owns the foreground, run the same
+    /// dismiss path the missed transition would have.
+    /// </summary>
+    private void SchedulePopoverDismissIfDeactivated()
+    {
+        if (_stackPopoverHostWindow is not { } host)
+        {
+            return;
+        }
+
+        _ = DispatcherQueue.TryEnqueue(() =>
+        {
+            if (_stackPopoverPopupOpen &&
+                !_stackPopoverContextMenuOpen &&
+                !_stackPopoverSystemContextMenuOpen &&
+                !_stackPopoverDragActive &&
+                Win32Helper.GetForegroundWindow() != host.WindowHandle)
+            {
+                StackPopoverHost_DeactivatedByOutsideClick();
+            }
+        });
     }
 
     private void CompleteStackPopoverDrag()

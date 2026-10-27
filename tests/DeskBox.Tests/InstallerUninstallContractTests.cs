@@ -15,7 +15,8 @@ public sealed class InstallerUninstallContractTests
         "french",
         "arabic",
         "bengali",
-        "russian"
+        "russian",
+        "korean"
     ];
 
     private static readonly string[] AppDataChoiceMessages =
@@ -464,6 +465,7 @@ public sealed class InstallerUninstallContractTests
     [InlineData("arabic", "ar-SA")]
     [InlineData("bengali", "bn-BD")]
     [InlineData("russian", "ru-RU")]
+    [InlineData("korean", "ko-KR")]
     [InlineData("chinesetraditional", "zh-TW")]
     public void InstallerLanguage_IsPassedToFirstAppLaunch(
         string installerLanguage,

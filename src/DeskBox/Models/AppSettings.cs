@@ -148,6 +148,18 @@ public class AppSettings
     /// <inheritdoc cref="CoreSettingsSlice.LastUpdateCheckAt"/>
     public DateTimeOffset? LastUpdateCheckAt { get => Core.LastUpdateCheckAt; set => Core.LastUpdateCheckAt = value; }
 
+    /// <inheritdoc cref="CoreSettingsSlice.ShowReleaseNotesAfterUpdate"/>
+    public bool ShowReleaseNotesAfterUpdate { get => Core.ShowReleaseNotesAfterUpdate; set => Core.ShowReleaseNotesAfterUpdate = value; }
+
+    /// <inheritdoc cref="CoreSettingsSlice.LastRunVersion"/>
+    public string? LastRunVersion { get => Core.LastRunVersion; set => Core.LastRunVersion = value; }
+
+    /// <inheritdoc cref="CoreSettingsSlice.AutoDownloadUpdates"/>
+    public bool AutoDownloadUpdates { get => Core.AutoDownloadUpdates; set => Core.AutoDownloadUpdates = value; }
+
+    /// <inheritdoc cref="CoreSettingsSlice.ShowUpdateToastNotification"/>
+    public bool ShowUpdateToastNotification { get => Core.ShowUpdateToastNotification; set => Core.ShowUpdateToastNotification = value; }
+
     /// <inheritdoc cref="QuickCaptureSettingsSlice.QuickCaptureEnabled"/>
     public bool QuickCaptureEnabled { get => QuickCapture.QuickCaptureEnabled; set => QuickCapture.QuickCaptureEnabled = value; }
 
@@ -324,6 +336,9 @@ public class AppSettings
 
     /// <inheritdoc cref="CoreSettingsSlice.HasResolvedInitialFileWidgetSetup"/>
     public bool HasResolvedInitialFileWidgetSetup { get => Core.HasResolvedInitialFileWidgetSetup; set => Core.HasResolvedInitialFileWidgetSetup = value; }
+
+    /// <inheritdoc cref="CoreSettingsSlice.FullyElevatedNoticeAcknowledgedUtcTicks"/>
+    public long? FullyElevatedNoticeAcknowledgedUtcTicks { get => Core.FullyElevatedNoticeAcknowledgedUtcTicks; set => Core.FullyElevatedNoticeAcknowledgedUtcTicks = value; }
 
     /// <inheritdoc cref="WidgetShellSettingsSlice.DefaultWidgetWidth"/>
     public double DefaultWidgetWidth { get => WidgetShell.DefaultWidgetWidth; set => WidgetShell.DefaultWidgetWidth = value; }

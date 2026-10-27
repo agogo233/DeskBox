@@ -142,6 +142,20 @@ public sealed record DeskBoxCallbackRadarDiagnostic(
     IReadOnlyDictionary<string, long> WindowOperationCounts,
     long PostAfterCallbackDropped);
 
+/// <summary>
+/// Wipe-recovery offer state: whether a configuration wipe was detected with
+/// a surviving snapshot, which snapshot it pointed at, and what this session's
+/// offer concluded. The first place to look when a report says settings were
+/// lost after a restart (or that the offer never appeared).
+/// </summary>
+public sealed record DeskBoxRecoveryOfferDiagnostic(
+    bool MarkerPresent,
+    DateTimeOffset? DetectedAtUtc,
+    DateTimeOffset? SnapshotCreatedAtUtc,
+    string? SnapshotAppVersion,
+    int SnapshotWidgetCount,
+    string LastOutcome);
+
 public sealed record DeskBoxDiagnosticSnapshot(
     int SchemaVersion,
     DateTimeOffset GeneratedAtUtc,
@@ -153,6 +167,7 @@ public sealed record DeskBoxDiagnosticSnapshot(
     string UiCulture,
     DeskBoxHotkeyDiagnostic Hotkeys,
     DeskBoxSettingsDiagnostic Settings,
+    DeskBoxRecoveryOfferDiagnostic RecoveryOffer,
     DeskBoxShortcutNativeDiagnostic ShortcutNative,
     AppRuntimeHealthSnapshot? RuntimeHealth,
     DeskBoxWidgetManagerDiagnostic WidgetManager,

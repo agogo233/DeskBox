@@ -50,3 +50,8 @@ russian.ManagedStorageShortcutPrompt=Чтобы эти файлы было ле�
 russian.ManagedStorageShortcutCreateFailed=Не удалось создать ярлык на рабочем столе. Ваши файлы по-прежнему находятся в безопасности здесь:%n%1
 russian.StoreEditionDataPreserved=Версия DeskBox из Microsoft Store всё ещё установлена. Её данные хранятся в отдельном месте и эта деинсталляция их не затронет; для безопасности данные версии с прямой установкой также сохраняются.
 russian.StoreEditionStateUnknown=Не удалось проверить, установлена ли версия DeskBox из Microsoft Store. Из соображений безопасности данные приложения сохранены.%n%nСначала удалите версию из Store и повторите попытку либо продолжите, сохранив данные.
+
+korean.ManagedStorageShortcutPrompt=제거 후에 이 파일을 쉽게 찾을 수 있도록 바탕 화면에 "DeskBox Files" 바로 가기를 만드시겠습니까?%n%n바로 가기는 다음 위치를 엽니다:%n%1
+korean.ManagedStorageShortcutCreateFailed=바탕 화면 바로 가기를 만들지 못했습니다. 파일은 다음 위치에 그대로 안전하게 남아 있습니다:%n%1
+korean.StoreEditionDataPreserved=Microsoft Store 버전의 DeskBox가 아직 설치되어 있습니다. 해당 데이터는 별도 위치에 저장되어 있어 이번 제거 작업의 영향을 받지 않으며, 안전을 위해 데스크톱 버전의 데이터도 유지됩니다.
+korean.StoreEditionStateUnknown=Microsoft Store 버전의 DeskBox가 설치되어 있는지 확인하지 못했습니다. 안전을 위해 앱 데이터를 유지했습니다.%n%n먼저 Store 버전을 제거한 후 다시 시도하거나, 데이터 유지를 선택하세요.

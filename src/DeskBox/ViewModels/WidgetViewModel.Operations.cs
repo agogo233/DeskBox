@@ -946,6 +946,83 @@ public partial class WidgetViewModel
         return new FileDeleteBatchResult(deletedCount, failures);
     }
 
+    /// <summary>
+    /// Recycles dropped paths for the Recycle Bin namespace tile — the
+    /// bin-drop entry point, where the payload is a list of paths (external
+    /// desktop/Explorer files) rather than <see cref="WidgetItem"/>s. The
+    /// Shell delete carries its own confirmation per the user's Explorer
+    /// settings, exactly like the item delete pipeline. Model entries whose
+    /// paths were actually deleted are removed in the same pass.
+    /// </summary>
+    public async Task<FileDeleteBatchResult> DeleteDroppedPathsForBinAsync(
+        IReadOnlyList<string> paths,
+        IntPtr ownerHandle)
+    {
+        string[] targets = paths
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Select(path =>
+            {
+                try
+                {
+                    return Path.GetFullPath(path);
+                }
+                catch
+                {
+                    return string.Empty;
+                }
+            })
+            .Where(path => path.Length > 0 &&
+                (File.Exists(path) || Directory.Exists(path)))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        if (targets.Length == 0)
+        {
+            return new FileDeleteBatchResult(0, []);
+        }
+
+        int deletedCount = 0;
+        var failures = new List<FileDeleteFailure>();
+        if (ownerHandle == IntPtr.Zero)
+        {
+            return new FileDeleteBatchResult(0, failures);
+        }
+
+        try
+        {
+            IReadOnlySet<string> deletedPaths =
+                await _fileService.DeleteEntriesWithShellAsync(
+                    targets,
+                    recycle: true,
+                    ownerHandle);
+            deletedCount = deletedPaths.Count;
+
+            // Keep the model in sync: same-widget drops arrive as paths, and
+            // the watcher refresh alone would leave a stale tile visible
+            // until the next folder pass.
+            foreach (WidgetItem item in Items.ToList())
+            {
+                if (deletedPaths.Contains(Path.GetFullPath(item.Path)))
+                {
+                    Items.Remove(item);
+                    RemoveFileAddedAt(item.Path);
+                }
+            }
+
+            NormalizeSortOrder();
+            RemoveStackMemberOverridePaths(
+                targets.Where(deletedPaths.Contains));
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            failures.Add(new FileDeleteFailure(
+                targets[0],
+                Path.GetFileName(targets[0]),
+                ex.Message));
+        }
+
+        return new FileDeleteBatchResult(deletedCount, failures);
+    }
+
     public void UpdateBounds(double x, double y, double width, double height, bool persist)
     {
         Config.X = x;

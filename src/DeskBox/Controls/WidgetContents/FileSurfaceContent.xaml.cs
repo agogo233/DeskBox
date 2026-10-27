@@ -36,7 +36,7 @@ public sealed partial class FileSurfaceContent :
     private readonly FileService _fileService;
     private readonly SettingsService _settingsService;
     private readonly StackInputActivationArbiter _stackInputActivation = new();
-    private static readonly QuickLookPreviewService s_quickLookService =
+    private static readonly SpacePreviewBroker s_spacePreviewService =
         new();
     private string[] _cutClipboardPaths = [];
     private WidgetItem? _itemRenameTarget;
@@ -45,6 +45,14 @@ public sealed partial class FileSurfaceContent :
     private bool _isCommittingItemRename;
     private bool _isCancellingItemRename;
     private long _itemRenameOpenedAtTick;
+
+    // Slow-click rename: clicking the label of the already-sole-selected item
+    // arms a delayed rename; one system double-click window of grace lets a
+    // real double-click (open) disarm it via its DoubleTapped.
+    private DispatcherTimer? _slowClickRenameTimer;
+    private WidgetItem? _slowClickRenameItem;
+    private long _lastDoubleTapTick;
+    private const double SlowClickRenameGraceMs = 150;
     private bool _isSurfaceReorderDragActive;
     private string[] _surfaceReorderPaths = [];
     private string? _surfaceReorderStackKey;
@@ -806,7 +814,13 @@ public sealed partial class FileSurfaceContent :
             EmptyStateHelpButton,
             T("Widget.Empty.HelpTipTitle"));
 
-        if (!IsCurrentProcessElevatedCached())
+        // The elevated-mode hint is only true when DeskBox runs ABOVE the
+        // shell: drag-in from a normal Explorer is what UIPI blocks. On a
+        // same-level fully-elevated desktop drag-in works (only drag-out is
+        // limited — the informed-notice batch owns that story), so the bar
+        // must stay out of the way there.
+        if (!IsCurrentProcessElevatedCached() ||
+            App.Current.StartupElevation.Mismatch != ShellIntegrityMismatch.AppAboveShell)
         {
             return;
         }
@@ -894,6 +908,8 @@ public sealed partial class FileSurfaceContent :
         bool shiftPressed =
             Win32Helper.IsKeyPressed(VirtualKey.Shift);
 
+        TryStartSlowClickRename(sender, item, controlPressed || shiftPressed);
+
         if (!_settingsService.Settings.DoubleClickToOpen &&
             !controlPressed &&
             !shiftPressed)
@@ -909,6 +925,85 @@ public sealed partial class FileSurfaceContent :
                 CloseStackPopover(releaseImmediately: true);
             }
         }
+    }
+
+    private void TryStartSlowClickRename(
+        object sender,
+        WidgetItem item,
+        bool hasModifierKey)
+    {
+        CancelPendingSlowClickRename();
+
+        // Reading the selection here is the pre-click snapshot: the native
+        // selector commits this click's selection only after ItemClick (see
+        // ItemSurface_PointerPressed), so SelectedItems still reports what
+        // was selected before this click — exactly what the entry requires.
+        ListViewBase activeView = GetActiveItemsView();
+        bool wasSoleSelectedBeforeClick =
+            ReferenceEquals(sender, activeView) &&
+            activeView.SelectedItems.Count == 1 &&
+            ReferenceEquals(activeView.SelectedItems[0], item);
+        if (!SelectedNameExpansionPolicy.ShouldStartRenameFromItemClick(
+                _settingsService.Settings.FileWidget.DoubleClickToOpen,
+                hasModifierKey,
+                wasSoleSelectedBeforeClick,
+                _lastItemPressOnLabel))
+        {
+            return;
+        }
+
+        // Arm rather than start: this click may still be the second stroke
+        // of a double-click, which opens the item. One system double-click
+        // window plus grace; the DoubleTapped handler disarms within it.
+        _slowClickRenameItem = item;
+        _slowClickRenameTimer = new DispatcherTimer
+        {
+            Interval = TimeSpan.FromMilliseconds(
+                Win32Helper.GetDoubleClickTime() + SlowClickRenameGraceMs)
+        };
+        _slowClickRenameTimer.Tick += OnSlowClickRenameTimerTick;
+        _slowClickRenameTimer.Start();
+    }
+
+    private void CancelPendingSlowClickRename()
+    {
+        _slowClickRenameTimer?.Stop();
+        _slowClickRenameTimer = null;
+        _slowClickRenameItem = null;
+    }
+
+    private void OnSlowClickRenameTimerTick(object? sender, object e)
+    {
+        WidgetItem? armedItem = _slowClickRenameItem;
+        CancelPendingSlowClickRename();
+        if (armedItem is null ||
+            _isDisposed ||
+            _itemRenameTarget is not null ||
+            IsStackPopoverItemRenameEditing)
+        {
+            return;
+        }
+
+        // A double-click whose DoubleTapped fired before this second ItemClick
+        // disarmed nothing (the arm happened after it); the recorded tick
+        // keeps that ordering from renaming an item that just opened.
+        long sinceDoubleTap = Environment.TickCount64 - _lastDoubleTapTick;
+        if (sinceDoubleTap >= 0 &&
+            sinceDoubleTap < Win32Helper.GetDoubleClickTime() + SlowClickRenameGraceMs)
+        {
+            return;
+        }
+
+        // Esc or a click elsewhere may have cleared the selection during the
+        // grace window; only a still-selected item enters rename.
+        ListViewBase activeView = GetActiveItemsView();
+        if (activeView.SelectedItems.Count != 1 ||
+            !ReferenceEquals(activeView.SelectedItems[0], armedItem))
+        {
+            return;
+        }
+
+        _ = RenameItemAsync(armedItem);
     }
 
     internal void OnWindowRevealCompleted()
@@ -960,6 +1055,11 @@ public sealed partial class FileSurfaceContent :
         object sender,
         DoubleTappedRoutedEventArgs e)
     {
+        // Any double tap disarms a pending slow-click rename and marks the
+        // window so a Tick racing this handler cannot rename either.
+        _lastDoubleTapTick = Environment.TickCount64;
+        CancelPendingSlowClickRename();
+
         if (!_settingsService.Settings.DoubleClickToOpen ||
             FindItemFromSource(e.OriginalSource) is not { } item)
         {
@@ -990,20 +1090,59 @@ public sealed partial class FileSurfaceContent :
 
     private void Items_RightTapped(object sender, RightTappedRoutedEventArgs e)
     {
-        WidgetItem? item = FindItemFromSource(e.OriginalSource);
-        if (item is null)
+        // A right-button marquee shows its menu on pointer release; if the
+        // gesture still raises this event, swallow the duplicate.
+        if (_suppressNextRightTap)
         {
-            _lastItemContextScreenPoint = null;
-            ClearSelection();
-            FrameworkElement contentTarget =
-                sender as FrameworkElement ?? Root;
-            CreateContentAreaFlyout().ShowAt(
-                contentTarget,
-                e.GetPosition(contentTarget));
+            _suppressNextRightTap = false;
             e.Handled = true;
             return;
         }
 
+        FileItemSurface? hitSurface =
+            FindItemSurface(e.OriginalSource);
+
+        // Explorer list semantics: only the icon+label block of a list row
+        // is the item's right-click zone; the stretched remainder of the
+        // row is blank surface, opening the content-area menu and clearing
+        // the selection exactly like a right-click on true blank space.
+        // Icon-mode tiles are primary zone throughout.
+        if (hitSurface is { IsListMode: true } listSurface &&
+            !listSurface.IsPointWithinListPrimaryContent(
+                e.GetPosition(listSurface)))
+        {
+            ShowContentAreaFlyoutForBlankTap(sender, e);
+            return;
+        }
+
+        WidgetItem? item =
+            (hitSurface ?? FindItemElement(e.OriginalSource))
+                ?.DataContext as WidgetItem;
+        if (item is null)
+        {
+            ShowContentAreaFlyoutForBlankTap(sender, e);
+            return;
+        }
+
+        ShowItemContextMenuForSelection(
+            sender,
+            item,
+            target => e.GetPosition(target));
+        e.Handled = true;
+    }
+
+    /// <summary>
+    /// The item-menu path shared by the right-tap and the right-button
+    /// marquee release: anchors the native-menu screen point, keeps the
+    /// existing selection when the item is already part of it (the marquee
+    /// case), and places the flyout inside the tree of whichever view
+    /// raised the gesture.
+    /// </summary>
+    private void ShowItemContextMenuForSelection(
+        object sender,
+        WidgetItem item,
+        Func<FrameworkElement, Windows.Foundation.Point> getPosition)
+    {
         if (Win32Helper.GetCursorPos(out Win32Helper.POINT contextPoint))
         {
             _lastItemContextScreenPoint = (contextPoint.X, contextPoint.Y);
@@ -1031,11 +1170,10 @@ public sealed partial class FileSurfaceContent :
             // The native Shell menu only supports a single item, and stack
             // tiles have no file-system path; both keep the built-in flyout.
             _ = ShowSystemContextMenuAsync(item);
-            e.Handled = true;
             return;
         }
 
-        FlyoutBase flyout = item is WidgetStackItem stack
+        MenuFlyout flyout = item is WidgetStackItem stack
             ? CreateStackFlyout(stack)
             : GetSelectedItems().Count > 1
                 ? CreateMultiSelectionFlyout()
@@ -1046,6 +1184,11 @@ public sealed partial class FileSurfaceContent :
         if (fromStackPopover)
         {
             _stackPopoverContextMenuOpen = true;
+            // The popover is TOPMOST; the flyout's bridge windows are not.
+            // Promote them for the menu's lifetime or it renders beneath
+            // the popover and cannot be clicked (2026-10-21).
+            flyout.Opened += (_, _) => BeginPopoverFlyoutBandPromotion();
+            flyout.Closed += (_, _) => EndPopoverFlyoutBandPromotion();
             flyout.Closed += (_, _) =>
             {
                 if (!_stackPopoverSystemContextMenuOpen)
@@ -1054,54 +1197,26 @@ public sealed partial class FileSurfaceContent :
                 }
             };
         }
-        if (item is WidgetStackItem)
+        if (item is WidgetStackItem removedStack)
         {
             flyout.Closed += (_, _) =>
             {
-                ItemsGrid.SelectedItems.Remove(item);
-                ItemsList.SelectedItems.Remove(item);
+                ItemsGrid.SelectedItems.Remove(removedStack);
+                ItemsList.SelectedItems.Remove(removedStack);
             };
         }
         try
         {
-            // Engine-owned placement at the invocation point. The target
-            // is a zero-size proxy at the cursor point, not the icon
-            // container: when this flyout flips upward (lower half of the
-            // screen) the engine re-anchors the menu horizontally to the
-            // target RECT's left edge, parking the whole menu left of the
-            // icon; a degenerate 0x0 rect leaves the engine only the
-            // point, so its flip/slide/work-area logic stays and the
-            // rect-anchoring drift goes. Root padding is compensated:
-            // child margins lay out in the padded content box.
-            Windows.Foundation.Point point = e.GetPosition(Root);
-            if (PredictsUpwardFlip(flyout))
-            {
-                // Up-flip drops the primary strip window with its TOP at
-                // the point, hanging the ~80px strip below the cursor and
-                // over the clicked icon; the native Shell menu bottoms
-                // out AT the pointer. Pre-lifting the anchor by the strip
-                // height makes the flipped menu end at the cursor.
-                point.Y -= UpFlipStripLiftDip;
-            }
-
-            var anchor = new Border
-            {
-                Width = 0,
-                Height = 0,
-                HorizontalAlignment = HorizontalAlignment.Left,
-                VerticalAlignment = VerticalAlignment.Top,
-                Margin = new Thickness(
-                    point.X - Root.Padding.Left,
-                    point.Y - Root.Padding.Top,
-                    0,
-                    0),
-                IsHitTestVisible = false
-            };
-            Root.Children.Add(anchor);
-            flyout.Closed += (_, _) => Root.Children.Remove(anchor);
-            flyout.ShowAt(
-                anchor,
-                new FlyoutShowOptions { Placement = FlyoutPlacementMode.Bottom });
+            // MenuFlyout's ShowAt(target, point) places the menu at the point
+            // with the engine's flip/slide/work-area logic intact. The target
+            // is the view that raised the event: from the stack popover the
+            // items live in the popover's own visual tree, and positioning
+            // against this surface's Root (in the widget window's tree)
+            // produces a cross-tree point that lands the menu far from the
+            // clicked icon.
+            FrameworkElement placementTarget =
+                sender as FrameworkElement ?? Root;
+            flyout.ShowAt(placementTarget, getPosition(placementTarget));
         }
         catch
         {
@@ -1111,49 +1226,58 @@ public sealed partial class FileSurfaceContent :
             }
             throw;
         }
+    }
+
+    /// <summary>
+    /// The blank-surface right-click path shared by true blank space and the
+    /// non-primary remainder of a list row: drop any item-menu anchor,
+    /// clear the selection (Explorer clears on background right-click), and
+    /// show the content-area menu at the tap point.
+    /// </summary>
+    private void ShowContentAreaFlyoutForBlankTap(
+        object sender,
+        RightTappedRoutedEventArgs e)
+    {
+        ShowContentAreaFlyoutAt(
+            sender,
+            target => e.GetPosition(target));
         e.Handled = true;
     }
 
-    /// <summary>Strip window height measured on the up-flipped flyout
-    /// (physical px at scale 1; the anchor shift works in DIP).</summary>
-    private const double UpFlipStripLiftDip = 80;
-
     /// <summary>
-    /// Whether the engine will have to open the menu upward: no room for
-    /// the estimated full menu (rows + strip) below the cursor inside the
-    /// containing monitor's work area. Matching the engine's flip decision
-    /// matters only near the boundary, where either direction fits
-    /// visually; a rough row-count estimate is therefore enough.
+    /// Core blank-surface menu show, position-provider style so the
+    /// right-button marquee (a pointer event) shares the exact path.
     /// </summary>
-    private bool PredictsUpwardFlip(FlyoutBase flyout)
+    private void ShowContentAreaFlyoutAt(
+        object sender,
+        Func<FrameworkElement, Windows.Foundation.Point> getPosition)
     {
-        if (flyout is not CommandBarFlyout commandBar ||
-            !Win32Helper.GetCursorPos(out Win32Helper.POINT cursor))
+        _lastItemContextScreenPoint = null;
+        ClearSelection();
+        FrameworkElement contentTarget =
+            sender as FrameworkElement ?? Root;
+        MenuFlyout contentAreaFlyout = CreateContentAreaFlyout();
+        if (ReferenceEquals(sender, _stackPopoverItemsView))
         {
-            return false;
+            contentAreaFlyout.Opened += (_, _) => BeginPopoverFlyoutBandPromotion();
+            contentAreaFlyout.Closed += (_, _) => EndPopoverFlyoutBandPromotion();
         }
 
-        double scale = Root.XamlRoot?.RasterizationScale ?? 1;
-        if (scale <= 0)
-        {
-            scale = 1;
-        }
+        contentAreaFlyout.ShowAt(
+            contentTarget,
+            getPosition(contentTarget));
+    }
 
-        int separators = commandBar.SecondaryCommands
-            .OfType<AppBarSeparator>()
-            .Count();
-        int rows = commandBar.SecondaryCommands.Count - separators;
-        double estimatedMenuHeight =
-            52 + rows * 38 + separators * 9 + UpFlipStripLiftDip;
+    private void BeginPopoverFlyoutBandPromotion()
+    {
+        EndPopoverFlyoutBandPromotion();
+        _popoverFlyoutBandPromoter = Services.FlyoutBridgeBandPromoter.TryBegin();
+    }
 
-        return Win32Helper.GetMonitorWorkAreaInfos()
-            .FirstOrDefault(area =>
-                cursor.X >= area.Monitor.Left &&
-                cursor.X < area.Monitor.Right &&
-                cursor.Y >= area.Monitor.Top &&
-                cursor.Y < area.Monitor.Bottom)
-            is { WorkArea: { } work } &&
-            cursor.Y + estimatedMenuHeight * scale > work.Bottom;
+    private void EndPopoverFlyoutBandPromotion()
+    {
+        _popoverFlyoutBandPromoter?.Dispose();
+        _popoverFlyoutBandPromoter = null;
     }
 
     private void Items_DragStarting(
@@ -1165,6 +1289,23 @@ public sealed partial class FileSurfaceContent :
             $"sender={sender?.GetType().Name} " +
             $"original={e.OriginalSource?.GetType().Name} " +
             $"allowed={e.AllowedOperations}");
+
+        // A press on a list row's blank remainder is pending as a marquee
+        // (Explorer semantics, both buttons). The press sits on the item
+        // container, so its drag machinery wants the same gesture — cancel
+        // it while the marquee has not crossed the threshold yet; once it
+        // has, the marquee's pointer capture keeps drag away on its own.
+        // A plain click never reaches this pending state's drag window,
+        // and drags from the icon+label block never enter the marquee
+        // pipeline at all.
+        if (_selectionPointerPressed &&
+            !_isBoxSelecting &&
+            _selectionPressOnRowBlank)
+        {
+            e.Cancel = true;
+            return;
+        }
+
         _sourceDragSession.Complete(_activeDragSessionId);
         _activeDragSessionId = null;
         bool fromStackPopover = IsFromStackPopover(sender);
@@ -1172,6 +1313,7 @@ public sealed partial class FileSurfaceContent :
         {
             _stackPopoverDragActive = true;
         }
+        HideAllNameExpansions();
         _activeDragHandledAsStackMembership = false;
 
         // The container that owns the gesture started this drag through
@@ -1884,6 +2026,13 @@ public sealed partial class FileSurfaceContent :
                     _ => HorizontalAlignment.Left
                 };
             ItemRenameTextBox.TextWrapping = nameText.TextWrapping;
+            if (!ViewModel.IsListMode)
+            {
+                // The icon-mode editor grows downward; keep the text anchored
+                // to the label position instead of centering in the taller box.
+                ItemRenameTextBox.VerticalContentAlignment =
+                    VerticalAlignment.Top;
+            }
         }
         else
         {
@@ -1900,6 +2049,7 @@ public sealed partial class FileSurfaceContent :
         ItemRenameTextBox.Visibility = Visibility.Visible;
         ItemRenameTextBox.IsHitTestVisible = true;
         _itemRenameOpenedAtTick = Environment.TickCount64;
+        SetItemsViewScrollingSuspended(true);
         App.Current?.WidgetManager?.BeginWidgetInteraction(
             "surface-file-item-rename-opened");
 
@@ -2017,6 +2167,7 @@ public sealed partial class FileSurfaceContent :
         ItemRenameTextBox.Visibility = Visibility.Collapsed;
         ItemRenameTextBox.IsHitTestVisible = false;
         ItemRenameTextBox.Text = string.Empty;
+        SetItemsViewScrollingSuspended(false);
         if (_itemRenameNameText is not null)
         {
             _itemRenameNameText.Visibility = Visibility.Visible;
@@ -2072,9 +2223,28 @@ public sealed partial class FileSurfaceContent :
             height = Math.Min(
                 height,
                 Math.Max(20, contentHeight - offsetY - 4));
-
             if (!ViewModel.IsListMode)
             {
+                // Desktop-style rename: the editor keeps the label's width
+                // and grows downward instead, wrapping the full name until
+                // the surface bottom.
+                double labelMaxWidth =
+                    target is TextBlock nameTarget &&
+                    double.IsFinite(nameTarget.MaxWidth)
+                        ? nameTarget.MaxWidth
+                        : target.ActualWidth;
+                double fullTextHeight = MeasureRenameTextHeight(
+                    ItemRenameTextBox.Text,
+                    ItemRenameTextBox.FontSize,
+                    labelMaxWidth);
+                height = Math.Max(
+                    height,
+                    SelectedNameExpansionPolicy.ClampRenameEditorHeight(
+                        fullTextHeight + 6,
+                        target.ActualHeight + (2 * border),
+                        contentHeight - offsetY - 4,
+                        20));
+
                 // Icon labels are often narrower than the editor's minimum
                 // width. Growing only toward the right visibly detaches the
                 // editor from the icon, so keep both centers aligned and only
@@ -2098,6 +2268,61 @@ public sealed partial class FileSurfaceContent :
         ItemRenameTextBox.Height = height;
         ItemRenameTextBox.Margin =
             new Thickness(offsetX, offsetY, 0, 0);
+    }
+
+    /// <summary>
+    /// Measures how tall the full rename text wraps at the label's width.
+    /// The probe reuses the label's font size; a few pixels of editor chrome
+    /// are added by the callers.
+    /// </summary>
+    private static double MeasureRenameTextHeight(
+        string text,
+        double fontSize,
+        double maxWidth)
+    {
+        if (string.IsNullOrEmpty(text) || fontSize <= 0 || maxWidth <= 0)
+        {
+            return 0;
+        }
+
+        var probe = new TextBlock
+        {
+            FontSize = fontSize,
+            MaxWidth = maxWidth,
+            Text = text,
+            TextWrapping = TextWrapping.Wrap
+        };
+        probe.Measure(new Windows.Foundation.Size(
+            maxWidth,
+            double.PositiveInfinity));
+        return probe.DesiredSize.Height;
+    }
+
+    private void SetItemsViewScrollingSuspended(bool suspended)
+    {
+        SetItemsViewScrollSuspended(ItemsGrid, suspended);
+        SetItemsViewScrollSuspended(ItemsList, suspended);
+        if (_stackPopoverItemsView is { } popoverView)
+        {
+            SetItemsViewScrollSuspended(popoverView, suspended);
+        }
+    }
+
+    private static void SetItemsViewScrollSuspended(
+        ListViewBase itemsView,
+        bool suspended)
+    {
+        // The inline editor is positioned once when it opens. Wheel and
+        // Ctrl+wheel scrolling happen inside the template ScrollViewer before
+        // any bubbling handler could veto them, so the edit session disables
+        // the scroll modes instead. ListViewBase forwards these attached
+        // properties to its template ScrollViewer.
+        itemsView.SetValue(
+            ScrollViewer.VerticalScrollModeProperty,
+            suspended ? ScrollMode.Disabled : ScrollMode.Enabled);
+        itemsView.SetValue(
+            ScrollViewer.HorizontalScrollModeProperty,
+            suspended ? ScrollMode.Disabled : ScrollMode.Enabled);
     }
 
     private FrameworkElement? FindItemNameElement(WidgetItem item)
@@ -3423,6 +3648,87 @@ public sealed partial class FileSurfaceContent :
         _dragPayloadSnapshot?.IsDeskBoxFileDrag == true;
 
     /// <summary>
+    /// Recycles dropped files for the Recycle Bin namespace tile — the tile's
+    /// native desktop verb inside the grid. The Shell delete asks its own
+    /// "move to the recycle bin?" confirmation per the user's Explorer
+    /// settings; declining leaves every file untouched.
+    /// </summary>
+    private async Task DeleteDroppedFilesForBinAsync(
+        IReadOnlyList<string> paths,
+        string binShortcutPath)
+    {
+        try
+        {
+            FileDeleteBatchResult result =
+                await ViewModel.DeleteDroppedPathsForBinAsync(
+                    paths
+                        .Where(path => !string.Equals(
+                            path,
+                            binShortcutPath,
+                            StringComparison.OrdinalIgnoreCase))
+                        .ToArray(),
+                    _hostWindowHandle);
+            UpdateEmptyState();
+            if (result.DeletedCount > 0)
+            {
+                // The bin gained contents: its state-aware icon must
+                // re-render even though the shortcut file never changed.
+                await RefreshRecycleBinItemIconsAsync();
+                ShowFeedback(new WidgetFeedbackRequest(
+                    _localizationService.Format(
+                        "Widget.MovedToRecycleBin",
+                        result.DeletedCount),
+                    WidgetFeedbackSeverity.Success,
+                    "recycle-bin-drop"));
+            }
+            else if (result.Failures.Count > 0)
+            {
+                ShowFeedback(new WidgetFeedbackRequest(
+                    _localizationService.Format(
+                        "Widget.DeletePartialResult",
+                        result.DeletedCount,
+                        result.Failures.Count,
+                        result.Failures[0].Name),
+                    WidgetFeedbackSeverity.Error,
+                    "recycle-bin-drop-partial"));
+            }
+        }
+        catch (Exception ex)
+        {
+            App.Log(
+                $"[RecycleBinDrop] delete failed widget={WidgetId}: {ex.Message}");
+            ShowFeedback(new WidgetFeedbackRequest(
+                T("Widget.Error.OperationIncomplete"),
+                WidgetFeedbackSeverity.Warning,
+                "recycle-bin-drop"));
+        }
+    }
+
+    /// <summary>
+    /// Re-extracts the icons of every Recycle Bin namespace tile in this
+    /// surface — the bin renders its empty or full graphic for the same
+    /// PIDL, and the .lnk file never changes on state transitions, so the
+    /// caches (and the freshness ledger) never invalidate on their own.
+    /// </summary>
+    private async Task RefreshRecycleBinItemIconsAsync()
+    {
+        try
+        {
+            List<WidgetItem> binItems = ViewModel.Items
+                .Where(item => NamespaceShortcutHelper.ResolveKind(item) ==
+                    NamespaceShortcutKind.RecycleBin)
+                .ToList();
+            await ViewModel.RefreshItemIconsAsync(binItems);
+        }
+        catch (Exception ex)
+        {
+            App.LogVerbose(
+                $"[RecycleBinDrop] icon refresh failed widget={WidgetId}: " +
+                ex.Message);
+        }
+    }
+
+    /// <summary>
     /// Uses the OLE IDropTarget screen coordinate as a fallback for routed
     /// DragLeave and external insertion preview. WinUI can omit or delay a
     /// child leave while the pointer moves quickly or the host is resizing;
@@ -3468,6 +3774,17 @@ public sealed partial class FileSurfaceContent :
         {
             ClearExternalDropPreviewPlacement();
             ApplyNativeStackDropTarget(nativeStack);
+            return;
+        }
+
+        // The Recycle Bin namespace tile is a delete drop target; it rides
+        // the same child-target visual the launch tiles use.
+        if (nativeTarget is { } nativeBin &&
+            NamespaceShortcutHelper.ResolveKind(nativeBin) ==
+                NamespaceShortcutKind.RecycleBin)
+        {
+            ClearExternalDropPreviewPlacement();
+            ApplyNativeFolderDropTarget(nativeBin);
             return;
         }
 
@@ -4253,6 +4570,20 @@ public sealed partial class FileSurfaceContent :
             return false;
         }
 
+        // The Recycle Bin namespace tile owns its drop: recycle the files
+        // instead of importing them. Drag-session visuals clear before the
+        // Shell confirmation can go modal — the OLE Drop never sends a
+        // DragLeave after the fact, so a hover state left here would strand
+        // until the next pointer pass (the 1.5.9 popover red-tint lesson).
+        if (targetItem is { } binTile &&
+            NamespaceShortcutHelper.ResolveKind(binTile) ==
+                NamespaceShortcutKind.RecycleBin)
+        {
+            ClearDragSessionVisualState();
+            await DeleteDroppedFilesForBinAsync(paths, binTile.Path);
+            return true;
+        }
+
         NoteImportStartedForProtocol("native");
         int? preferredManualIndex = _pendingNativeDropInsertionIndex ??
             (screenX.HasValue &&
@@ -4551,6 +4882,7 @@ public sealed partial class FileSurfaceContent :
             }
 
             _isSurfaceReorderDragActive = true;
+            HideAllNameExpansions();
             _surfaceReorderStackKey = stackKey;
             _surfaceReorderPaths = [];
             UpdateSurfaceReorderPreview(position);
@@ -4589,6 +4921,7 @@ public sealed partial class FileSurfaceContent :
             }
 
             _isSurfaceReorderDragActive = true;
+            HideAllNameExpansions();
             _surfaceReorderPaths = paths;
             _surfaceReorderDraggedItem = draggedItems[0];
             _surfaceReorderDraggedItems = draggedItems;
@@ -5268,9 +5601,9 @@ public sealed partial class FileSurfaceContent :
                 this,
                 previewTarget.Path);
         }
-        else if (s_quickLookService.CanPreview(previewTarget.Path))
+        else if (s_spacePreviewService.CanPreview(previewTarget.Path))
         {
-            await s_quickLookService.TryToggleAsync(previewTarget.Path);
+            await s_spacePreviewService.TryToggleAsync(previewTarget.Path);
         }
 
         return true;
@@ -6002,6 +6335,32 @@ public sealed partial class FileSurfaceContent :
                 "file-import-blocked-undisplayable"));
     }
 
+    /// <summary>
+    /// Reports a drop the native OLE layer accepted but whose deferred
+    /// extraction produced zero importable items (contract ⑫): the hover
+    /// promised a link the extraction could not honor, so the silence gets
+    /// an explanation instead of nothing. The source kept everything.
+    /// </summary>
+    internal void NotifyNativeDropZeroResult()
+    {
+        ShowFeedback(new(
+            _localizationService.Format("Widget.ImportZeroResult"),
+            WidgetFeedbackSeverity.Warning,
+            "file-import-zero-result"));
+    }
+
+    /// <summary>
+    /// Reports a drop refused because the import pipeline was still busy;
+    /// the source kept everything (contract ⑫).
+    /// </summary>
+    internal void NotifyNativeDropImportBusy()
+    {
+        ShowFeedback(new(
+            _localizationService.Format("Widget.ImportBlockedBusy"),
+            WidgetFeedbackSeverity.Warning,
+            "file-import-blocked-busy"));
+    }
+
     public void Dispose()
     {
         if (_isDisposed)
@@ -6034,6 +6393,8 @@ public sealed partial class FileSurfaceContent :
         {
             CancelItemRename();
         }
+        SetItemsViewScrollingSuspended(false);
+        CancelPendingSlowClickRename();
         Loaded -= OnLoaded;
         Unloaded -= OnUnloaded;
         UnregisterRenderWindowTracking();

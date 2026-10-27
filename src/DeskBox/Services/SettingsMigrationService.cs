@@ -21,7 +21,7 @@ public interface ISettingsMigration
 public sealed class SettingsMigrationPipeline
 {
     /// <summary>The current schema version that the application expects.</summary>
-    public const int CurrentSchemaVersion = 14;
+    public const int CurrentSchemaVersion = 15;
 
     private readonly List<ISettingsMigration> _migrations = [];
 
@@ -42,6 +42,7 @@ public sealed class SettingsMigrationPipeline
         _migrations.Add(new Migration_11_To_12());
         _migrations.Add(new Migration_12_To_13());
         _migrations.Add(new Migration_13_To_14());
+        _migrations.Add(new Migration_14_To_15());
     }
 
     /// <summary>
@@ -738,6 +739,21 @@ internal sealed class Migration_13_To_14 : ISettingsMigration
         }
 
         fileWidget.FileStacksEnabled = true;
+    }
+}
+
+/// <summary>
+/// v15 adds the one-time fully-elevated-desktop informed-notice ack
+/// (CoreSettingsSlice.FullyElevatedNoticeAcknowledgedUtcTicks). Purely
+/// additive: settings written before v15 simply leave the notice
+/// unacknowledged, which is the correct first-run state.
+/// </summary>
+internal sealed class Migration_14_To_15 : ISettingsMigration
+{
+    public int FromVersion => 14;
+
+    public void Migrate(AppSettings settings)
+    {
     }
 }
 

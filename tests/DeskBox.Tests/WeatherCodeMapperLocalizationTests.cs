@@ -19,7 +19,8 @@ public sealed class WeatherCodeMapperLocalizationTests
         "fr-FR",
         "ar-SA",
         "bn-BD",
-        "ru-RU"
+        "ru-RU",
+        "ko-KR"
     ];
 
     private static readonly int[] MappedCodes =
@@ -109,7 +110,7 @@ public sealed class WeatherCodeMapperLocalizationTests
     [InlineData("ja-JP", 80, "にわか雨")]
     [InlineData("de-DE", 65, "Starker Regen")]
     [InlineData("pt-BR", 95, "Trovoada")]
-    [InlineData("hi-IN", 0, "साफ आसमान")]
+    [InlineData("hi-IN", 0, "साफ़ आसमान")]
     [InlineData("es-ES", 0, "Cielo despejado")]
     [InlineData("fr-FR", 0, "Ciel dégagé")]
     [InlineData("ar-SA", 0, "سماء صافية")]

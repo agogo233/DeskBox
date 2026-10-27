@@ -556,10 +556,18 @@ public partial class App
                     AotLocalFileSurfaceFixture.IsPathEqualOrInside(
                         paths.WidgetRoot,
                         path)) &&
-                history.DestinationPaths.All(path =>
-                    AotLocalFileSurfaceFixture.IsPathEqualOrInside(
-                        paths.DesktopRoot,
-                        path)));
+                // A failed entry carries no CONFIRMED destination — the
+                // failure writer has no destination to report (a physically
+                // completed item rides the exception into the undoable
+                // success entry instead, and the disk-level assertions pin
+                // that landing separately); a successful entry's
+                // destinations must sit inside the owned desktop root.
+                (history.IsFailed
+                    ? history.DestinationPaths.All(string.IsNullOrEmpty)
+                    : history.DestinationPaths.All(path =>
+                        AotLocalFileSurfaceFixture.IsPathEqualOrInside(
+                            paths.DesktopRoot,
+                            path))));
 
         RequireAotManagedUi(
             result,

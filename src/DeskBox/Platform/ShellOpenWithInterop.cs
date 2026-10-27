@@ -9,6 +9,12 @@ namespace DeskBox.Platform;
 /// loaded through this path, so the shell-extension process isolation
 /// contract is preserved. Vtable order and IIDs are verified against the
 /// Windows SDK 10.0.26100 shobjidl_core.h header.
+///
+/// Every COM call is a raw vtable slot invocation (see <see cref="ComVtable"/>,
+/// 2026-10-20): classic ComImport RCW marshaling does not exist on NativeAOT,
+/// and the 1.5.9 retail installer shipped an empty Open With submenu because
+/// of it — the IL2050 suppression silenced the analyzer, the runtime still
+/// refused the marshaling.
 /// </summary>
 internal static class ShellOpenWithInterop
 {
@@ -28,17 +34,104 @@ internal static class ShellOpenWithInterop
     private static readonly Guid BHID_DataObject =
         new("b8c0bd9f-ed24-455c-83e6-d5390c4fe8c4");
 
-    // The enumerator is returned as a raw COM pointer instead of a
-    // marshal-as-interface out parameter: interface marshaling in a P/Invoke
-    // signature cannot be guaranteed correct after trimming (IL2050), and the
-    // local AOT audit contract requires every IL2050 to be eliminated. The
-    // caller wraps the pointer with Marshal.GetObjectForIUnknown, which is
-    // AOT-safe for ComImport interfaces.
-    [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = false)]
-    internal static extern void SHAssocEnumHandlers(
+    // ---- vtable delegates (COM stdcall; the interface pointer itself is
+    // the first parameter; slot counts start after IUnknown) ----
+
+    // IEnumAssocHandlers::Next — slot 3, the interface's only method. The
+    // element array stays a plain IntPtr[] in a delegate signature: the old
+    // ComImport form needed an explicit LPArray marshal attribute because
+    // interface-method arrays default to SAFEARRAY, and the SafeArray
+    // marshaler hard-crashed the CLR on IntPtr[] (2026-10-16); delegates
+    // never engage that marshaler at all.
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    private delegate int EnumHandlersNext(
+        IntPtr self, uint celt, IntPtr[] rgelt, out uint pceltFetched);
+
+    // IShellItemArray::BindToHandler — slot 3, first after IUnknown.
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    private delegate int ShellItemArrayBindToHandler(
+        IntPtr self,
+        IntPtr bindContext,
+        ref Guid handlerId,
+        ref Guid iid,
+        out IntPtr bound);
+
+    // IAssocHandler — GetName(3), GetUIName(4), GetIconLocation(5),
+    // IsRecommended(6), MakeDefault(7), Invoke(8), CreateInvoker(9).
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    private delegate int AssocHandlerGetUIName(
+        IntPtr self, out IntPtr uiDisplayName);
+
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    private delegate int AssocHandlerGetIconLocation(
+        IntPtr self, out IntPtr iconPath, out int iconIndex);
+
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    private delegate int AssocHandlerInvoke(IntPtr self, IntPtr dataObject);
+
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+    private static extern int SHAssocEnumHandlers(
         string extension,
         uint filter,
-        out IntPtr handlers);
+        out IntPtr enumHandlers);
+
+    /// <summary>
+    /// Creates the recommended-handler enumerator for one extension.
+    /// Release the returned pointer with <see cref="Marshal.Release"/>.
+    /// </summary>
+    internal static bool TryEnumHandlers(
+        string extension,
+        out IntPtr enumHandlers)
+    {
+        int hr = SHAssocEnumHandlers(
+            extension,
+            AssocFilterRecommended,
+            out enumHandlers);
+        return hr >= 0 && enumHandlers != IntPtr.Zero;
+    }
+
+    /// <summary>IEnumAssocHandlers::Next for a batch of handlers.</summary>
+    internal static int HandlersNext(
+        IntPtr enumHandlers,
+        IntPtr[] rgelt,
+        out uint pceltFetched)
+    {
+        return ComVtable.Slot<EnumHandlersNext>(enumHandlers, 3)(
+            enumHandlers,
+            (uint)rgelt.Length,
+            rgelt,
+            out pceltFetched);
+    }
+
+    /// <summary>IAssocHandler::GetUIName — slot 4.</summary>
+    internal static int HandlerGetUIName(
+        IntPtr handler,
+        out IntPtr uiDisplayName)
+    {
+        return ComVtable.Slot<AssocHandlerGetUIName>(handler, 4)(
+            handler,
+            out uiDisplayName);
+    }
+
+    /// <summary>IAssocHandler::GetIconLocation — slot 5.</summary>
+    internal static int HandlerGetIconLocation(
+        IntPtr handler,
+        out IntPtr iconPath,
+        out int iconIndex)
+    {
+        return ComVtable.Slot<AssocHandlerGetIconLocation>(handler, 5)(
+            handler,
+            out iconPath,
+            out iconIndex);
+    }
+
+    /// <summary>IAssocHandler::Invoke — slot 8.</summary>
+    internal static int HandlerInvoke(IntPtr handler, IntPtr dataObject)
+    {
+        return ComVtable.Slot<AssocHandlerInvoke>(handler, 8)(
+            handler,
+            dataObject);
+    }
 
     [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = false)]
     private static extern void SHCreateItemFromParsingName(
@@ -85,31 +178,19 @@ internal static class ShellOpenWithInterop
                 shellItem,
                 ref arrayId,
                 out arrayPointer);
-            if (Marshal.GetObjectForIUnknown(arrayPointer)
-                is not ShellItemArray array)
-            {
-                return false;
-            }
 
-            try
-            {
-                Guid handlerId = BHID_DataObject;
-                Guid dataObjectId = IID_IDataObject;
-                array.BindToHandler(
-                    IntPtr.Zero,
-                    ref handlerId,
-                    ref dataObjectId,
-                    out dataObject);
-                return dataObject != IntPtr.Zero;
-            }
-            finally
-            {
-                Marshal.ReleaseComObject(array);
-            }
+            Guid handlerId = BHID_DataObject;
+            Guid dataObjectId = IID_IDataObject;
+            int hr = ComVtable.Slot<ShellItemArrayBindToHandler>(arrayPointer, 3)(
+                arrayPointer,
+                IntPtr.Zero,
+                ref handlerId,
+                ref dataObjectId,
+                out dataObject);
+            return hr >= 0 && dataObject != IntPtr.Zero;
         }
         catch (Exception ex) when (
-            ex is COMException or InvalidCastException or
-            InvalidOperationException)
+            ex is COMException or InvalidOperationException)
         {
             ReleaseDataObject(ref dataObject);
             return false;
@@ -186,52 +267,5 @@ internal static class ShellOpenWithInterop
         public string? Class;
 
         public uint Flags;
-    }
-
-    [ComImport]
-    [Guid("973810ae-9599-4b88-9e4d-6ee98c9552da")]
-    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-    internal interface ShellOpenWithEnumHandlers
-    {
-        // IEnumAssocHandlers exposes only Next in the SDK header. The array
-        // parameter must opt into LPArray marshaling explicitly: interface
-        // method arrays default to SAFEARRAY, and the SafeArray marshaler
-        // dies with a CLR internal error on IntPtr[] (crash, not exception —
-        // proven 2026-10-16 by the open-with repro).
-        void Next(
-            uint celt,
-            [MarshalAs(UnmanagedType.LPArray), Out] IntPtr[] rgelt,
-            out uint pceltFetched);
-    }
-
-    [ComImport]
-    [Guid("b63ea76d-1f85-456f-a19c-48159efa858b")]
-    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-    internal interface ShellItemArray
-    {
-        // First method after IUnknown per shobjidl_core.h.
-        void BindToHandler(
-            IntPtr bindContext,
-            ref Guid handlerId,
-            ref Guid iid,
-            out IntPtr bound);
-    }
-
-    [ComImport]
-    [Guid("F04061AC-1659-4a3f-A954-775AA57FC083")]
-    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-    internal interface ShellOpenWithAssocHandler
-    {
-        // Order per shobjidl_core.h: GetName, GetUIName, GetIconLocation,
-        // IsRecommended, MakeDefault, Invoke(IDataObject), CreateInvoker.
-        void GetName(out IntPtr displayName);
-        void GetUIName(out IntPtr uiDisplayName);
-        void GetIconLocation(out IntPtr iconPath, out int iconIndex);
-        [PreserveSig] int IsRecommended();
-        void MakeDefault(string description);
-        void Invoke(IntPtr dataObject);
-        void CreateInvoker(
-            IntPtr dataObject,
-            out IntPtr invoker);
     }
 }

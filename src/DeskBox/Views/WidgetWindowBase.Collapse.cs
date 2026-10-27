@@ -57,6 +57,14 @@ public abstract partial class WidgetWindowBase
     private const int CompactExpansionWarmupSpacingMs = 24;
     private const int CompactExpansionPrimeNodeBudget = 48;
     private const double CompactExpansionPrimeTimeBudgetMs = 4;
+    // The urgent lane (pointer waiting on the capsule, or a hosted-content
+    // swap's imminent re-entry) primes with a whole frame budget instead of
+    // a quarter of one: a switched-in member's tree primes in one or two
+    // slices (~60-90 ms) instead of ~20 (~930 ms at 48 nodes/slice), so the
+    // re-entry expand does not sit in the readiness hold while the slice
+    // queue drains (2026-10-20 group tab-switch hover delay).
+    private const int CompactExpansionPrimeNodeBudgetUrgent = 192;
+    private const double CompactExpansionPrimeTimeBudgetUrgentMs = 16;
     private const int CompactHoverRecoveryProbeMs = 120;
     private const int CompactDragSessionRecoveryProbeMs = 120;
     private const int CompactLayerRestoreFallbackMs = 120;
@@ -108,12 +116,23 @@ public abstract partial class WidgetWindowBase
     /// Ends the expanded capsule lease without touching the layer. Manager
     /// teardown uses this: the whole group returns to its resting layer even
     /// while a capsule is expanded, so the lease must not outlive the session.
+    /// The stale generation is handed back so the manager releases its side of
+    /// the lease in the same step; otherwise the manager lease stays active
+    /// and keeps every restore funnel gated until this window vanishes.
     /// </summary>
     protected void EndExpandedWidgetLayerLease()
     {
+        long generation = _expandedWidgetLayerLeaseGeneration;
         _expandedWidgetLayerLeaseGeneration = 0;
         _isRaisedForExpandedState = false;
         _restoreDesktopLayerAfterExpandedState = false;
+        if (generation > 0)
+        {
+            App.Current.WidgetManager?.TearDownExpandedWidgetLayer(
+                HWnd,
+                generation,
+                "manager-teardown");
+        }
     }
     private long _compactExpansionRequestGeneration;
     private PendingCompactExpansion? _pendingCompactExpansion;
@@ -149,6 +168,7 @@ public abstract partial class WidgetWindowBase
     private bool _isCompactExpansionWarmed;
     private bool _isCompactExpansionVisualTreePrimed;
     private long _compactExpansionWarmupEpoch = -1;
+    private long _hostedContentSwapTimestamp;
     private Queue<DependencyObject>? _compactExpansionPrimeQueue;
     private bool _isCompactHoverRecoveryRegistered;
     private bool _compactInteractionReconcileQueued;
@@ -168,7 +188,8 @@ public abstract partial class WidgetWindowBase
         int? DurationMilliseconds,
         bool AllowDuringInteraction,
         bool RequireHoverEligibility,
-        bool AllowInteractionRegionDwell);
+        bool AllowInteractionRegionDwell,
+        long RequestedAtTimestamp);
 
     private bool IsCompactExpansionReady =>
         WidgetCompactWarmupPolicy.IsExpansionReady(
@@ -1012,7 +1033,7 @@ public abstract partial class WidgetWindowBase
                 try
                 {
                     completion.TrySetResult(
-                        TryRunCompactExpansionWarmupSlice(reason));
+                        TryRunCompactExpansionWarmupSlice(reason, urgent));
                 }
                 catch (Exception ex)
                 {
@@ -1027,7 +1048,8 @@ public abstract partial class WidgetWindowBase
     }
 
     private WidgetCompactWarmupSliceResult TryRunCompactExpansionWarmupSlice(
-        string reason)
+        string reason,
+        bool urgent)
     {
         if (IsCompactExpansionReady)
         {
@@ -1065,7 +1087,7 @@ public abstract partial class WidgetWindowBase
 
         if (!_isCompactExpansionVisualTreePrimed)
         {
-            PrimeCompactExpansionVisualTree(reason);
+            PrimeCompactExpansionVisualTree(reason, urgent);
             return WidgetCompactWarmupSliceResult.Progressed;
         }
 
@@ -1126,11 +1148,17 @@ public abstract partial class WidgetWindowBase
         }
     }
 
-    private void PrimeCompactExpansionVisualTree(string reason)
+    private void PrimeCompactExpansionVisualTree(string reason, bool urgent)
     {
         _compactExpansionPrimeQueue ??=
             new Queue<DependencyObject>([WidgetShellControl]);
         long started = Stopwatch.GetTimestamp();
+        int nodeBudget = urgent
+            ? CompactExpansionPrimeNodeBudgetUrgent
+            : CompactExpansionPrimeNodeBudget;
+        double timeBudgetMs = urgent
+            ? CompactExpansionPrimeTimeBudgetUrgentMs
+            : CompactExpansionPrimeTimeBudgetMs;
         int visited = 0;
         while (_compactExpansionPrimeQueue.Count > 0)
         {
@@ -1148,9 +1176,9 @@ public abstract partial class WidgetWindowBase
             }
 
             visited++;
-            if (visited >= CompactExpansionPrimeNodeBudget ||
+            if (visited >= nodeBudget ||
                 Stopwatch.GetElapsedTime(started).TotalMilliseconds >=
-                    CompactExpansionPrimeTimeBudgetMs)
+                    timeBudgetMs)
             {
                 PerformanceLogger.Mark(
                     "CompactExpansionPrimeSlice",
@@ -1278,13 +1306,18 @@ public abstract partial class WidgetWindowBase
         // persistent group HWND does not produce another routed PointerEntered,
         // so merely warming the new tree can leave Smart expansion permanently
         // unarmed until the user clicks.
+        _hostedContentSwapTimestamp = Stopwatch.GetTimestamp();
         CancelTimer(ref _collapseHoverTimer);
         CancelPendingCompactExpansion();
         InvalidateCompactExpansionReadiness();
         CancelCompactExpansionWarmup();
         if (_targetCollapsed && _compactExpansionWarmupCancellation is null)
         {
-            QueueCompactExpansionWarmup();
+            // Swapped while collapsed: the user is interacting with the new
+            // member right now and the next hover expand is imminent, so the
+            // re-warm takes the urgent lane (the pointer-over gate would
+            // otherwise pin it to background idle until the pointer leaves).
+            QueueCompactExpansionWarmup(urgent: true);
         }
 
         // Let SetContent finish attaching the incoming view before measuring
@@ -2043,7 +2076,18 @@ public abstract partial class WidgetWindowBase
         WidgetCompactInteractionSnapshot appliedSnapshot = CaptureCompactInteractionSnapshot();
         if (desiredCollapsed && _targetCollapsed)
         {
-            QueueCompactExpansionWarmup();
+            // A collapse right after a hosted-content swap (group tab
+            // switch) is a likely "switched, leaving, coming right back":
+            // warm the new member urgently so the re-entry hover expands at
+            // the dwell instead of racing switch-settle animations on the
+            // shared frame clock and falling to the live-layout fallback.
+            QueueCompactExpansionWarmup(
+                urgent: WidgetCompactWarmupSchedulePolicy
+                    .ShouldWarmUrgentlyAfterHostedContentSwap(
+                        _hostedContentSwapTimestamp == 0
+                            ? double.PositiveInfinity
+                            : Stopwatch.GetElapsedTime(_hostedContentSwapTimestamp)
+                                .TotalMilliseconds));
             StartCompactHoverRecoveryProbe();
             SynchronizeCompactHoverFromCurrentCursor();
         }
@@ -3258,6 +3302,15 @@ public abstract partial class WidgetWindowBase
         bool allowInteractionRegionDwell)
     {
         long generation = ++_compactExpansionRequestGeneration;
+        // A re-request while an identical deferral is already parked must
+        // inherit its hold clock: the dwelling pointer re-issues the expand
+        // request every dwell cycle, and a fresh clock per request would
+        // reset the 320 ms ceiling each time (2026-10-20 perf trail: eight
+        // deadline extensions for a single expand).
+        long requestedAt = _pendingCompactExpansion is { } parked &&
+            _compactState == WidgetCompactState.ExpandPending
+                ? parked.RequestedAtTimestamp
+                : Stopwatch.GetTimestamp();
         _pendingCompactExpansion = new PendingCompactExpansion(
             generation,
             persistManualState,
@@ -3265,7 +3318,8 @@ public abstract partial class WidgetWindowBase
             durationMs,
             allowDuringInteraction,
             requireHoverEligibility,
-            allowInteractionRegionDwell);
+            allowInteractionRegionDwell,
+            requestedAt);
         _compactState = WidgetCompactState.ExpandPending;
         UpdateCompactViewState();
 
@@ -3286,10 +3340,15 @@ public abstract partial class WidgetWindowBase
         // The capsule has not moved yet. A warm-up that is alive and allowed
         // to run is worth one bounded extra hold; a live-layout fallback runs
         // the first expanded layout inside the animation's opening frames.
+        // The cumulative hold keeps that "bounded" honest across repeat
+        // extensions and repeat requests.
+        double totalHeldMs = Stopwatch.GetElapsedTime(
+            _pendingCompactExpansion.RequestedAtTimestamp).TotalMilliseconds;
         int extensionMs = WidgetCompactExpansionReadinessPolicy
             .ResolveDeadlineExtensionMilliseconds(
                 warmupActive: _compactExpansionWarmupCancellation is not null,
-                warmupCanRunNow: CanRunCompactExpansionWarmup(urgent: true));
+                warmupCanRunNow: CanRunCompactExpansionWarmup(urgent: true),
+                totalHeldMilliseconds: totalHeldMs);
         if (extensionMs > 0)
         {
             PerformanceLogger.Mark(
@@ -4058,10 +4117,15 @@ public abstract partial class WidgetWindowBase
             height);
     }
 
-    protected RectInt32 ResolveWidgetBoundsForCurrentState()
+    protected RectInt32 ResolveWidgetBoundsForCurrentState() =>
+        ResolveWidgetBoundsForCurrentState(out _);
+
+    protected RectInt32 ResolveWidgetBoundsForCurrentState(out bool placementFellBack)
     {
         RectInt32 contentBounds =
-            WidgetPositioningService.ResolveBoundsForCurrentTopology(Config);
+            WidgetPositioningService.ResolveBoundsForCurrentTopology(
+                Config,
+                out placementFellBack);
         RectInt32 compact = GetCompactBounds(contentBounds);
         if (IsCompactBoundsStateActive)
         {
@@ -4418,6 +4482,30 @@ public abstract partial class WidgetWindowBase
                 reason) == true;
     }
 
+    /// <summary>
+    /// Clears an expanded-lease residue left by a hide that happened while
+    /// this capsule was expanded: the manager voids its slot once the owner
+    /// is invisible, but the window-local generation survives the hidden
+    /// period and would keep refusing to bed after the re-show. The residue
+    /// is kept only while the manager still attributes the lease here.
+    /// </summary>
+    protected void ReconcileStaleExpandedWidgetLayerLease()
+    {
+        long generation = _expandedWidgetLayerLeaseGeneration;
+        if (generation == 0 ||
+            App.Current.WidgetManager?.OwnsExpandedWidgetLayer(HWnd, generation) == true)
+        {
+            return;
+        }
+
+        _expandedWidgetLayerLeaseGeneration = 0;
+        _isRaisedForExpandedState = false;
+        _restoreDesktopLayerAfterExpandedState = false;
+        App.LogVerbose(
+            $"[ZOrder] Stale expanded lease residue cleared on show " +
+            $"generation={generation} hwnd=0x{HWnd.ToInt64():X}");
+    }
+
     private void HoldExpandedPeerLayerLease(bool restoreDesktopLayer)
     {
         _isRaisedForExpandedState = true;
@@ -4437,14 +4525,21 @@ public abstract partial class WidgetWindowBase
     /// rests at the desktop layer: the first visible non-DeskBox window below
     /// it must be a desktop shell window (Progman/WorkerW).  When the first
     /// foreign window below is a normal app window, this window is currently
-    /// floating above that app (e.g. after a released tray raise).
+    /// floating above that app (e.g. after a released tray raise).  Minimized
+    /// and cloaked windows are skipped like the shared bedding classifier:
+    /// iconic windows rest at the normal band's bottom by design, so one
+    /// hanging below this widget is not evidence of floating.
     /// </summary>
     private bool IsPhysicallyAtDesktopBottom()
     {
+        const long WS_MINIMIZE = 0x20000000;
         IntPtr current = Win32Helper.GetWindow(HWnd, Win32Helper.GW_HWNDNEXT);
         while (current != IntPtr.Zero)
         {
             if (Win32Helper.IsWindowVisible(current) &&
+                !Win32Helper.IsWindowCloaked(current) &&
+                (Win32Helper.GetWindowLongPtr(current, Win32Helper.GWL_STYLE).ToInt64() &
+                    WS_MINIMIZE) == 0 &&
                 !App.Current.IsDeskBoxWindow(current))
             {
                 return WindowHasShellClass(current, ["Progman", "WorkerW"]);

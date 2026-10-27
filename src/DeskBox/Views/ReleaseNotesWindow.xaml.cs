@@ -42,6 +42,8 @@ public sealed partial class ReleaseNotesWindow : Window
     private IntPtr _ownerHwnd;
     private bool _isSubclassInstalled;
     private bool _isClosed;
+    private bool _isRebuildingVersionList;
+    private string _selectedVersion = string.Empty;
 
     public ReleaseNotesWindow(
         AppUpdateManifest? manifest,
@@ -85,6 +87,7 @@ public sealed partial class ReleaseNotesWindow : Window
         ResizeAndCenter(windowId);
         ApplyTitleBarColors();
         ApplyStaticText();
+        RebuildVersionList();
         if (_manifest is not null)
         {
             _ = LoadReleaseNotesAsync();
@@ -105,7 +108,104 @@ public sealed partial class ReleaseNotesWindow : Window
         _manifest = manifest;
         _currentVersion = currentVersion;
         ApplyStaticText();
+        RebuildVersionList();
         _ = LoadReleaseNotesAsync();
+    }
+
+    /// <summary>
+    /// Rebuilds the version navigation rail: the version currently shown
+    /// first, then every published release, then any extra versions with an
+    /// on-disk notes cache, newest first — the published list keeps the rail
+    /// identical across machines, while the cache keeps viewed-but-unlisted
+    /// versions reachable. The rail stays collapsed while only one version
+    /// is reachable so the single-version experience is unchanged.
+    /// </summary>
+    private void RebuildVersionList()
+    {
+        _isRebuildingVersionList = true;
+        try
+        {
+            string target = _manifest is { } manifest && !string.IsNullOrWhiteSpace(manifest.Version)
+                ? manifest.Version
+                : _currentVersion;
+            _selectedVersion = target;
+
+            var versions = new List<string> { target };
+            foreach (string known in Services.ReleaseNotesService.KnownReleaseVersions)
+            {
+                if (!versions.Contains(known, StringComparer.OrdinalIgnoreCase))
+                {
+                    versions.Add(known);
+                }
+            }
+
+            foreach (string cached in _releaseNotesService.GetCachedVersions())
+            {
+                if (!versions.Contains(cached, StringComparer.OrdinalIgnoreCase))
+                {
+                    versions.Add(cached);
+                }
+            }
+
+            versions.Sort((x, y) =>
+            {
+                if (Version.TryParse(x, out Version? xVersion) &&
+                    Version.TryParse(y, out Version? yVersion))
+                {
+                    int result = xVersion.CompareTo(yVersion);
+                    if (result != 0)
+                    {
+                        return -result;
+                    }
+                }
+
+                return -string.CompareOrdinal(x, y);
+            });
+
+            VersionList.Items.Clear();
+            foreach (string version in versions)
+            {
+                VersionList.Items.Add(version);
+            }
+
+            VersionListHost.Visibility = versions.Count > 1 ? Visibility.Visible : Visibility.Collapsed;
+            VersionList.SelectedItem = target;
+        }
+        finally
+        {
+            _isRebuildingVersionList = false;
+        }
+    }
+
+    private void VersionList_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_isRebuildingVersionList || _isClosed)
+        {
+            return;
+        }
+
+        if (VersionList.SelectedItem is not string version ||
+            string.Equals(version, _selectedVersion, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        _selectedVersion = version;
+        if (_manifest is { } manifest &&
+            string.Equals(manifest.Version, version, StringComparison.OrdinalIgnoreCase))
+        {
+            // Back on the resolved manifest: it carries the locale-aware
+            // inline notes.
+            UpdateManifest(manifest, _currentVersion);
+            return;
+        }
+
+        // Any other version resolves through its GitHub release tag; the
+        // notes loader serves that version's disk cache first, so versions
+        // viewed once stay readable offline.
+        UpdateManifest(
+            Services.AppUpdateService.CreateReleaseNotesOnlyManifest(version),
+            _currentVersion);
     }
 
     /// <summary>

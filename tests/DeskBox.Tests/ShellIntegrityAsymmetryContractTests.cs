@@ -11,10 +11,16 @@ namespace DeskBox.Tests;
 /// Pins the integrity-asymmetry contract shared by the launch gate, the
 /// elevation notice, the settings diagnostic, and the updater restart
 /// (2026-10-14 batch, feedback elevation-notice / wechat newuser families):
-/// only asymmetric shell/process relationships warn or act; same-level
-/// sessions — including fully elevated company desktops — stay silent, and
-/// the updater never hands an app down to Medium under an elevated shell
-/// (that would manufacture the tray-dead, drag-dead ShellAboveApp state).
+/// only asymmetric shell/process relationships warn or act, and the updater
+/// never hands an app down to Medium under an elevated shell (that would
+/// manufacture the tray-dead, drag-dead ShellAboveApp state).
+///
+/// 2026-10-22 revision: same-level elevated desktops no longer stay fully
+/// silent — WinUI cannot start XAML drags in an elevated process, so those
+/// sessions get a one-time informed notice plus the restore path, pinned
+/// separately in FullyElevatedSessionAttributionTests. The asymmetry
+/// machinery here (Mismatch derivation, variant selection, restart guard)
+/// is unchanged by that notice.
 /// </summary>
 public class ShellIntegrityAsymmetryContractTests
 {
@@ -72,6 +78,51 @@ public class ShellIntegrityAsymmetryContractTests
                 IsExplorerElevated: true,
                 IsUacDisabled: false,
                 CanRelaunchUnelevated: true)));
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, true)]
+    public void NoticeVariant_SameLevelElevatedDesktopExplainsInsteadOfOfferingExit(
+        bool uacDisabled,
+        bool builtInAdmin)
+    {
+        // 2026-10-22: same-level elevated desktops are no longer silent —
+        // WinUI cannot start XAML drags in an elevated process, so they get
+        // the one-time informed explanation (restore path at the system
+        // level), never a one-click exit that would change nothing here.
+        Assert.Equal(
+            ElevationNoticeVariant.ExplainFullyElevated,
+            ElevationNoticeWindow.SelectVariant(new StartupElevationAssessment(
+                IsCurrentProcessElevated: true,
+                IsExplorerElevated: true,
+                IsUacDisabled: uacDisabled,
+                CanRelaunchUnelevated: false,
+                IsBuiltInAdminAccount: builtInAdmin)));
+    }
+
+    [Theory]
+    [InlineData("Core", true)]
+    [InlineData("CoreN", true)]
+    [InlineData("CoreSingleLanguage", true)]
+    [InlineData("CoreCountrySpecific", true)]
+    [InlineData("CoreConnected", true)]
+    [InlineData("CoreConnectedSingleLanguage", true)]
+    [InlineData("CoreARM64", true)]
+    [InlineData("Professional", false)]
+    [InlineData("ProfessionalN", false)]
+    [InlineData("Enterprise", false)]
+    [InlineData("EnterpriseS", false)]
+    [InlineData("Education", false)]
+    [InlineData("ServerStandard", false)]
+    [InlineData("", false)]
+    [InlineData(null, false)]
+    public void NoticeHomeEditionDetection_CoversSecpolLessVariants(string? editionId, bool expected)
+    {
+        // The secpol button must not render where the tool does not exist:
+        // launching secpol.msc on Home surfaces a Windows error box. A null
+        // EditionID fails closed at the button gate (hidden), not here.
+        Assert.Equal(expected, ElevationNoticeWindow.IsHomeEdition(editionId));
     }
 
     [Theory]

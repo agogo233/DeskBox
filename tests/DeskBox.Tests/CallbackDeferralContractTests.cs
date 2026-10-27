@@ -200,8 +200,12 @@ public sealed class CallbackDeferralContractTests : IDisposable
             "private int OnDropCore(",
             "private int HandleDeferredDropMaterialization(");
         Assert.Contains("HandleDeferredDropMaterialization(", dropCore, StringComparison.Ordinal);
-        // Both deferred flavors: virtual streams and shell-application links.
-        Assert.Contains("(virtualFileDrop || shellApplicationDrop)", dropCore, StringComparison.Ordinal);
+        // All deferred flavors: virtual streams, shell-application links,
+        // and materializable Shell namespace objects.
+        Assert.Contains(
+            "(virtualFileDrop || shellApplicationDrop || shellNamespaceDrop)",
+            dropCore,
+            StringComparison.Ordinal);
 
         string handler = SliceMethod(
             source,
@@ -219,20 +223,22 @@ public sealed class CallbackDeferralContractTests : IDisposable
             "StartOperation must precede the worker enqueue.");
         // A full queue refuses synchronously with a none receipt.
         Assert.Contains("materialization queue ", handler, StringComparison.Ordinal);
-        // Shell-application extraction stays on the UI STA (shell namespace
-        // APIs fail on the MTA worker — 2026-10-15 field incident): its
-        // branch AddRefs the raw pointer and defers one turn instead of
-        // marshaling to the worker.
+        // Shell-object extraction (AppsFolder + namespace items) stays on the
+        // UI STA (shell namespace APIs fail on the MTA worker — 2026-10-15
+        // field incident): its branch AddRefs the raw pointer and defers one
+        // turn instead of marshaling to the worker.
         Assert.Contains("Marshal.AddRef(dataObject)", handler, StringComparison.Ordinal);
         Assert.Contains(
-            "TryExtractShellApplicationShortcuts(dataObject)",
+            "TryExtractShellIdListItems(dataObject)",
             handler,
             StringComparison.Ordinal);
         Assert.Contains("Marshal.Release(dataObject)", handler, StringComparison.Ordinal);
         Assert.True(
-            handler.IndexOf("if (shellApplicationDrop)", StringComparison.Ordinal) <
+            handler.IndexOf(
+                "if (shellApplicationDrop || shellNamespaceDrop)",
+                StringComparison.Ordinal) <
             handler.IndexOf("CoMarshalInterThreadInterfaceInStream", StringComparison.Ordinal),
-            "The shell-app branch must run before the virtual marshal path.");
+            "The shell-object branch must run before the virtual marshal path.");
 
         string completion = SliceMethod(
             source,

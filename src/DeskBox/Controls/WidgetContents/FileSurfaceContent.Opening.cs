@@ -329,6 +329,14 @@ public sealed partial class FileSurfaceContent
         if (!_isDisposed && sender is FileItemSurface surface)
         {
             ApplyOpeningStateToSurface(surface);
+            // A recycled container can strand the expansion suppression: the
+            // hidden label would stay hidden on whichever item inherits it.
+            // Collapse the expansion so the recycled surface starts clean.
+            if (_nameExpansionNameText is { } hiddenLabel &&
+                ReferenceEquals(hiddenLabel, surface.ItemNameText))
+            {
+                HideAllNameExpansions();
+            }
         }
     }
 

@@ -46,6 +46,16 @@ public class WidgetConfig
     /// <summary>Vertical distance from the selected anchor edge in logical pixels.</summary>
     public double PositionMarginY { get; set; }
 
+    /// <summary>
+    /// When the user last deliberately placed this widget (drag commit,
+    /// coordinated move). Topology-profile activation yields to the config
+    /// when this is newer than a stored entry's authoritative timestamp on
+    /// the same display — a stale snapshot must never overwrite the user's
+    /// latest placement (the 2026-10-20 reveal-jump incident lineage).
+    /// Null on legacy data: the profile entry then wins as before.
+    /// </summary>
+    public DateTimeOffset? LastUserPlacementUtc { get; set; }
+
     /// <summary>Work area signature of the monitor where the widget was last positioned.</summary>
     public string? PositionMonitorKey { get; set; }
 

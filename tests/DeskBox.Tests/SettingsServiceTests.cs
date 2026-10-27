@@ -202,7 +202,7 @@ public sealed class SettingsServiceTests : IDisposable
 
         Assert.Equal(SettingsLoadRecoveryState.Primary, service.LastLoadRecoveryState);
         Assert.Equal(SettingsMigrationPipeline.CurrentSchemaVersion, service.Settings.SchemaVersion);
-        Assert.Equal(14, service.Settings.SchemaVersion);
+        Assert.Equal(15, service.Settings.SchemaVersion);
 
         // Widgets survive the chain (and the layout-store adoption): both
         // instances keep their identity, kind, and legacy geometry — the 5→6
@@ -263,7 +263,7 @@ public sealed class SettingsServiceTests : IDisposable
         // The migrated profile is persisted back at the current schema.
         using JsonDocument persisted = JsonDocument.Parse(
             await File.ReadAllTextAsync(settingsPath));
-        Assert.Equal(14, persisted.RootElement.GetProperty("schemaVersion").GetInt32());
+        Assert.Equal(15, persisted.RootElement.GetProperty("schemaVersion").GetInt32());
         Assert.True(persisted.RootElement.GetProperty("fileStacksEnabled").GetBoolean());
         Assert.False(persisted.RootElement.GetProperty("fileStackAutoStacking").GetBoolean());
 
@@ -272,7 +272,7 @@ public sealed class SettingsServiceTests : IDisposable
         var reloaded = new SettingsService(_settingsRoot);
         await reloaded.LoadAsync();
         Assert.Equal(SettingsLoadRecoveryState.Primary, reloaded.LastLoadRecoveryState);
-        Assert.Equal(14, reloaded.Settings.SchemaVersion);
+        Assert.Equal(15, reloaded.Settings.SchemaVersion);
         Assert.True(reloaded.Settings.FileStacksEnabled);
         Assert.False(reloaded.Settings.FileStackAutoStacking);
         Assert.Equal(2, reloaded.Settings.Widgets.Count);
@@ -1621,10 +1621,13 @@ public sealed class SettingsServiceTests : IDisposable
     }
 
     [Fact]
-    public void WidgetResizeMinimum_IsFiftyByFifty()
+    public void WidgetResizeMinimum_IsTwentyFiveByTwentyFive()
     {
-        Assert.Equal(50, SettingsService.MinWidgetWidth);
-        Assert.Equal(50, SettingsService.MinWidgetHeight);
+        // Halved from 50 so expanded widgets resize smaller; must stay
+        // above WidgetElasticLayout.AbsoluteMinWidgetSizeDips (20) so the
+        // elastic projection never fights the gates.
+        Assert.Equal(25, SettingsService.MinWidgetWidth);
+        Assert.Equal(25, SettingsService.MinWidgetHeight);
     }
 
     [Theory]
@@ -1931,6 +1934,11 @@ public sealed class SettingsServiceTests : IDisposable
         if (type == typeof(long))
         {
             return (long)(defaultValue ?? 0L) + 123456789012345L;
+        }
+
+        if (type == typeof(long?))
+        {
+            return (defaultValue as long? ?? 0L) + 123456789012345L;
         }
 
         if (type == typeof(DateTimeOffset?))

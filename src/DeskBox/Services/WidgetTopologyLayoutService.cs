@@ -597,7 +597,14 @@ internal sealed class WidgetTopologyLayoutService
                   intent.HomeId?.Trim(),
                   StringComparison.OrdinalIgnoreCase);
 
-        return needsReseed
+        // P3 arbitration: applying a stored entry older than the config's
+        // deliberate placement would resurrect a stale snapshot over the
+        // user's latest position (the reveal-jump incident's executor).
+        bool configOutranks = group is null &&
+            ConfigPlacementOutranksEntry(config, existing) &&
+            SameEntryDisplayAsConfig(existing, config, targetProfile);
+
+        return needsReseed || configOutranks
             ? SeedSurfaceEntry(settings, surfaceId, config, group, targetProfile)
             : existing;
     }
@@ -686,6 +693,19 @@ internal sealed class WidgetTopologyLayoutService
             }
         }
 
+        // P3 arbitration: a deliberate placement newer than whatever the
+        // history picked is the truth regardless of which profile captured
+        // it (the capture may even live in a pruned profile) — seed from
+        // the live config instead. Cross-display entries keep their
+        // projected intent; only the same-display lineage defers.
+        if (group is null && ConfigPlacementOutranksEntry(config, src))
+        {
+            src = FallbackCurrent();
+            srcProfile = targetProfile;
+            targetDisplay = FindMonitor(targetProfile, EntryStableId(src)) ??
+                ResolveHeuristicTarget(src, srcProfile, targetProfile);
+        }
+
         WidgetScreenInfo? srcDisplay = FindMonitor(srcProfile, EntryStableId(src));
         bool sameDisplay = targetDisplay is not null &&
             srcDisplay is not null &&
@@ -711,10 +731,14 @@ internal sealed class WidgetTopologyLayoutService
             seeded = MapToTopology(
                 src,
                 [.. srcProfile.Monitors],
-                [.. targetProfile.Monitors]);
+                [.. targetProfile.Monitors],
+                out bool usedFallbackPlacement);
             // Same-display projections keep the user's authored placement;
-            // cross-display mappings are heuristic and never authoritative.
-            seeded.IsAuthoritative = sameDisplay && src.IsAuthoritative == true;
+            // cross-display mappings are heuristic and never authoritative;
+            // fallback placements are shelter geometry and never intent.
+            seeded.IsAuthoritative = !usedFallbackPlacement &&
+                sameDisplay &&
+                src.IsAuthoritative == true;
             seeded.AuthoredAtUtc = seeded.IsAuthoritative == true ? src.AuthoredAtUtc : null;
         }
 
@@ -725,6 +749,44 @@ internal sealed class WidgetTopologyLayoutService
         group is not null
             ? new DisplayPlacementIntent(group.ScreenBindingMode, group.BoundScreenId)
             : new DisplayPlacementIntent(config.ScreenBindingMode, config.BoundScreenId);
+
+    /// <summary>
+    /// The deliberate-placement arbitration (P3): the config's
+    /// <see cref="WidgetConfig.LastUserPlacementUtc"/> outranks a stored
+    /// entry whose authoritative timestamp is older (or absent). Entries
+    /// captured from fallback geometry carry no timestamp and always lose.
+    /// </summary>
+    internal static bool ConfigPlacementOutranksEntry(
+        WidgetConfig config,
+        WidgetSurfaceLayoutProfile entry)
+    {
+        return config.LastUserPlacementUtc is { } configUtc &&
+            (entry.AuthoredAtUtc is not { } entryUtc || configUtc > entryUtc);
+    }
+
+    /// <summary>
+    /// The arbitration is same-display only: an entry targeting another
+    /// physical monitor describes that screen's own placement history and
+    /// keeps its projected intent; the config's stamp belongs to the
+    /// display it was placed on.
+    /// </summary>
+    internal static bool SameEntryDisplayAsConfig(
+        WidgetSurfaceLayoutProfile entry,
+        WidgetConfig config,
+        WidgetTopologyLayoutProfile targetProfile)
+    {
+        string? entryId = EntryStableId(entry);
+        if (entryId is null)
+        {
+            return true;
+        }
+
+        string? configId = DisplayPlacementResolver.IsDegenerateIdentity(config.PositionMonitorStableId)
+            ? null
+            : config.PositionMonitorStableId?.Trim();
+        return configId is null ||
+            string.Equals(entryId, configId, StringComparison.OrdinalIgnoreCase);
+    }
 
     private static string? EntryStableId(WidgetSurfaceLayoutProfile entry) =>
         DisplayPlacementResolver.IsDegenerateIdentity(entry.PositionMonitorStableId)
@@ -1260,12 +1322,22 @@ internal sealed class WidgetTopologyLayoutService
     internal static WidgetSurfaceLayoutProfile MapToTopology(
         WidgetSurfaceLayoutProfile source,
         IReadOnlyList<WidgetTopologyMonitorProfile> sourceMonitors,
-        IReadOnlyList<WidgetTopologyMonitorProfile> targetMonitors)
+        IReadOnlyList<WidgetTopologyMonitorProfile> targetMonitors) =>
+        MapToTopology(source, sourceMonitors, targetMonitors, out _);
+
+    internal static WidgetSurfaceLayoutProfile MapToTopology(
+        WidgetSurfaceLayoutProfile source,
+        IReadOnlyList<WidgetTopologyMonitorProfile> sourceMonitors,
+        IReadOnlyList<WidgetTopologyMonitorProfile> targetMonitors,
+        out bool usedFallbackPlacement)
     {
         WidgetTopologyMonitorProfile? sourceMonitor = SelectSourceMonitor(source, sourceMonitors);
         WidgetTopologyMonitorProfile? targetMonitor = SelectTargetMonitor(source, sourceMonitor, targetMonitors);
         if (targetMonitor is null)
         {
+            // No target to project onto: a plain clone is not shelter
+            // geometry.
+            usedFallbackPlacement = false;
             return CloneLayout(source);
         }
 
@@ -1306,7 +1378,21 @@ internal sealed class WidgetTopologyLayoutService
             compact.PositionMonitorKey = CreateWorkAreaKey(targetMonitor);
         }
 
-        ResolvePhysicalPosition(mapped, source, sourceMonitor, targetMonitor);
+        ResolvePhysicalPosition(
+            mapped,
+            source,
+            sourceMonitor,
+            targetMonitor,
+            out usedFallbackPlacement);
+        if (usedFallbackPlacement)
+        {
+            // Shelter geometry, not user intent. SeedSurfaceEntry also
+            // consumes the flag so its own authority assignment cannot
+            // resurrect the fallback as authoritative intent.
+            mapped.IsAuthoritative = false;
+            mapped.AuthoredAtUtc = null;
+        }
+
         return mapped;
     }
 
@@ -1314,7 +1400,8 @@ internal sealed class WidgetTopologyLayoutService
         WidgetSurfaceLayoutProfile mapped,
         WidgetSurfaceLayoutProfile source,
         WidgetTopologyMonitorProfile? sourceMonitor,
-        WidgetTopologyMonitorProfile targetMonitor)
+        WidgetTopologyMonitorProfile targetMonitor,
+        out bool usedFallbackPlacement)
     {
         double targetScale = NormalizeScale(targetMonitor.DpiScale);
         int width = Math.Max(1, (int)Math.Round(mapped.Width * targetScale));
@@ -1327,6 +1414,7 @@ internal sealed class WidgetTopologyLayoutService
 
         int x;
         int y;
+        usedFallbackPlacement = false;
         if (validAnchor)
         {
             int marginX = Math.Max(0, (int)Math.Round(mapped.PositionMarginX * targetScale));
@@ -1349,8 +1437,13 @@ internal sealed class WidgetTopologyLayoutService
         }
         else
         {
+            // Shelter geometry, not user intent: this branch fires when the
+            // source carries neither a valid anchor nor a source monitor.
+            // The caller must strip authority so the fallback can never
+            // outrank a later deliberate placement (2026-10-20 lineage).
             x = targetMonitor.WorkAreaX + 32;
             y = targetMonitor.WorkAreaY + 32;
+            usedFallbackPlacement = true;
         }
 
         int maxX = Math.Max(targetMonitor.WorkAreaX, targetMonitor.WorkAreaX + targetMonitor.WorkAreaWidth - width);

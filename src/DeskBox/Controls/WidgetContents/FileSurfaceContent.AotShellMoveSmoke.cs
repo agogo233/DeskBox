@@ -38,11 +38,11 @@ public sealed partial class FileSurfaceContent
         UpdateSelectionCommandBar();
         RefreshItemSelectionVisuals();
 
-        CommandBarFlyout flyout = expectMultiSelection
+        MenuFlyout flyout = expectMultiSelection
             ? CreateMultiSelectionFlyout()
             : CreateItemFlyout(selectedItems[0]);
         string moveText = T("Widget.MoveBackToDesktop");
-        AppBarButton moveItem = AotContextMenuProbe.FindButton(
+        MenuFlyoutItem moveItem = AotContextMenuProbe.FindItem(
             flyout,
             moveText);
         int moveIndex = AotContextMenuProbe.IndexOf(flyout, moveItem);
@@ -111,7 +111,7 @@ public sealed partial class FileSurfaceContent
                 _hostWindowHandle.ToInt64(),
                 AotContextMenuProbe.Count(flyout),
                 moveIndex,
-                moveItem.Label,
+                moveItem.Text,
                 moveItem.IsEnabled,
                 AutomationInvoked: true,
                 feedback.DeduplicationKey ?? string.Empty,

@@ -90,7 +90,9 @@ public static class WidgetLayerService
         Win32Helper.SetWindowToBottom(windowHandle);
     }
 
-    public static IntPtr ClearTopMostPreservingForeground(IntPtr windowHandle)
+    internal static IntPtr ClearTopMostPreservingForeground(
+        IntPtr windowHandle,
+        out RelativeLayerRestoreDisposition disposition)
     {
         ApplyDesktopPinnedActivationStyle(windowHandle);
 
@@ -101,6 +103,7 @@ public static class WidgetLayerService
                 MoveToDynamicDesktopBottom(windowHandle);
             }
 
+            disposition = RelativeLayerRestoreDisposition.DesktopBottom;
             return Win32Helper.GetForegroundWindow();
         }
 
@@ -109,7 +112,7 @@ public static class WidgetLayerService
         bool hasForeground =
             foregroundRoot != IntPtr.Zero &&
             Win32Helper.IsWindow(foregroundRoot);
-        RelativeLayerRestoreDisposition disposition = RelativeLayerRestorePolicy.Decide(
+        disposition = RelativeLayerRestorePolicy.Decide(
             hasForeground,
             hasForeground && IsDesktopShellWindow(foregroundRoot),
             foregroundRoot == windowHandle,
@@ -715,6 +718,21 @@ public static class WidgetLayerService
             Win32Helper.HWND_TOP,
             "group-raise-normal-band");
         Win32Helper.BringWindowToFront(activeHandle);
+        // #553: the trailing activation is redundant on every hot path — the
+        // title click or tray activation already moved the foreground onto a
+        // raised window by the time this runs — and this synchronous kernel
+        // call deadlocked the UI thread when the input queue was still
+        // draining after a long shell operation (drag/import). Skip it once
+        // the raised band already owns the foreground; the skipped call was
+        // only trying to establish exactly that state.
+        IntPtr foregroundAtRaise = Win32Helper.GetForegroundWindow();
+        if (foregroundAtRaise != IntPtr.Zero &&
+            (handles.Contains(foregroundAtRaise) ||
+                handles.Contains(GetForegroundRoot(foregroundAtRaise))))
+        {
+            return;
+        }
+
         Win32Helper.SetForegroundWindow(activeHandle);
     }
 
@@ -797,7 +815,8 @@ public static class WidgetLayerService
     /// the band, and neither do DeskBox's own auxiliary surfaces.
     /// </summary>
     internal static bool IsForeignWindowAboveRaisedPeers(
-        IReadOnlyList<IntPtr> orderedHandles)
+        IReadOnlyList<IntPtr> orderedHandles,
+        bool exemptShellDesktopWindows = false)
     {
         if (orderedHandles.Count < 2 ||
             orderedHandles[0] == IntPtr.Zero ||
@@ -818,7 +837,9 @@ public static class WidgetLayerService
                 DesktopLayerBeddingWindowKind kind =
                     ClassifyWindowForBedding(current, WS_MINIMIZE);
                 if (kind != DesktopLayerBeddingWindowKind.IgnoredWindow &&
-                    kind != DesktopLayerBeddingWindowKind.DeskBoxWindow)
+                    kind != DesktopLayerBeddingWindowKind.DeskBoxWindow &&
+                    !(exemptShellDesktopWindows &&
+                        kind == DesktopLayerBeddingWindowKind.ShellDesktopWindow))
                 {
                     return true;
                 }

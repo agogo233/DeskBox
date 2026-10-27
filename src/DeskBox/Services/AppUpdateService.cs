@@ -21,6 +21,21 @@ public sealed partial class AppUpdateService : IAppUpdateService
     private readonly string _githubLatestReleaseApiUrl;
     private readonly string _updateRootPath;
 
+    // Display-only manifest fetches are static calls (no service instance on
+    // surfaces like the release-notes window), so they share one client
+    // instead of allocating per call.
+    private static readonly HttpClient s_contentHttpClient = CreateContentHttpClient();
+
+    private static HttpClient CreateContentHttpClient()
+    {
+        var client = new HttpClient
+        {
+            Timeout = TimeSpan.FromSeconds(10)
+        };
+        client.DefaultRequestHeaders.UserAgent.ParseAdd($"DeskBox/{GetCurrentAppVersion()}");
+        return client;
+    }
+
     public AppUpdateService(
         HttpClient? httpClient = null,
         string? manifestUrl = null,
@@ -46,6 +61,59 @@ public sealed partial class AppUpdateService : IAppUpdateService
     public AppUpdateCheckResult? LastCheckResult { get; private set; }
     public DateTime? LastCheckTimeUtc { get; private set; }
     public event Action<AppUpdateCheckResult>? CheckCompleted;
+    public event Action<AppUpdateDownloadProgress>? DownloadProgressChanged;
+    public event Action<AppUpdateDownloadResult>? DownloadCompleted;
+
+    private string? _lastDownloadedInstallerPath;
+    private string? _lastDownloadedVersion;
+    private int _downloadInProgress;
+
+    public string? LastDownloadedInstallerPath => _lastDownloadedInstallerPath;
+    public bool IsDownloadInProgress => Volatile.Read(ref _downloadInProgress) != 0;
+
+    public void ClearLastDownloadedInstaller()
+    {
+        _lastDownloadedInstallerPath = null;
+        _lastDownloadedVersion = null;
+    }
+
+    // Retiring a downloaded installer must also reclaim its files: each
+    // download lives in a version-scoped folder under the updates root, and
+    // without this the folder grows by one installer with every release.
+    // The expected-path guard pins the delete to that layout even if the
+    // fields ever drift; the helper folder is never touched.
+    private void TryDeleteRetiredInstallerDirectory()
+    {
+        string? retiredPath = _lastDownloadedInstallerPath;
+        string? retiredVersion = _lastDownloadedVersion;
+        if (string.IsNullOrWhiteSpace(retiredPath) ||
+            string.IsNullOrWhiteSpace(retiredVersion))
+        {
+            return;
+        }
+
+        try
+        {
+            string expectedDirectory = Path.Combine(
+                _updateRootPath,
+                SanitizePathSegment(retiredVersion));
+            if (!string.Equals(
+                    Path.GetDirectoryName(retiredPath),
+                    expectedDirectory,
+                    StringComparison.OrdinalIgnoreCase) ||
+                !Directory.Exists(expectedDirectory))
+            {
+                return;
+            }
+
+            Directory.Delete(expectedDirectory, recursive: true);
+            App.Log($"[Update] Deleted retired installer directory '{expectedDirectory}'");
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[Update] Failed to delete retired installer directory: {ex.Message}");
+        }
+    }
 
     public string ManifestUrl => _manifestUrl;
     public AppUpdateDeliveryKind DeliveryKind => AppUpdateDeliveryKind.DirectInstaller;
@@ -143,6 +211,46 @@ public sealed partial class AppUpdateService : IAppUpdateService
     }
 
     public async Task<AppUpdateDownloadResult> DownloadUpdateAsync(
+        AppUpdateManifest manifest,
+        IProgress<AppUpdateDownloadProgress>? progress = null,
+        CancellationToken cancellationToken = default)
+    {
+        // One download at a time across all initiators (settings one-click
+        // and the background auto-download); the loser gets a cancelled-kind
+        // result, which every caller already treats as a quiet no-op.
+        if (Interlocked.Exchange(ref _downloadInProgress, 1) == 1)
+        {
+            return AppUpdateDownloadResult.Failed(
+                AppUpdateDownloadFailureKind.Cancelled,
+                "Another update download is already in progress.");
+        }
+
+        AppUpdateDownloadResult result;
+        try
+        {
+            var reportingProgress = new Progress<AppUpdateDownloadProgress>(p =>
+            {
+                progress?.Report(p);
+                DownloadProgressChanged?.Invoke(p);
+            });
+            result = await DownloadUpdateCoreAsync(manifest, reportingProgress, cancellationToken);
+        }
+        finally
+        {
+            Volatile.Write(ref _downloadInProgress, 0);
+        }
+
+        if (result.Success && !string.IsNullOrWhiteSpace(result.FilePath))
+        {
+            _lastDownloadedInstallerPath = result.FilePath;
+            _lastDownloadedVersion = manifest.Version;
+        }
+
+        DownloadCompleted?.Invoke(result);
+        return result;
+    }
+
+    private async Task<AppUpdateDownloadResult> DownloadUpdateCoreAsync(
         AppUpdateManifest manifest,
         IProgress<AppUpdateDownloadProgress>? progress = null,
         CancellationToken cancellationToken = default)
@@ -348,6 +456,7 @@ public sealed partial class AppUpdateService : IAppUpdateService
             LocalizationService.LanguageArabic => "arabic",
             LocalizationService.LanguageBengali => "bengali",
             LocalizationService.LanguageRussian => "russian",
+            LocalizationService.LanguageKorean => "korean",
             _ => null,
         };
     }
@@ -490,6 +599,71 @@ public sealed partial class AppUpdateService : IAppUpdateService
     }
 
     /// <summary>
+    /// Fetches the published manifest purely for display surfaces (release
+    /// notes, update summary). Unlike <see cref="IsManifestUsable"/>, this
+    /// validation only requires the content fields: the installer-pinning
+    /// rules exist to protect the download/install path and must not gate
+    /// plain text display — that gate is what left Store builds (whose
+    /// synthesized manifest carries a ms-windowsstore:// download target)
+    /// with an eternally empty release-notes window.
+    /// </summary>
+    public static async Task<AppUpdateManifest?> FetchContentManifestAsync(
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            return await FetchContentManifestAsync(DefaultManifestUrl, s_contentHttpClient, cancellationToken);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException or IOException)
+        {
+            return null;
+        }
+    }
+
+    internal static async Task<AppUpdateManifest?> FetchContentManifestAsync(
+        string manifestUrl,
+        HttpClient httpClient,
+        CancellationToken cancellationToken)
+    {
+        using var response = await httpClient.GetAsync(manifestUrl, cancellationToken);
+        response.EnsureSuccessStatusCode();
+
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        var manifest = await JsonSerializer.DeserializeAsync(
+            stream,
+            AppUpdateJsonContext.Default.UpdateManifest,
+            cancellationToken);
+        return IsContentManifestUsable(manifest) ? manifest : null;
+    }
+
+    internal static bool IsContentManifestUsable(AppUpdateManifest? manifest)
+    {
+        return manifest is not null &&
+            manifest.SchemaVersion == 1 &&
+            !string.IsNullOrWhiteSpace(manifest.Version) &&
+            manifest.HasReleaseNotesOrUrl;
+    }
+
+    /// <summary>
+    /// Builds a display-only manifest that resolves notes for an exact
+    /// version through the project's GitHub release tag; the release-notes
+    /// loader converts github.com tag pages to the API endpoint and caches
+    /// the body locally for offline viewing. Used when no full manifest is
+    /// reachable or when the published manifest already moved on to a newer
+    /// version than the one that needs showing.
+    /// </summary>
+    public static AppUpdateManifest CreateReleaseNotesOnlyManifest(string version)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(version);
+        return new AppUpdateManifest
+        {
+            Channel = "direct",
+            Version = version.Trim(),
+            ReleaseNotesUrl = $"https://github.com/Tianyu199509/DeskBox/releases/tag/v{version.Trim()}",
+        };
+    }
+
+    /// <summary>
     /// The installer may only come from DeskBox's own distribution hosts over
     /// HTTPS. The manifest hash proves integrity but not authenticity: a
     /// compromised feed can serve a malicious installer together with its own
@@ -625,6 +799,25 @@ public sealed partial class AppUpdateService : IAppUpdateService
     {
         LastCheckResult = result;
         LastCheckTimeUtc = DateTime.UtcNow;
+
+        // A downloaded installer only stays valid for the version it was
+        // downloaded for: a check offering a different version retires it,
+        // and so does an up-to-date answer (the running build IS the
+        // downloaded one). A periodic re-check offering the SAME version
+        // must keep it — that is exactly the downloaded-but-not-yet-
+        // installed state the 24h loop would otherwise strand.
+        if (result.IsUpdateAvailable && result.Manifest is { } offered &&
+            !string.Equals(offered.Version, _lastDownloadedVersion, StringComparison.Ordinal))
+        {
+            TryDeleteRetiredInstallerDirectory();
+            ClearLastDownloadedInstaller();
+        }
+        else if (result.Status == AppUpdateCheckStatus.UpToDate && _lastDownloadedInstallerPath is not null)
+        {
+            TryDeleteRetiredInstallerDirectory();
+            ClearLastDownloadedInstaller();
+        }
+
         CheckCompleted?.Invoke(result);
         return result;
     }

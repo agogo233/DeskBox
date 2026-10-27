@@ -208,6 +208,13 @@ public sealed class DeskBoxDiagnosticsBundleServiceTests : IDisposable
                 false,
                 null,
                 null),
+            new DeskBoxRecoveryOfferDiagnostic(
+                false,
+                null,
+                null,
+                null,
+                0,
+                nameof(RecoveryOfferOutcome.NotOffered)),
             new DeskBoxShortcutNativeDiagnostic(
                 "CSharp",
                 "deskbox_native.dll",

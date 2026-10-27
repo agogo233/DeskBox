@@ -1,6 +1,7 @@
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using DeskBox.Models;
 
 namespace DeskBox.Services;
@@ -105,6 +106,76 @@ public sealed class ReleaseNotesService
             return new ReleaseNotesLoadResult(string.Empty, ErrorMessage: ex.Message);
         }
     }
+
+    private static readonly Regex CacheFileNamePattern = new(
+        @"^(?<version>.+)\.(?<locale>all|[A-Za-z]{2}(?:[-_][A-Za-z0-9]{2,8})?)\.md$",
+        RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
+    /// <summary>
+    /// Distinct versions that have an on-disk notes cache, newest first.
+    /// The release-notes window's version list is seeded from these plus the
+    /// versions it resolves live, so previously viewed versions stay
+    /// reachable (and offline-readable) after the feed moves on.
+    /// </summary>
+    public IReadOnlyList<string> GetCachedVersions()
+    {
+        try
+        {
+            if (!Directory.Exists(_cacheRootPath))
+            {
+                return [];
+            }
+
+            return Directory.GetFiles(_cacheRootPath, "*.md")
+                .Select(path => CacheFileNamePattern.Match(Path.GetFileName(path)))
+                .Where(match => match.Success)
+                .Select(match => match.Groups["version"].Value)
+                .Where(version => !string.IsNullOrWhiteSpace(version))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderByDescending(version => version, CachedVersionComparer.Instance)
+                .ToList();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return [];
+        }
+    }
+
+    private sealed class CachedVersionComparer : IComparer<string>
+    {
+        public static readonly CachedVersionComparer Instance = new();
+
+        public int Compare(string? x, string? y)
+        {
+            if (Version.TryParse(x, out Version? xVersion) &&
+                Version.TryParse(y, out Version? yVersion))
+            {
+                int result = xVersion.CompareTo(yVersion);
+                if (result != 0)
+                {
+                    return result;
+                }
+            }
+
+            return string.CompareOrdinal(x, y);
+        }
+    }
+
+    /// <summary>
+    /// Every version with a published GitHub release, newest first, from the
+    /// bilingual-notes era (v1.4.0) onward. The release-notes window unions
+    /// this with the local cache so every machine shows the same version
+    /// rail regardless of which notes it happened to cache; versions
+    /// without a release (v1.4.4 never existed, v1.4.5 was tag-only) stay
+    /// out because their notes cannot resolve. Append the new version at
+    /// release time.
+    /// </summary>
+    public static readonly IReadOnlyList<string> KnownReleaseVersions =
+    [
+        "1.5.9", "1.5.8", "1.5.7", "1.5.6", "1.5.5", "1.5.4", "1.5.3", "1.5.2",
+        "1.5.1", "1.5.0", "1.4.9", "1.4.8", "1.4.7", "1.4.6", "1.4.3", "1.4.2",
+        "1.4.1", "1.4.0",
+    ];
 
     internal static Uri GetContentSourceUri(string releaseNotesUrl)
     {

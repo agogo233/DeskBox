@@ -94,6 +94,14 @@ public static class WidgetPositioningService
         RectInt32 fallbackWorkArea,
         IReadOnlyList<AvailableMonitorWorkArea> availableWorkAreas,
         Func<RectInt32, double>? dpiScaleProvider = null)
+        => ResolveBoundsCore(config, fallbackWorkArea, availableWorkAreas, out _, dpiScaleProvider);
+
+    private static RectInt32 ResolveBoundsCore(
+        WidgetConfig config,
+        RectInt32 fallbackWorkArea,
+        IReadOnlyList<AvailableMonitorWorkArea> availableWorkAreas,
+        out bool fellBack,
+        Func<RectInt32, double>? dpiScaleProvider = null)
     {
         var workArea = SelectWorkAreaCore(config, fallbackWorkArea, availableWorkAreas);
         double scale = GetDpiScale(workArea, dpiScaleProvider);
@@ -108,10 +116,18 @@ public static class WidgetPositioningService
             y = ResolveAnchoredY(config, workArea, height, scale);
         }
 
-        return EnsureVisible(new RectInt32(x, y, width, height), workArea);
+        return EnsureVisible(
+            new RectInt32(x, y, width, height),
+            workArea,
+            out fellBack);
     }
 
-    public static RectInt32 ResolveBoundsForCurrentTopology(WidgetConfig config)
+    public static RectInt32 ResolveBoundsForCurrentTopology(WidgetConfig config) =>
+        ResolveBoundsForCurrentTopology(config, out _);
+
+    public static RectInt32 ResolveBoundsForCurrentTopology(
+        WidgetConfig config,
+        out bool fellBack)
     {
         int x = (int)Math.Round(double.IsFinite(config.X) ? config.X : 100);
         int y = (int)Math.Round(double.IsFinite(config.Y) ? config.Y : 100);
@@ -119,7 +135,11 @@ public static class WidgetPositioningService
             new PointInt32(x, y),
             DisplayAreaFallback.Nearest).WorkArea;
 
-        return ResolveBoundsCore(config, fallbackWorkArea, GetAvailableMonitorWorkAreas());
+        return ResolveBoundsCore(
+            config,
+            fallbackWorkArea,
+            GetAvailableMonitorWorkAreas(),
+            out fellBack);
     }
 
     public static bool EnsureCurrentBoundsCoordinateVersionForCurrentTopology(
@@ -268,16 +288,35 @@ public static class WidgetPositioningService
         config.Height = ToLogicalPixels(bounds.Height, scale);
     }
 
-    public static RectInt32 EnsureVisible(RectInt32 bounds, RectInt32 workArea)
+    public static RectInt32 EnsureVisible(RectInt32 bounds, RectInt32 workArea) =>
+        EnsureVisible(bounds, workArea, out _);
+
+    public static RectInt32 EnsureVisible(RectInt32 bounds, RectInt32 workArea, out bool fellBack)
     {
+        // "Wildly offscreen" means the work-area overlap is a minority
+        // sliver on an axis: less than MinimumVisibleExtent of the window is
+        // visible, and that sliver is not the window's whole (legally
+        // docked) body. The previous edge-coordinate form ("top edge inside
+        // the last 48px band") misread any window shorter than 48px docked
+        // to an edge as fully offscreen — a 41px-tall strip glued to the
+        // bottom jumped to the fallback spot on every reveal's topology
+        // re-resolve (2026-10-20). The intersection form keeps the original
+        // intent: fully outside, or barely peeking in, still falls back; a
+        // small window whose entire body legitimately sits inside the last
+        // band does not.
+        int overlapWidth =
+            Math.Min(bounds.X + bounds.Width, workArea.X + workArea.Width) -
+            Math.Max(bounds.X, workArea.X);
+        int overlapHeight =
+            Math.Min(bounds.Y + bounds.Height, workArea.Y + workArea.Height) -
+            Math.Max(bounds.Y, workArea.Y);
         bool isWildlyOffscreen =
-            bounds.X + bounds.Width < workArea.X + MinimumVisibleExtent ||
-            bounds.Y + bounds.Height < workArea.Y + MinimumVisibleExtent ||
-            bounds.X > workArea.X + workArea.Width - MinimumVisibleExtent ||
-            bounds.Y > workArea.Y + workArea.Height - MinimumVisibleExtent;
+            overlapWidth < Math.Min(MinimumVisibleExtent, bounds.Width) ||
+            overlapHeight < Math.Min(MinimumVisibleExtent, bounds.Height);
 
         if (isWildlyOffscreen)
         {
+            fellBack = true;
             return new RectInt32(
                 workArea.X + FallbackOffset,
                 workArea.Y + FallbackOffset,
@@ -285,6 +324,7 @@ public static class WidgetPositioningService
                 bounds.Height);
         }
 
+        fellBack = false;
         int maxX = Math.Max(workArea.X, workArea.X + workArea.Width - bounds.Width);
         int maxY = Math.Max(workArea.Y, workArea.Y + workArea.Height - bounds.Height);
         return new RectInt32(

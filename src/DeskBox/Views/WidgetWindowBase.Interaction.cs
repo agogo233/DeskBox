@@ -121,8 +121,17 @@ public abstract partial class WidgetWindowBase
         {
             TopMostSafetyTimer.Stop();
         }
+        _safetyRestoreLeaseDeferrals = 0;
         TopMostSafetyTimer.Start();
     }
+
+    private static int _safetyForceRestoreLoggedThisSession;
+
+    // Lease deferrals are bounded (unlike the four routine defer predicates,
+    // which re-arm indefinitely by design): if the lease's owner gave up, the
+    // net must still reach the window within a few intervals.
+    private const int MaxSafetyRestoreLeaseDeferrals = 3;
+    private int _safetyRestoreLeaseDeferrals;
 
     private void TopMostSafetyTimer_Tick(DispatcherQueueTimer sender, object args)
     {
@@ -139,18 +148,46 @@ public abstract partial class WidgetWindowBase
         if (!IsAtDesktopLayer &&
             App.Current.WidgetManager is not { WidgetsRaisedFromTray: true })
         {
-            if (WidgetTemporaryRaiseLeasePolicy.ShouldDeferSafetyRestore(
-                    IsDragging,
-                    IsResizing,
-                    HasBlockingFlyoutOpen(),
-                    App.Current.WidgetManager is { IsWidgetInteractionActive: true }))
+            // The manager's temporary-raise lease owns this window's descent
+            // (settle ~2.3s plus busy retries) and cancels this timer when it
+            // lands; deferring while it is held stops the net from stealing
+            // the restore 300ms early on every startup raise.
+            bool routineDefer = WidgetTemporaryRaiseLeasePolicy.ShouldDeferSafetyRestore(
+                IsDragging,
+                IsResizing,
+                HasBlockingFlyoutOpen(),
+                App.Current.WidgetManager is { IsWidgetInteractionActive: true });
+            bool leaseDefer = IsRaisedFromManager &&
+                _safetyRestoreLeaseDeferrals < MaxSafetyRestoreLeaseDeferrals;
+            if (routineDefer || leaseDefer)
             {
-                App.LogVerbose($"[ZOrder] {LogPrefix} safety timer: defer restore hwnd=0x{HWnd.ToInt64():X}");
+                if (leaseDefer && !routineDefer)
+                {
+                    _safetyRestoreLeaseDeferrals++;
+                }
+
+                App.LogVerbose(
+                    $"[ZOrder] {LogPrefix} safety timer: defer restore hwnd=0x{HWnd.ToInt64():X} " +
+                    $"routine={routineDefer} lease={leaseDefer}");
                 sender.Start();
                 return;
             }
 
-            App.Log($"[ZOrder] {LogPrefix} safety timer: force restore hwnd=0x{HWnd.ToInt64():X}");
+            // The restore itself is routine — the normal descent path
+            // missed and this net is the designed backstop. Only the
+            // first hit per session stays at the default level so a
+            // regression still surfaces in field logs.
+            string forceRestoreLine =
+                $"[ZOrder] {LogPrefix} safety timer: force restore hwnd=0x{HWnd.ToInt64():X}";
+            if (System.Threading.Interlocked.Exchange(ref _safetyForceRestoreLoggedThisSession, 1) == 0)
+            {
+                App.Log(forceRestoreLine);
+            }
+            else
+            {
+                App.LogVerbose(forceRestoreLine);
+            }
+
             RestoreDesktopLayer(force: true);
         }
     }
@@ -231,21 +268,33 @@ public abstract partial class WidgetWindowBase
     protected void ClearTopMostOnly(bool absoluteDesktopBottom = false)
     {
         IsRaisedFromManager = false;
-        IsAtDesktopLayer = true;
         if (absoluteDesktopBottom)
         {
             // Startup settle: ignore the foreground owner and rest directly on
             // the desktop layer so widgets cannot stay floating above apps when
             // a login-time window still holds the foreground.
+            IsAtDesktopLayer = true;
             WidgetLayerService.MoveToDesktopBottom(HWnd);
             App.LogVerbose($"[ZOrder] {LogPrefix} ClearTopMostOnly absolute hwnd=0x{HWnd.ToInt64():X}");
         }
         else
         {
-            IntPtr foreground = WidgetLayerService.ClearTopMostPreservingForeground(HWnd);
-            App.LogVerbose($"[ZOrder] {LogPrefix} ClearTopMostOnly hwnd=0x{HWnd.ToInt64():X} fg=0x{foreground.ToInt64():X}");
-        }
+            IntPtr foreground = WidgetLayerService.ClearTopMostPreservingForeground(
+                HWnd,
+                out RelativeLayerRestoreDisposition disposition);
+            // PreservePeerOrder deliberately leaves the window at its current
+            // level: raised before the restore, still raised after it. Marking
+            // it bedded here would blind the Deactivated funnel that owns its
+            // later descent (the flyout-Esc lingering window). The placed
+            // branches (DesktopBottom / BehindForeground) end on a resting
+            // window.
+            if (disposition != RelativeLayerRestoreDisposition.PreservePeerOrder)
+            {
+                IsAtDesktopLayer = true;
+            }
 
+            App.LogVerbose($"[ZOrder] {LogPrefix} ClearTopMostOnly hwnd=0x{HWnd.ToInt64():X} fg=0x{foreground.ToInt64():X} disposition={disposition}");
+        }
         App.Current.WidgetManager?.QueueIdleWidgetZOrderNormalization(
             $"{LogPrefix}-desktop-layer-restored");
     }
@@ -768,7 +817,9 @@ public abstract partial class WidgetWindowBase
     {
         EndCompactInteraction();
         App.Current.WidgetManager?.EndWidgetInteraction(reason);
-        if (App.Current.WidgetManager?.RequestRestoreRaisedWidgetsToDesktopLayer(reason) == true)
+        // While the tray raised session is alive its restore monitor owns the
+        // layer; outside a session this window restores itself.
+        if (App.Current.WidgetManager is { WidgetsRaisedFromTray: true })
         {
             return;
         }

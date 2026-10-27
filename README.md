@@ -7,7 +7,7 @@ English | [简体中文](README.zh-CN.md)
 > External pull requests are not being merged at this time — bug reports, ideas, and discussions are very welcome via Issues / Discussions. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 [![CI](https://github.com/Tianyu199509/DeskBox/actions/workflows/ci.yml/badge.svg)](https://github.com/Tianyu199509/DeskBox/actions/workflows/ci.yml)
-[![Release 1.5.8](https://img.shields.io/badge/release-1.5.8-2563EB.svg)](https://github.com/Tianyu199509/DeskBox/releases/tag/v1.5.8)
+[![Release 1.5.9](https://img.shields.io/badge/release-1.5.9-2563EB.svg)](https://github.com/Tianyu199509/DeskBox/releases/tag/v1.5.9)
 [![Windows 10/11](https://img.shields.io/badge/Windows-10%2F11-0078D4.svg)](#system-requirements)
 [![x64 and ARM64](https://img.shields.io/badge/architecture-x64%20%7C%20ARM64-5C2D91.svg)](#download)
 [![License: GPL v3](https://img.shields.io/badge/license-GPLv3-blue.svg)](LICENSE)
@@ -34,17 +34,17 @@ DeskBox uses native-feeling Windows materials and keeps ordinary desktop files a
 | **Platform** | Windows 10/11, x64 and ARM64 |
 | **Technology** | C#, WinUI 3, .NET 10 Native AOT, Windows App SDK 2.5.1, Rust native Shell layer |
 | **Storage model** | Local-first; files, notes, tasks, settings, and layouts remain on the PC |
-| **Languages** | English, Simplified Chinese, Traditional Chinese, Japanese, German, Brazilian Portuguese, Hindi, Spanish, French, Arabic, Bengali, Russian |
+| **Languages** | English, Simplified Chinese, Traditional Chinese, Japanese, German, Brazilian Portuguese, Hindi, Spanish, French, Arabic, Bengali, Russian, Korean |
 | **License** | GPL-3.0-only |
 
-All twelve selectable languages share the same resource-key and formatting-placeholder coverage.
+All thirteen selectable languages share the same resource-key and formatting-placeholder coverage.
 
 ## Download
 
-DeskBox 1.5.8 is prepared for release. The [GitHub Releases](https://github.com/Tianyu199509/DeskBox/releases/tag/v1.5.8) download links below will become available after publication.
+DeskBox 1.5.9 is prepared for release. The [GitHub Releases](https://github.com/Tianyu199509/DeskBox/releases/tag/v1.5.9) download links below will become available after publication.
 
-- [DeskBox 1.5.8 for x64](https://github.com/Tianyu199509/DeskBox/releases/download/v1.5.8/DeskBox_Setup_1.5.8_x64.exe), recommended for most Intel and AMD PCs.
-- [DeskBox 1.5.8 for ARM64](https://github.com/Tianyu199509/DeskBox/releases/download/v1.5.8/DeskBox_Setup_1.5.8_arm64.exe), recommended for Snapdragon, Surface Pro X, and other Windows on ARM PCs.
+- [DeskBox 1.5.9 for x64](https://github.com/Tianyu199509/DeskBox/releases/download/v1.5.9/DeskBox_Setup_1.5.9_x64.exe), recommended for most Intel and AMD PCs.
+- [DeskBox 1.5.9 for ARM64](https://github.com/Tianyu199509/DeskBox/releases/download/v1.5.9/DeskBox_Setup_1.5.9_arm64.exe), recommended for Snapdragon, Surface Pro X, and other Windows on ARM PCs.
 
 Both packages are Full Native AOT builds with the matching private Windows App Runtime 2.5.1, so they can install offline without downloading a separate .NET 10 or Windows App Runtime package.
 
@@ -129,6 +129,16 @@ Every release publishes a matching `.sha256` sidecar for each installer. Code si
 - Back up and restore settings locally, or back up todos, quick captures, and widget styles to your own WebDAV server on a schedule; passwords live in Windows Credential Manager, each data domain toggles independently, and remote snapshots can be browsed and restored in merge or snapshot-faithful mode.
 - Export a privacy-filtered diagnostics package for troubleshooting.
 - Recover settings from resilient snapshots, flush pending changes during shutdown, and report save failures instead of silently reverting to defaults.
+
+## What's new in 1.5.9
+
+- **Korean language support.** The interface, installer, and first-run experience now ship in Korean alongside the existing 12 languages.
+- **Windows 11-native right-click menus.** A single column of inline-icon rows in Explorer's classic order, an "Open with" submenu with real associated apps (UWP included), "New"/"View"/"Sort by" submenus on the blank area, and native ZIP compress/extract.
+- **A calmer, more capable updater** — background downloads that skip metered connections, actionable update-toast buttons, and release notes that open automatically after an update.
+- **A recovery offer after a configuration wipe**, a clear notice on fully elevated desktops, and a hideable tray icon.
+- **Steadier widgets.** Positions survive display-topology changes, edge-docked bars no longer jump to a corner on reveal, group-tab capsules expand promptly on re-entry, expanded widgets can shrink twice as small, and the todo color submenu no longer crash-closes the app on Windows 11 25H2.
+
+Read the complete [changelog](CHANGELOG.md) or the [1.5.9 release notes](docs/releases/v1.5.9.md).
 
 ## What's new in 1.5.8
 
@@ -264,8 +274,8 @@ ISCC.exe /DDeskBoxNativeAot=1 /DDeskBoxBundledRuntime=1 /DMyAppReleaseDir=..\.ar
 Expected outputs:
 
 ```text
-Output\DeskBox_Setup_1.5.8_x64.exe
-Output\DeskBox_Setup_1.5.8_arm64.exe
+Output\DeskBox_Setup_1.5.9_x64.exe
+Output\DeskBox_Setup_1.5.9_arm64.exe
 ```
 
 ## Project layout

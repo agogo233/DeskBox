@@ -114,6 +114,24 @@ public partial class WidgetItem : ObservableObject
     /// </summary>
     internal bool IsShortcutTargetLoaded { get; set; }
 
+    /// <summary>
+    /// Namespace classification (internal, never bound): filled by
+    /// <c>NamespaceShortcutHelper.ResolveKind</c> on first menu build. A
+    /// PIDL-only namespace link (This PC, Recycle Bin, Control Panel, …)
+    /// changes which native verbs the item menu offers.
+    /// </summary>
+    internal NamespaceShortcutKind NamespaceShortcutKind { get; set; } =
+        NamespaceShortcutKind.None;
+
+    /// <summary>
+    /// The namespace target's parsing name when
+    /// <see cref="NamespaceShortcutKind"/> is not None (empty otherwise),
+    /// kept so verbs can re-materialize the same target.
+    /// </summary>
+    internal string NamespaceShortcutParsingName { get; set; } = string.Empty;
+
+    internal bool IsNamespaceShortcutKindResolved { get; set; }
+
     public string SecondaryInfo
     {
         get

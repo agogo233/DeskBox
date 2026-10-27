@@ -40,7 +40,6 @@ public partial class SettingsViewModel
     /// accessible when the current build is already up to date.
     /// </summary>
     public AppUpdateManifest? LatestUpdateManifest => _availableUpdateManifest ?? _latestUpdateManifest;
-    public bool CanViewReleaseNotes => LatestUpdateManifest?.HasReleaseNotesOrUrl == true;
     public string ViewReleaseNotesButtonText => _localizationService.T("Settings.Update.ViewReleaseNotes");
     public string ManualUpdateDownloadUrl => GetManualUpdateDownloadUrl(_availableUpdateManifest);
     // Store builds deliver updates through the Store itself; the auto-check
@@ -48,6 +47,126 @@ public partial class SettingsViewModel
     // card folds the same way the install-button card does.
     public Visibility UpdateAutoCheckVisibility =>
         IsDirectInstallerUpdateDelivery ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility UpdateAutoDownloadVisibility =>
+        IsDirectInstallerUpdateDelivery ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility UpdateToastNotificationVisibility =>
+        IsDirectInstallerUpdateDelivery ? Visibility.Visible : Visibility.Collapsed;
+    /// <summary>
+    /// The floating update-activity card (settings page bottom-right, the
+    /// PowerToys pattern): visible whenever an update story is live — an
+    /// update waiting, a download in flight or finished, or a failure —
+    /// until the user dismisses it for this window session.
+    /// </summary>
+    public Visibility UpdateActivityCardVisibility =>
+        IsDirectInstallerUpdateDelivery &&
+        !_updateActivityDismissed &&
+        (IsCheckingForUpdates ||
+         IsDownloadingUpdate ||
+         IsUpdateDownloaded ||
+         _lastUpdateDownloadFailed ||
+         _availableUpdateManifest is not null)
+            ? Visibility.Visible : Visibility.Collapsed;
+
+    public void DismissUpdateActivity()
+    {
+        if (!_updateActivityDismissed)
+        {
+            _updateActivityDismissed = true;
+            OnPropertyChanged(nameof(UpdateActivityCardVisibility));
+        }
+    }
+
+    /// <summary>
+    /// Re-arms the floating card for a fresh window session (dismissals are
+    /// per-session, mirroring PowerToys' BeginWindowSession).
+    /// </summary>
+    public void BeginUpdateActivitySession()
+    {
+        if (_updateActivityDismissed)
+        {
+            _updateActivityDismissed = false;
+            OnPropertyChanged(nameof(UpdateActivityCardVisibility));
+        }
+    }
+
+    /// <summary>
+    /// Drops the service event subscriptions; the app-scoped update service
+    /// outlives this window, so an open window closing must not leak the VM
+    /// through them.
+    /// </summary>
+    public void DetachFromUpdateService()
+    {
+        _appUpdateService.DownloadProgressChanged -= OnServiceDownloadProgress;
+        _appUpdateService.DownloadCompleted -= OnServiceDownloadCompleted;
+    }
+
+    private void OnServiceDownloadProgress(AppUpdateDownloadProgress progress)
+    {
+        // Background auto-downloads raise progress from a thread-pool thread
+        // (their Progress<T> captures no UI context); mutating observable
+        // state from there reaches WinRT bindings off-thread and dies with
+        // RPC_E_WRONG_THREAD, so marshal to the VM's UI thread first.
+        if (_uiDispatcherQueue is { } queue && !queue.HasThreadAccess)
+        {
+            queue.TryEnqueue(() => OnServiceDownloadProgress(progress));
+            return;
+        }
+
+        if (_isVmDownloadInFlight)
+        {
+            return;
+        }
+
+        _updateBytesReceived = progress.BytesReceived;
+        _updateTotalBytes = progress.TotalBytes;
+        UpdateProgressValue = progress.Percent;
+        if (!IsDownloadingUpdate)
+        {
+            IsDownloadingUpdate = true;
+            UpdateProgressValue = progress.Percent;
+            UpdateStatusText = _localizationService.Format(
+                "Settings.Update.Status.Downloading",
+                _availableUpdateManifest?.Version ?? string.Empty);
+            UpdateDetailText = _localizationService.T("Settings.Update.Detail.Downloading");
+        }
+
+        OnPropertyChanged(nameof(UpdateProgressText));
+        OnPropertyChanged(nameof(UpdateProgressIsIndeterminate));
+    }
+
+    private void OnServiceDownloadCompleted(AppUpdateDownloadResult result)
+    {
+        // Same marshal as the progress handler: the completion event can
+        // arrive from the background download's thread.
+        if (_uiDispatcherQueue is { } queue && !queue.HasThreadAccess)
+        {
+            queue.TryEnqueue(() => OnServiceDownloadCompleted(result));
+            return;
+        }
+
+        if (_isVmDownloadInFlight)
+        {
+            return;
+        }
+
+        IsDownloadingUpdate = false;
+        if (result.Success)
+        {
+            _showManualUpdateFallback = false;
+            _lastUpdateDownloadFailed = false;
+            UpdateProgressValue = 100;
+            UpdateStatusText = _localizationService.Format(
+                "Settings.Update.Status.Downloaded",
+                _availableUpdateManifest?.Version ?? string.Empty);
+            UpdateDetailText = _localizationService.T("Settings.Update.Detail.Downloaded");
+        }
+        else if (result.FailureKind != AppUpdateDownloadFailureKind.Cancelled)
+        {
+            ApplyDownloadFailure(result);
+        }
+
+        NotifyUpdateActionPropertiesChanged();
+    }
     public Visibility UpdateProgressVisibility => IsDownloadingUpdate ? Visibility.Visible : Visibility.Collapsed;
     public Visibility UpdateProgressTextVisibility => IsDownloadingUpdate ? Visibility.Visible : Visibility.Collapsed;
     public Visibility UpdateReleaseNotesVisibility =>
@@ -59,6 +178,19 @@ public partial class SettingsViewModel
     public Visibility InstallUpdateButtonVisibility => IsDirectInstallerUpdateDelivery ? Visibility.Visible : Visibility.Collapsed;
     public Visibility UpdateReminderBadgeVisibility =>
         _availableUpdateManifest is not null ? Visibility.Visible : Visibility.Collapsed;
+    /// <summary>
+    /// Badge state for the update status card, string-typed for the AOT
+    /// binder (see <see cref="Services.UpdateStatusBadgeStates"/>). Store
+    /// builds hide the badge: they have no download state machine, so the
+    /// amber/red states would be lies.
+    /// </summary>
+    public string UpdateBadgeStateName => UpdateStatusBadgePolicy.GetStateName(
+        IsCheckingForUpdates,
+        IsDownloadingUpdate,
+        _lastUpdateDownloadFailed,
+        _availableUpdateManifest is not null);
+    public Visibility UpdateBadgeVisibility =>
+        IsDirectInstallerUpdateDelivery ? Visibility.Visible : Visibility.Collapsed;
     public bool CanCheckForUpdates => !IsCheckingForUpdates && !IsDownloadingUpdate;
     public bool CanDownloadUpdate => _availableUpdateManifest is not null && !IsCheckingForUpdates && !IsDownloadingUpdate;
     public bool CanOpenManualUpdateDownload =>
@@ -69,8 +201,8 @@ public partial class SettingsViewModel
         IsDirectInstallerUpdateDelivery &&
         !IsCheckingForUpdates &&
         !IsDownloadingUpdate &&
-        !string.IsNullOrWhiteSpace(_downloadedUpdateInstallerPath) &&
-        File.Exists(_downloadedUpdateInstallerPath);
+        !string.IsNullOrWhiteSpace(_appUpdateService.LastDownloadedInstallerPath) &&
+        File.Exists(_appUpdateService.LastDownloadedInstallerPath);
     public string UpdateDownloadActionText => _localizationService.T(IsStoreUpdateDelivery
         ? "Settings.Update.StoreInstall"
         : "Settings.Update.Download");
@@ -81,33 +213,10 @@ public partial class SettingsViewModel
         : FormatByteSize(_updateBytesReceived);
 
     // One-click update properties
-    public string UpdateSummaryText =>
-        GetUpdateSummaryPreview(GetLocalizedUpdateSummary());
-
-    private string GetLocalizedUpdateSummary()
-    {
-        if (_availableUpdateManifest is null)
-            return string.Empty;
-
-        // Server-published manifests keep authoritative per-locale summaries;
-        // locally built GitHub/Store manifests synthesize from string resources.
-        string summary = _availableUpdateManifest.GetLocalizedSummary(_localizationService.CurrentCultureName);
-        return string.IsNullOrWhiteSpace(summary)
-            ? _availableUpdateManifest.Channel == "store"
-                ? _localizationService.T("Settings.Update.Summary.Store")
-                : _localizationService.Format("Settings.Update.Summary.GitHub", _availableUpdateManifest.Version)
-            : summary;
-    }
-    public Visibility UpdateSummaryVisibility =>
-        _availableUpdateManifest is not null &&
-        !IsDownloadingUpdate &&
-        !_lastUpdateDownloadFailed &&
-        !string.IsNullOrWhiteSpace(UpdateSummaryText)
-            ? Visibility.Visible : Visibility.Collapsed;
     public bool HasUpdateAvailable => _availableUpdateManifest is not null;
     public bool IsUpdateDownloaded =>
-        !string.IsNullOrWhiteSpace(_downloadedUpdateInstallerPath) &&
-        File.Exists(_downloadedUpdateInstallerPath);
+        !string.IsNullOrWhiteSpace(_appUpdateService.LastDownloadedInstallerPath) &&
+        File.Exists(_appUpdateService.LastDownloadedInstallerPath);
     public Visibility UpdateCardVisibility =>
         _availableUpdateManifest is not null || _showManualUpdateFallback
             ? Visibility.Visible : Visibility.Collapsed;
@@ -227,9 +336,16 @@ public partial class SettingsViewModel
         try
         {
             var result = await _appUpdateService.CheckForUpdatesAsync(AppVersion, cancellationToken);
-            return result.Manifest is not null && AppUpdateService.IsManifestUsable(result.Manifest)
-                ? result.Manifest
-                : null;
+            if (result.Manifest is not null && AppUpdateService.IsManifestUsable(result.Manifest))
+            {
+                return result.Manifest;
+            }
+
+            // Store builds synthesize a ms-windowsstore:// manifest that the
+            // installer gate above rejects, and an up-to-date direct check
+            // carries no manifest at all; display surfaces still deserve the
+            // published notes, so fall back to the content-only manifest.
+            return await AppUpdateService.FetchContentManifestAsync(cancellationToken);
         }
         catch (OperationCanceledException)
         {
@@ -250,7 +366,6 @@ public partial class SettingsViewModel
 
         _updateOperationCts?.Cancel();
         _updateOperationCts = new CancellationTokenSource();
-        _downloadedUpdateInstallerPath = null;
         _lastUpdateDownloadFailed = false;
         IsDownloadingUpdate = true;
         UpdateProgressValue = 0;
@@ -275,11 +390,11 @@ public partial class SettingsViewModel
 
         try
         {
+            _isVmDownloadInFlight = true;
             var result = await _appUpdateService.DownloadUpdateAsync(_availableUpdateManifest, progress, _updateOperationCts.Token);
             if (result.Success && IsStoreUpdateDelivery)
             {
                 _availableUpdateManifest = null;
-                _downloadedUpdateInstallerPath = null;
                 _showManualUpdateFallback = false;
                 UpdateProgressValue = 100;
                 UpdateStatusText = _localizationService.T("Settings.Update.Status.StoreInstallComplete");
@@ -289,7 +404,8 @@ public partial class SettingsViewModel
 
             if (result.Success && !string.IsNullOrWhiteSpace(result.FilePath))
             {
-                _downloadedUpdateInstallerPath = result.FilePath;
+                // The service recorded the installer path; this branch only
+                // owns the presentation state.
                 _showManualUpdateFallback = false;
                 UpdateProgressValue = 100;
                 UpdateStatusText = _localizationService.Format("Settings.Update.Status.Downloaded", _availableUpdateManifest.Version);
@@ -302,6 +418,7 @@ public partial class SettingsViewModel
         }
         finally
         {
+            _isVmDownloadInFlight = false;
             IsDownloadingUpdate = false;
             NotifyUpdateActionPropertiesChanged();
         }
@@ -309,13 +426,14 @@ public partial class SettingsViewModel
 
     public AppUpdateInstallResult StartDownloadedUpdateInstall()
     {
-        if (!CanInstallUpdate || string.IsNullOrWhiteSpace(_downloadedUpdateInstallerPath))
+        string? installerPath = _appUpdateService.LastDownloadedInstallerPath;
+        if (!CanInstallUpdate || string.IsNullOrWhiteSpace(installerPath))
         {
             return AppUpdateInstallResult.Failed(_localizationService.T("Settings.Update.Detail.DownloadMissing"));
         }
 
         var result = _appUpdateService.StartInstallerHelper(
-            _downloadedUpdateInstallerPath,
+            installerPath,
             appCultureName: _localizationService.CurrentCultureName);
         if (result.Success)
         {
@@ -342,10 +460,13 @@ public partial class SettingsViewModel
             _latestUpdateManifest = result.Manifest;
         }
 
+        // Downloaded-installer lifetime is owned by the service (version-
+        // aware invalidation); applying a check result never resets it here,
+        // so a periodic re-check cannot strand a downloaded-not-installed
+        // update the way the old unconditional clear did.
         if (result.IsUpdateAvailable && result.Manifest is not null)
         {
             _availableUpdateManifest = result.Manifest;
-            _downloadedUpdateInstallerPath = null;
             _showManualUpdateFallback = false;
             _lastUpdateDownloadFailed = false;
             UpdateStatusText = IsStoreUpdateDelivery
@@ -358,7 +479,6 @@ public partial class SettingsViewModel
         else if (result.Status == AppUpdateCheckStatus.UpToDate)
         {
             _availableUpdateManifest = null;
-            _downloadedUpdateInstallerPath = null;
             _showManualUpdateFallback = false;
             _lastUpdateDownloadFailed = false;
             UpdateStatusText = _localizationService.T("Settings.Update.Status.UpToDate");
@@ -367,7 +487,6 @@ public partial class SettingsViewModel
         else if (result.Status == AppUpdateCheckStatus.InvalidManifest)
         {
             _availableUpdateManifest = null;
-            _downloadedUpdateInstallerPath = null;
             _showManualUpdateFallback = IsDirectInstallerUpdateDelivery;
             _lastUpdateDownloadFailed = false;
             UpdateStatusText = _localizationService.T("Settings.Update.Status.Failed");
@@ -376,7 +495,6 @@ public partial class SettingsViewModel
         else
         {
             _availableUpdateManifest = null;
-            _downloadedUpdateInstallerPath = null;
             _showManualUpdateFallback = IsDirectInstallerUpdateDelivery;
             _lastUpdateDownloadFailed = false;
             UpdateStatusText = _localizationService.T("Settings.Update.Status.Failed");
@@ -474,13 +592,6 @@ public partial class SettingsViewModel
         return AppUpdateService.DefaultManualDownloadUrl;
     }
 
-    internal static string GetUpdateSummaryPreview(string? summary)
-    {
-        return string.Join(" ", SimpleMarkdownRenderer.Parse(summary)
-            .Select(block => string.Concat(block.Inlines.Select(inline => inline.Text)))
-            .Where(text => !string.IsNullOrWhiteSpace(text)));
-    }
-
     private static bool HasManifestManualDownloadUrl(AppUpdateManifest? manifest)
     {
         return AppUpdateManifest.IsSafeWebUrl(manifest?.ManualDownloadUrl) ||
@@ -515,7 +626,6 @@ public partial class SettingsViewModel
         OnPropertyChanged(nameof(UpdateReleaseNotesVisibility));
         OnPropertyChanged(nameof(AvailableUpdateReleaseNotesUrl));
         OnPropertyChanged(nameof(LatestUpdateManifest));
-        OnPropertyChanged(nameof(CanViewReleaseNotes));
         OnPropertyChanged(nameof(ViewReleaseNotesButtonText));
         OnPropertyChanged(nameof(ManualUpdateDownloadUrl));
         OnPropertyChanged(nameof(CanOpenManualUpdateDownload));
@@ -524,9 +634,10 @@ public partial class SettingsViewModel
         OnPropertyChanged(nameof(UpdateFallbackVisibility));
         OnPropertyChanged(nameof(UpdateReminderBadgeVisibility));
         OnPropertyChanged(nameof(UpdateProgressText));
+        OnPropertyChanged(nameof(UpdateBadgeStateName));
+        OnPropertyChanged(nameof(UpdateBadgeVisibility));
+        OnPropertyChanged(nameof(UpdateActivityCardVisibility));
         // One-click update properties
-        OnPropertyChanged(nameof(UpdateSummaryText));
-        OnPropertyChanged(nameof(UpdateSummaryVisibility));
         OnPropertyChanged(nameof(HasUpdateAvailable));
         OnPropertyChanged(nameof(IsUpdateDownloaded));
         OnPropertyChanged(nameof(UpdateCardVisibility));

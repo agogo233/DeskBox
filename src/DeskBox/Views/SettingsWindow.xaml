@@ -2713,6 +2713,12 @@ Text="DeskBox" />
                                         <InfoBar
                                             IsClosable="False"
                                             IsOpen="True"
+                                            Severity="Informational"
+                                            Message="{Binding CustomDirectoryRecoveryNoteText}"
+                                            Visibility="{Binding ShowCustomDirectoryRecoveryNote, Converter={StaticResource SettingsBoolToVisibilityConverter}}" />
+                                        <InfoBar
+                                            IsClosable="False"
+                                            IsOpen="True"
                                             Severity="Warning"
                                             Message="{Binding LocalFallbackWarningText}"
                                             Visibility="{Binding ShowLocalFallbackWarning, Converter={StaticResource SettingsBoolToVisibilityConverter}}" />
@@ -3317,6 +3323,44 @@ Text="DeskBox" />
 
                             <toolkit:SettingsCard
                                 HorizontalContentAlignment="Right"
+                                svc:Localized.DescriptionKey="Settings.Update.AutoDownloadDescription"
+                                svc:Localized.HeaderKey="Settings.Update.AutoDownload"
+                                Visibility="{Binding UpdateAutoDownloadVisibility}">
+                                <ToggleSwitch svc:Localized.AutomationNameKey="Settings.Update.AutoDownload"
+                                    VerticalAlignment="Center"
+                                    OnContent=""
+                                    OffContent=""
+                                    MinWidth="0"
+                                    IsOn="{Binding AutoDownloadUpdates, Mode=TwoWay}" />
+                            </toolkit:SettingsCard>
+
+                            <toolkit:SettingsCard
+                                HorizontalContentAlignment="Right"
+                                svc:Localized.DescriptionKey="Settings.Update.ShowUpdateToastDescription"
+                                svc:Localized.HeaderKey="Settings.Update.ShowUpdateToast"
+                                Visibility="{Binding UpdateToastNotificationVisibility}">
+                                <ToggleSwitch svc:Localized.AutomationNameKey="Settings.Update.ShowUpdateToast"
+                                    VerticalAlignment="Center"
+                                    OnContent=""
+                                    OffContent=""
+                                    MinWidth="0"
+                                    IsOn="{Binding ShowUpdateToastNotification, Mode=TwoWay}" />
+                            </toolkit:SettingsCard>
+
+                            <toolkit:SettingsCard
+                                HorizontalContentAlignment="Right"
+                                svc:Localized.DescriptionKey="Settings.Update.ShowReleaseNotesAfterUpdateDescription"
+                                svc:Localized.HeaderKey="Settings.Update.ShowReleaseNotesAfterUpdate">
+                                <ToggleSwitch svc:Localized.AutomationNameKey="Settings.Update.ShowReleaseNotesAfterUpdate"
+                                    VerticalAlignment="Center"
+                                    OnContent=""
+                                    OffContent=""
+                                    MinWidth="0"
+                                    IsOn="{Binding ShowReleaseNotesAfterUpdate, Mode=TwoWay}" />
+                            </toolkit:SettingsCard>
+
+                            <toolkit:SettingsCard
+                                HorizontalContentAlignment="Right"
                                 Description="{Binding UpdateStatusText}"
                                 svc:Localized.HeaderKey="Settings.Update.Status">
                                 <StackPanel
@@ -3324,6 +3368,11 @@ Text="DeskBox" />
                                     Orientation="Horizontal"
                                     Spacing="8"
                                     VerticalAlignment="Center">
+                                    <controls:UpdateStatusBadgeControl
+                                        VerticalAlignment="Center"
+                                        StateName="{Binding UpdateBadgeStateName}"
+                                        ToolTipService.ToolTip="{Binding UpdateStatusText}"
+                                        Visibility="{Binding UpdateBadgeVisibility}" />
                                     <Button
                                         x:Name="OneClickUpdateButton"
                                         VerticalAlignment="Center"
@@ -3356,23 +3405,6 @@ Text="DeskBox" />
                                         Style="{StaticResource SettingDescriptionTextStyle}"
                                         Text="{Binding UpdateDetailText}"
                                         TextWrapping="Wrap" />
-
-                                    <Button
-                                        HorizontalAlignment="Stretch"
-                                        HorizontalContentAlignment="Stretch"
-                                        Padding="14,10"
-                                        Click="ViewReleaseNotesButton_Click"
-                                        IsEnabled="{Binding CanViewReleaseNotes}"
-                                        AutomationProperties.Name="{Binding ViewReleaseNotesButtonText}"
-                                        Visibility="{Binding UpdateSummaryVisibility}">
-                                        <TextBlock
-                                            FontSize="13"
-                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                            MaxLines="2"
-                                            Text="{Binding UpdateSummaryText}"
-                                            TextTrimming="CharacterEllipsis"
-                                            TextWrapping="Wrap" />
-                                    </Button>
 
                                     <StackPanel Spacing="6" Visibility="{Binding UpdateProgressVisibility}">
                                         <ProgressBar
@@ -3826,5 +3858,88 @@ Text="DeskBox" />
                     </StackPanel>
             </ScrollViewer>
         </ContentDialog>
+
+        <!-- Floating update-activity card (bottom-right, the PowerToys
+             pattern): appears while an update story is live — available,
+             downloading, downloaded, failed — and dismisses per window
+             session. All state reuses the About section's update
+             view-model properties. -->
+        <Border
+            x:Name="UpdateActivityCard"
+            Grid.Row="1"
+            MaxWidth="360"
+            Margin="16"
+            Padding="20,16"
+            HorizontalAlignment="Right"
+            VerticalAlignment="Bottom"
+            Background="{ThemeResource AcrylicInAppFillColorDefaultBrush}"
+            BorderBrush="{ThemeResource SurfaceStrokeColorFlyoutBrush}"
+            BorderThickness="1"
+            Canvas.ZIndex="30"
+            CornerRadius="8"
+            Visibility="{Binding UpdateActivityCardVisibility}">
+            <StackPanel Spacing="10">
+                <Grid ColumnSpacing="10">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <controls:UpdateStatusBadgeControl
+                        Margin="0,2,0,0"
+                        VerticalAlignment="Top"
+                        StateName="{Binding UpdateBadgeStateName}" />
+                    <StackPanel
+                        Grid.Column="1"
+                        Spacing="2">
+                        <TextBlock
+                            FontSize="14"
+                            FontWeight="SemiBold"
+                            Text="{Binding UpdateStatusText}"
+                            TextWrapping="Wrap" />
+                        <TextBlock
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            Style="{StaticResource CaptionTextBlockStyle}"
+                            Text="{Binding UpdateDetailText}"
+                            TextWrapping="Wrap" />
+                    </StackPanel>
+                    <Button
+                        Grid.Column="2"
+                        Width="28"
+                        Height="28"
+                        Padding="0"
+                        VerticalAlignment="Top"
+                        Click="DismissUpdateActivity_Click"
+                        Content="&#xE711;"
+                        FontFamily="{ThemeResource SymbolThemeFontFamily}"
+                        FontSize="12" />
+                </Grid>
+
+                <ProgressBar
+                    Height="4"
+                    Maximum="100"
+                    IsIndeterminate="{Binding UpdateProgressIsIndeterminate}"
+                    Value="{Binding UpdateProgressValue}"
+                    Visibility="{Binding UpdateProgressVisibility}" />
+                <TextBlock
+                    HorizontalAlignment="Right"
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    Style="{StaticResource CaptionTextBlockStyle}"
+                    Text="{Binding UpdateProgressText}"
+                    Visibility="{Binding UpdateProgressTextVisibility}" />
+
+                <Button
+                    HorizontalAlignment="Stretch"
+                    Click="OneClickUpdateButton_Click"
+                    Content="{Binding OneClickActionButtonText}"
+                    IsEnabled="{Binding IsOneClickActionEnabled}"
+                    Style="{StaticResource AccentButtonStyle}" />
+                <HyperlinkButton
+                    HorizontalAlignment="Center"
+                    Click="ViewReleaseNotesButton_Click"
+                    Content="{Binding ViewReleaseNotesButtonText}"
+                    Padding="4,2" />
+            </StackPanel>
+        </Border>
     </Grid>
 </Window>

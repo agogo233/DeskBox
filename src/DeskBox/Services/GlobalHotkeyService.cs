@@ -411,13 +411,21 @@ public sealed class GlobalHotkeyService : IDisposable, IHookHealthProbeTarget, I
         bool wasRegistered = IsRegistered;
         string? previousError = LastError;
         RefreshRegistrationCore(quiet: true);
-        App.Log(
-            $"[GlobalHotkey] Heartbeat refreshed gesture={CurrentGestureText} " +
-            $"registered={IsRegistered}");
         if (IsRegistered != wasRegistered ||
             !string.Equals(previousError, LastError, StringComparison.Ordinal))
         {
+            App.Log(
+                $"[GlobalHotkey] Heartbeat refreshed gesture={CurrentGestureText} " +
+                $"registered={IsRegistered}");
             NotifyRegistrationChanged();
+        }
+        else
+        {
+            // A healthy round-trip produces no state change; keep the routine
+            // line out of the default log level while leaving it observable.
+            App.LogVerbose(
+                $"[GlobalHotkey] Heartbeat refreshed gesture={CurrentGestureText} " +
+                $"registered={IsRegistered}");
         }
     }
 

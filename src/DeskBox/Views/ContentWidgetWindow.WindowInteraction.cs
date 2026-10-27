@@ -390,6 +390,16 @@ public sealed partial class ContentWidgetWindow
         // A long-hidden release dropped the decoded custom background; the
         // surface is cheap to rebuild from disk on the way back in.
         RecoverCustomBackgroundIfReleased();
+        // Native activation (a body click on a resting widget) lifts the
+        // window without going through any raise path, so IsAtDesktopLayer
+        // never flipped and the Deactivated funnel above stayed blind — the
+        // window then floats above foreign apps with no owner for its
+        // restore. Every explicit raise path has already flipped the flag
+        // by now; the desktop-pinned band keeps its own activation funnels.
+        if (IsAtDesktopLayer && !WidgetLayerService.UsesDesktopPinnedMode())
+        {
+            IsAtDesktopLayer = false;
+        }
         // Deliberately synchronous (callback-isolation exemption): deferring
         // this reassert one dispatcher turn turns its SetForegroundWindow
         // (active) from a no-op — the window is still the foreground when the
@@ -430,15 +440,10 @@ public sealed partial class ContentWidgetWindow
             }
 
             RestoreDesktopLayerWhenIdle = true;
-            if (App.Current.WidgetManager is { } widgetManager)
-            {
-                if (!widgetManager.RequestRestoreRaisedWidgetsToDesktopLayer(
-                        "content-window-deactivated"))
-                {
-                    RestoreDesktopLayer(force: true);
-                }
-            }
-            else
+            // Raised-session holds are decided inline: while the tray session
+            // is alive its restore monitor owns the layer; otherwise this
+            // window restores itself.
+            if (App.Current.WidgetManager is not { WidgetsRaisedFromTray: true })
             {
                 RestoreDesktopLayer(force: true);
             }

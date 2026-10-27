@@ -141,6 +141,9 @@ public abstract partial class WidgetWindowBase : Window
     public bool IsRaisedAboveDesktopLayer =>
         !IsAtDesktopLayer || _isRaisedForExpandedState;
 
+    /// <summary>True while a title-bar drag has actually moved the window.</summary>
+    public bool IsTitleBarDragTransitionActive => IsDragging && HasMovedTitleBarDrag;
+
     /// <summary>The opacity value (0–1) used for backdrop tinting.</summary>
     protected abstract double WidgetOpacity { get; }
 

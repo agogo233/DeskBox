@@ -281,7 +281,7 @@ public sealed class NativeMenuCustomRenameAndPasteContractTests
         string[] languages =
         [
             "ar-SA", "bn-BD", "de-DE", "en-US", "es-ES", "fr-FR",
-            "hi-IN", "ja-JP", "pt-BR", "ru-RU", "zh-CN", "zh-TW"
+            "hi-IN", "ja-JP", "ko-KR", "pt-BR", "ru-RU", "zh-CN", "zh-TW"
         ];
 
         foreach (string language in languages)

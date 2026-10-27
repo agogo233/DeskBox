@@ -376,6 +376,9 @@ public sealed partial class InteractionSettingsViewModel : ObservableObject
 
     public void SetAutoStart(bool value) => _settings.SetAutoStart(value);
     public void SetAutoCheckForUpdates(bool value) => _settings.SetAutoCheckForUpdates(value);
+    public void SetShowReleaseNotesAfterUpdate(bool value) => _settings.SetShowReleaseNotesAfterUpdate(value);
+    public void SetAutoDownloadUpdates(bool value) => _settings.SetAutoDownloadUpdates(value);
+    public void SetShowUpdateToastNotification(bool value) => _settings.SetShowUpdateToastNotification(value);
     public void SetSilentStartup(bool value) => _settings.SetSilentStartup(value);
 
     public void SetFileItemSystemContextMenuEnabled(bool value) =>

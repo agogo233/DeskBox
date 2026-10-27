@@ -1162,7 +1162,7 @@ public sealed partial class ContentWidgetWindow
         ContentWidgetShell.TitleEditorContent = null;
         EndCompactInteraction();
         App.Current.WidgetManager?.EndWidgetInteraction(reason);
-        if (App.Current.WidgetManager?.RequestRestoreRaisedWidgetsToDesktopLayer(reason) == true)
+        if (App.Current.WidgetManager is { WidgetsRaisedFromTray: true })
         {
             return;
         }
@@ -1192,7 +1192,7 @@ public sealed partial class ContentWidgetWindow
         {
             EndCompactInteraction();
             App.Current.WidgetManager?.EndWidgetInteraction("content-flyout-closed");
-            if (App.Current.WidgetManager?.RequestRestoreRaisedWidgetsToDesktopLayer("content-flyout-closed") == true)
+            if (App.Current.WidgetManager is { WidgetsRaisedFromTray: true })
             {
                 return;
             }

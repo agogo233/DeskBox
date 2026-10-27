@@ -343,10 +343,23 @@ public sealed class SearchHotkeyService : IDisposable, IHookHealthProbeTarget, I
             return;
         }
 
+        bool wasRegistered = IsRegistered;
         RefreshRegistrationCore(quiet: true);
-        App.Log(
-            $"[SearchHotkey] Heartbeat refreshed gesture={FormatGesture(CurrentGesture)} " +
-            $"registered={IsRegistered}");
+        if (IsRegistered != wasRegistered)
+        {
+            // A silent unregister path (handle lost while disabled) can leave
+            // IsRegistered false without an error line; the flip itself is the
+            // signal worth the default log level.
+            App.Log(
+                $"[SearchHotkey] Heartbeat refreshed gesture={FormatGesture(CurrentGesture)} " +
+                $"registered={IsRegistered}");
+        }
+        else
+        {
+            App.LogVerbose(
+                $"[SearchHotkey] Heartbeat refreshed gesture={FormatGesture(CurrentGesture)} " +
+                $"registered={IsRegistered}");
+        }
     }
 
     /// <summary>

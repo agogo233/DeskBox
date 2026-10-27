@@ -38,12 +38,11 @@ public sealed partial class FileSurfaceContent
         UpdateSelectionCommandBar();
         RefreshItemSelectionVisuals();
 
-        CommandBarFlyout flyout = expectMultiSelection
+        MenuFlyout flyout = expectMultiSelection
             ? CreateMultiSelectionFlyout()
             : CreateItemFlyout(selectedItems[0]);
         string deleteText = T("Widget.MoveToRecycleBin");
-        // Delete now lives on the primary icon strip.
-        AppBarButton deleteItem = AotContextMenuProbe.FindButton(
+        MenuFlyoutItem deleteItem = AotContextMenuProbe.FindItem(
             flyout,
             deleteText);
         int deleteIndex = AotContextMenuProbe.IndexOf(flyout, deleteItem);
@@ -102,7 +101,7 @@ public sealed partial class FileSurfaceContent
                 selectedItems.Select(item => item.Path).ToArray(),
                 AotContextMenuProbe.Count(flyout),
                 deleteIndex,
-                deleteItem.Label,
+                deleteItem.Text,
                 deleteItem.IsEnabled,
                 AutomationInvoked: true,
                 feedback.DeduplicationKey ?? string.Empty,

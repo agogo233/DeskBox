@@ -78,7 +78,16 @@ public sealed class StartupResilienceContractTests
 
         // The first-run setup path still signals failure to its caller (it keeps
         // the pending marker for the next launch); the caller is what degrades.
-        Assert.Contains("() => EnsureInitialFileWidgetSetupAsync(isInteractiveLaunch: !IsStartupMode)", launch, StringComparison.Ordinal);
+        // The wipe-recovery offer precedes it, and only an explicit fresh start
+        // lets DefaultsAfterFailure manufacture the default widget.
+        Assert.Contains(
+            "() => EnsureInitialFileWidgetSetupAsync(",
+            launch,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "isInteractiveLaunch: !IsStartupMode,",
+            launch,
+            StringComparison.Ordinal);
         string setup = Slice(
             Read("src/DeskBox/App.xaml.cs"),
             "private async Task EnsureInitialFileWidgetSetupAsync",

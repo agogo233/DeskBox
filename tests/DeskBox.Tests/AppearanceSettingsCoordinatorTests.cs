@@ -142,6 +142,25 @@ public sealed class AppearanceSettingsCoordinatorTests : IDisposable
     }
 
     [Fact]
+    public void TrayIconStyle_HiddenRoundTrips_UnknownValuesStillNormalize()
+    {
+        var settings = new SettingsService(_root);
+        var coordinator = new AppearanceSettingsCoordinator(settings);
+
+        coordinator.SetTrayIconStyle("Hidden");
+        Assert.Equal("Hidden", settings.Settings.Core.TrayIconStyle);
+        Assert.Equal("Hidden", coordinator.ReadTrayIconStyle());
+
+        // A stored hidden style must survive the read projection: the shell
+        // keys its "skip tray icon creation" decision off this value.
+        settings.Settings.Core.TrayIconStyle = "Hidden";
+        Assert.Equal("Hidden", coordinator.ReadTrayIconStyle());
+
+        coordinator.SetTrayIconStyle("Nope");
+        Assert.Equal("System", settings.Settings.Core.TrayIconStyle);
+    }
+
+    [Fact]
     public void LayoutDensityWrites_PresetAppliesSevenFieldsWithoutSchedulingASave()
     {
         var settings = new SettingsService(_root);

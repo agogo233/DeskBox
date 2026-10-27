@@ -41,7 +41,7 @@ public sealed partial class SearchPopupWindow : Window
     private readonly SearchPopupViewModel _viewModel;
     private readonly SettingsService _settingsService;
     private readonly LocalizationService _localizationService;
-    private readonly QuickLookPreviewService _quickLookService = new();
+    private readonly SpacePreviewBroker _spacePreviewService = new();
     private readonly ThemeService? _themeService;
     private DispatcherTimer? _searchDebounceTimer;
     private CancellationTokenSource? _skeletonDelayCancellation;
@@ -112,6 +112,19 @@ public sealed partial class SearchPopupWindow : Window
     private Windows.Foundation.Point _dragStartPoint;
     private bool _dragOccurred;
     private bool _restoreResultFocusAfterFlyout;
+
+    private static bool? s_isProcessElevatedForDrag;
+
+    // Cached per process — elevation cannot change mid-run, and the probe
+    // sits on the pointer-pressed hot path. Elevated runs never arm a drag
+    // candidate: WinUI's StartDragAsync throws inside the platform drag
+    // pipeline for an elevated process (see FileSurfaceContent's elevated
+    // CanDrag removal), and this window's await has no catch.
+    private static bool IsCurrentProcessElevatedForDrag()
+    {
+        s_isProcessElevatedForDrag ??= DragDropPermissionService.IsCurrentProcessElevated();
+        return s_isProcessElevatedForDrag.Value;
+    }
 
     // Multi-selection state: tracks all items selected via rubber-band or Ctrl+click.
     // When non-empty, batch operations (copy/cut/delete) act on these items.
@@ -2654,8 +2667,12 @@ public sealed partial class SearchPopupWindow : Window
         // start a drag, while every non-blank result cell keeps its click action.
         _pressedItem = item;
 
-        // Drag is initiated only from the icon column, not the entire row.
-        if (item is not null && row is not null && pointerIsOnDragHandle)
+        // Drag is initiated only from the icon column, not the entire row —
+        // and never in an elevated process (see
+        // IsCurrentProcessElevatedForDrag). The icon keeps its click-open
+        // behavior either way.
+        if (item is not null && row is not null && pointerIsOnDragHandle &&
+            !IsCurrentProcessElevatedForDrag())
         {
             _dragCandidate = item;
             _dragSourceRow = row;
@@ -3980,10 +3997,10 @@ public sealed partial class SearchPopupWindow : Window
             return;
         }
 
-        bool shown = await _quickLookService.TryToggleAsync(item.DetailPath);
+        bool shown = await _spacePreviewService.TryToggleAsync(item.DetailPath);
         if (!shown)
         {
-            App.Log($"[SearchPopup] QuickLook preview unavailable for '{item.DetailPath}'.");
+            App.Log($"[SearchPopup] Space preview unavailable for '{item.DetailPath}'.");
         }
     }
 

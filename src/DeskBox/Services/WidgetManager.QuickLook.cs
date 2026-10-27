@@ -7,7 +7,9 @@ namespace DeskBox.Services;
 
 public sealed partial class WidgetManager
 {
-    private readonly QuickLookPreviewService _quickLookPreviewService = new();
+    // The broker arbitrates QuickLook vs PowerToys Peek; QuickLook-era
+    // names stay for the session machine and its call sites.
+    private readonly SpacePreviewBroker _quickLookPreviewService = new();
     private readonly SemaphoreSlim _quickLookPreviewSendGate = new(1, 1);
     private FileSurfaceContent? _quickLookPreviewSurface;
     private string? _quickLookPreviewPath;
@@ -190,6 +192,9 @@ public sealed partial class WidgetManager
             return;
         }
 
+        // Peek closes by re-sending the path the session last showed, so
+        // the path must be captured before the session state resets.
+        string? closePath = _quickLookPreviewPath;
         EndQuickLookPreviewSession();
         long closeGeneration = _quickLookPreviewGeneration;
         await _quickLookPreviewSendGate.WaitAsync();
@@ -201,7 +206,7 @@ public sealed partial class WidgetManager
                 return;
             }
 
-            await _quickLookPreviewService.TryCloseAsync();
+            await _quickLookPreviewService.TryCloseAsync(closePath);
         }
         finally
         {

@@ -460,14 +460,33 @@ public sealed partial class TodoWidgetContent
     private static IconElement CreateColorMarkerIcon(string colorMarker, bool isSelected)
     {
         var color = ParseColor(TodoItem.GetColorMarkerHex(colorMarker));
-        return new FontIcon
+        if (isSelected)
         {
-            Glyph = isSelected ? "\uE73E" : "\u25CF",
-            // Selected checkmark goes through the default SymbolThemeFontFamily
-            // (Fluent on Win11, MDL2 fallback on Win10) like every other E73E
-            // glyph in this file; the unselected dot keeps Segoe UI Symbol.
-            FontFamily = isSelected ? null : new FontFamily("Segoe UI Symbol"),
-            FontSize = isSelected ? 12 : 10,
+            // The checkmark goes through the default SymbolThemeFontFamily
+            // (a Fluent/MDL2 fallback chain, both of which resolve) like
+            // every other E73E glyph in this file.
+            return new FontIcon
+            {
+                Glyph = "\uE73E",
+                FontSize = 12,
+                Foreground = new SolidColorBrush(color)
+            };
+        }
+
+        // The unselected dot is geometry, not a glyph. Segoe UI Symbol's
+        // font file is removed on Win11 25H2 (26300) while its registry
+        // entry remains, and the first measure of a FontIcon pinned to
+        // that family fails in CFontFamily::GetTextLineBoundsMetrics with
+        // E_UNEXPECTED — a stowed exception that fail-fasts the process
+        // the moment the color submenu opens.
+        return new PathIcon
+        {
+            Data = new EllipseGeometry
+            {
+                Center = new Windows.Foundation.Point(8, 8),
+                RadiusX = 5,
+                RadiusY = 5
+            },
             Foreground = new SolidColorBrush(color)
         };
     }

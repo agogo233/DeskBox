@@ -768,7 +768,7 @@ public abstract partial class WidgetWindowBase
             return false;
         }
 
-        var bounds = ResolveWidgetBoundsForCurrentState();
+        var bounds = ResolveWidgetBoundsForCurrentState(out bool placementFellBack);
         RectInt32 actual = GetActualWindowBounds();
         if (actual.X == bounds.X &&
             actual.Y == bounds.Y &&
@@ -778,13 +778,17 @@ public abstract partial class WidgetWindowBase
             return true;
         }
 
+        // A fallback resolve (shelter geometry from EnsureVisible) parks the
+        // window somewhere visible but is NOT user intent — feeding it into
+        // the config's physical cache would let the fallback masquerade as
+        // a placement and win later arbitrations (2026-10-20 lineage).
         ApplyWindowBounds(
             bounds.X,
             bounds.Y,
             bounds.Width,
             bounds.Height,
             persist: false,
-            updateConfig: updateConfig);
+            updateConfig: updateConfig && !placementFellBack);
         return true;
     }
 

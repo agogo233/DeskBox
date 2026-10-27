@@ -19,7 +19,8 @@ public sealed partial class LocalizationResourceContractTests
         "fr-FR",
         "ar-SA",
         "bn-BD",
-        "ru-RU"
+        "ru-RU",
+        "ko-KR"
     ];
 
     [Fact]

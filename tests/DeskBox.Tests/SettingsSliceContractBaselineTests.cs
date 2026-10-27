@@ -37,6 +37,10 @@ public sealed class SettingsSliceContractBaselineTests
         Assert.True(s.EnableCompactAmbientAnimations);
         Assert.True(s.AutoCheckForUpdates);
         Assert.Null(s.LastUpdateCheckAt);
+        Assert.True(s.ShowReleaseNotesAfterUpdate);
+        Assert.Null(s.LastRunVersion);
+        Assert.True(s.AutoDownloadUpdates);
+        Assert.True(s.ShowUpdateToastNotification);
         Assert.False(s.QuickCaptureEnabled);
         Assert.False(s.TodoEnabled);
         Assert.Empty(s.FeatureWidgetEnabledStates);
@@ -282,6 +286,10 @@ public sealed class SettingsSliceContractBaselineTests
         "enableCompactAmbientAnimations",
         "autoCheckForUpdates",
         "lastUpdateCheckAt",
+        "showReleaseNotesAfterUpdate",
+        "lastRunVersion",
+        "autoDownloadUpdates",
+        "showUpdateToastNotification",
         "quickCaptureEnabled",
         "todoEnabled",
         "featureWidgetEnabledStates",
@@ -341,6 +349,7 @@ public sealed class SettingsSliceContractBaselineTests
         "onboardingStepIndex",
         "completedOnboardingVersion",
         "hasResolvedInitialFileWidgetSetup",
+        "fullyElevatedNoticeAcknowledgedUtcTicks",
         "defaultWidgetWidth",
         "defaultWidgetHeight",
         "widgetOpacity",

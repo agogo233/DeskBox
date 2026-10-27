@@ -38,6 +38,7 @@ internal static class Program
         "arabic",
         "bengali",
         "russian",
+        "korean",
     }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
     private const string InstallStateRegistryPath = @"Software\DeskBox\DirectInstall";
     private const string UninstallRegistryPath =

@@ -166,6 +166,7 @@ internal sealed class HookHealthWatchdog : IDisposable
     private readonly HookWatchdogPolicy _policy;
     private readonly DispatcherQueue? _dispatcherQueue;
     private readonly Action<string> _log;
+    private readonly Action<string> _logRoutine;
     private readonly List<WatchSlot> _slots = new();
     private readonly List<MaintenanceSlot> _maintenanceSlots = new();
     private readonly object _slotsLock = new();
@@ -194,11 +195,15 @@ internal sealed class HookHealthWatchdog : IDisposable
     internal HookHealthWatchdog(
         DispatcherQueue? dispatcherQueue,
         Action<string>? log = null,
+        Action<string>? logRoutine = null,
         HookWatchdogPolicy? policy = null)
     {
         _policy = policy ?? HookWatchdogPolicy.Default;
         _dispatcherQueue = dispatcherQueue;
         _log = log ?? (_ => { });
+        // Routine per-round lines (the registration heartbeat) go to the
+        // routine channel; repairs and failures always use _log.
+        _logRoutine = logRoutine ?? _log;
         _loop = Task.Run(LoopAsync);
     }
 
@@ -492,7 +497,7 @@ internal sealed class HookHealthWatchdog : IDisposable
         slot.HasAttempted = true;
         slot.LastAttemptTicks = nowTicks;
         slot.AttemptInFlight = true;
-        _log($"[HookWatchdog] {target.MaintenanceName} issuing registration heartbeat");
+        _logRoutine($"[HookWatchdog] {target.MaintenanceName} issuing registration heartbeat");
         if (_disposed)
         {
             return;

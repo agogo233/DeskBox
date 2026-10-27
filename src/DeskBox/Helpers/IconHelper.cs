@@ -1568,8 +1568,11 @@ public static class IconHelper
                 return null;
             }
 
-            var imageList = (ShellIconNativeMethods.IImageList)Marshal.GetObjectForIUnknown(imageListPtr);
-            int result = imageList.GetIcon(iconIndex, ShellIconNativeMethods.ILD_TRANSPARENT, ref iconHandle);
+            int result = ShellIconNativeMethods.ImageListGetIcon(
+                imageListPtr,
+                iconIndex,
+                ShellIconNativeMethods.ILD_TRANSPARENT,
+                ref iconHandle);
             if (result != 0 || iconHandle == IntPtr.Zero)
             {
                 return null;
@@ -1618,7 +1621,43 @@ public static class IconHelper
         {
             using var icon = Icon.FromHandle(shinfo.hIcon);
             using var bitmap = icon.ToBitmap();
-            return EncodeIconBitmapAsPng(bitmap, rejectPaddedShortcutIcon);
+            return EncodeIconBitmapAsPng(bitmap, rejectPaddedShortcutIcon: false);
+        }
+        finally
+        {
+            ShellIconNativeMethods.DestroyIcon(shinfo.hIcon);
+        }
+    }
+
+    /// <summary>
+    /// PNG bytes for a file TYPE's icon, resolved from the extension
+    /// association alone — the file does not have to exist. Used by the
+    /// New submenu, whose entries have no backing file yet.
+    /// </summary>
+    internal static byte[]? GetFileTypeIconPngBytes(
+        string fileNameWithExtension)
+    {
+        const uint fileAttributeNormal = 0x80;
+        var shinfo = new ShellIconNativeMethods.SHFILEINFO();
+        IntPtr hImg = ShellIconNativeMethods.SHGetFileInfo(
+            fileNameWithExtension,
+            fileAttributeNormal,
+            ref shinfo,
+            (uint)Marshal.SizeOf(shinfo),
+            ShellIconNativeMethods.SHGFI_ICON |
+            ShellIconNativeMethods.SHGFI_LARGEICON |
+            ShellIconNativeMethods.SHGFI_USEFILEATTRIBUTES);
+
+        if (hImg == IntPtr.Zero || shinfo.hIcon == IntPtr.Zero)
+        {
+            return null;
+        }
+
+        try
+        {
+            using var icon = Icon.FromHandle(shinfo.hIcon);
+            using var bitmap = icon.ToBitmap();
+            return EncodeIconBitmapAsPng(bitmap, rejectPaddedShortcutIcon: false);
         }
         finally
         {
@@ -1742,6 +1781,95 @@ public static class IconHelper
         string filePath,
         int iconIndex,
         int size) => TryExtractHighResIndexedIcon(filePath, iconIndex, size);
+
+    /// <summary>
+    /// Icon for a shell-namespace item addressed by its parsing name
+    /// ("::{645FF040-5081-101B-9F08-00AA002F954E}", "shell:ControlPanelFolder",
+    /// …) as PNG bytes. Unlike file-path icons, namespace icons can be
+    /// state-aware — the Recycle Bin returns the empty or the full graphic
+    /// for the same PIDL — so callers re-query when the state may have moved.
+    /// Safe to call from background threads.
+    /// </summary>
+    internal static byte[]? GetShellItemIconPngBytes(string parsingName)
+    {
+        IntPtr pidl = IntPtr.Zero;
+        IntPtr hImg = IntPtr.Zero;
+        try
+        {
+            int hr = ShellIconNativeMethods.SHParseDisplayName(
+                parsingName,
+                IntPtr.Zero,
+                out pidl,
+                0,
+                out _);
+            if (hr != 0 || pidl == IntPtr.Zero)
+            {
+                return null;
+            }
+
+            // Resolve the system image-list index, then pull the large
+            // (32px) icon out of SHIL_LARGE-quality handles for crispness.
+            var shinfo = new ShellIconNativeMethods.SHFILEINFO();
+            hImg = ShellIconNativeMethods.SHGetFileInfoPidl(
+                pidl,
+                0,
+                ref shinfo,
+                (uint)Marshal.SizeOf(shinfo),
+                ShellIconNativeMethods.SHGFI_PIDL |
+                ShellIconNativeMethods.SHGFI_SYSICONINDEX);
+            if (hImg != IntPtr.Zero)
+            {
+                byte[]? bytes = TryGetIconFromImageList(
+                    ShellIconNativeMethods.SHIL_EXTRALARGE,
+                    shinfo.iIcon);
+                bytes ??= TryGetIconFromImageList(
+                    ShellIconNativeMethods.SHIL_LARGE,
+                    shinfo.iIcon);
+                if (bytes is not null)
+                {
+                    return bytes;
+                }
+            }
+
+            // Fallback: let the shell hand us the icon handle directly.
+            var direct = new ShellIconNativeMethods.SHFILEINFO();
+            hImg = ShellIconNativeMethods.SHGetFileInfoPidl(
+                pidl,
+                0,
+                ref direct,
+                (uint)Marshal.SizeOf(direct),
+                ShellIconNativeMethods.SHGFI_PIDL |
+                ShellIconNativeMethods.SHGFI_ICON |
+                ShellIconNativeMethods.SHGFI_LARGEICON);
+            if (hImg == IntPtr.Zero || direct.hIcon == IntPtr.Zero)
+            {
+                return null;
+            }
+
+            try
+            {
+                using var icon = Icon.FromHandle(direct.hIcon);
+                using var bitmap = icon.ToBitmap();
+                return EncodeIconBitmapAsPng(bitmap, rejectPaddedShortcutIcon: false);
+            }
+            finally
+            {
+                ShellIconNativeMethods.DestroyIcon(direct.hIcon);
+            }
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[IconHelper] Shell item icon failed for {parsingName}: {ex.Message}");
+            return null;
+        }
+        finally
+        {
+            if (pidl != IntPtr.Zero)
+            {
+                ShellIconNativeMethods.ILFree(pidl);
+            }
+        }
+    }
 
     internal static Task<BitmapImage?> CreateBitmapImageAsync(
         Microsoft.UI.Dispatching.DispatcherQueue dispatcher,

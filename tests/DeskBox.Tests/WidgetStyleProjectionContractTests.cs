@@ -88,6 +88,7 @@ public sealed class WidgetStyleProjectionContractTests
         "screenBindingMode", "boundScreenId", "boundScreenLabel",
         "disconnectCollapsedForScreenId",
         "compactPlacement",
+        "lastUserPlacementUtc",
         // file bindings + item payloads
         "mappedFolderPath", "followsDefaultStoragePath", "managedFolderName",
         "items", "fileAddedAtByPath", "fileAddedAtTrackingInitialized",

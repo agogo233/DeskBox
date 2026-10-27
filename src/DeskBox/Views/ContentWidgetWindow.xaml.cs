@@ -828,6 +828,7 @@ private bool PrepareTrayShowAnimationCore(bool restoreBoundsForCurrentTopology)
 
     public void ShowPreparedAtDesktopLayer(bool persistVisibility = true)
     {
+        ReconcileStaleExpandedWidgetLayerLease();
         ShowWithoutActivation(persistVisibility);
         TrayAnimation.PrepareHiddenState();
         PushToBottom(showWindow: false);
@@ -836,6 +837,7 @@ private bool PrepareTrayShowAnimationCore(bool restoreBoundsForCurrentTopology)
 
     public void ShowPreparedRaisedFromTray(bool persistVisibility = true)
     {
+        ReconcileStaleExpandedWidgetLayerLease();
         ShowWithoutActivation(persistVisibility);
         TrayAnimation.PrepareHiddenState();
         HoldTemporaryTopMost(showWindow: false);

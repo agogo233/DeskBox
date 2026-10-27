@@ -951,29 +951,8 @@ public sealed class FileServiceTests : IDisposable
             FileService.CanUseAtomicMove(sourcePath, destinationPath));
     }
 
-    private static bool TryCreateDirectoryJunction(string junction, string target)
-    {
-        try
-        {
-            using var process = Process.Start(new ProcessStartInfo
-            {
-                FileName = "cmd.exe",
-                Arguments = $"/d /c mklink /J \"{junction}\" \"{target}\"",
-                CreateNoWindow = true,
-                UseShellExecute = false,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true
-            });
-            process?.WaitForExit();
-            return process?.ExitCode == 0 && Directory.Exists(junction);
-        }
-        catch (Exception ex) when (
-            ex is IOException or UnauthorizedAccessException or
-            System.ComponentModel.Win32Exception)
-        {
-            return false;
-        }
-    }
+    private static bool TryCreateDirectoryJunction(string junction, string target) =>
+        TestJunction.TryCreate(junction, target);
 
     private static void TryDeleteDirectoryJunction(string junction)
     {

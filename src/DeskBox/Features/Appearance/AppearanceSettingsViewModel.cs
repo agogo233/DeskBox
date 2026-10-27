@@ -42,7 +42,7 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
     private const string AccentSourceCustom = "Custom";
 
     private static readonly string[] Themes = ["System", "Light", "Dark"];
-    private static readonly string[] TrayIconStyles = ["System", "Colorful", "Black", "White"];
+    private static readonly string[] TrayIconStyles = ["System", "Colorful", "Black", "White", "Hidden"];
     private static readonly string[] ForegroundModes =
     [
         WidgetForegroundKinds.FollowTheme,
@@ -334,7 +334,8 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
                 "Settings.TrayIcon.System",
                 "Settings.TrayIcon.Colorful",
                 "Settings.TrayIcon.Black",
-                "Settings.TrayIcon.White"
+                "Settings.TrayIcon.White",
+                "Settings.TrayIcon.Hidden"
             ];
             _cachedTrayIconStyleNames ??= keys.Select(key => _localize(key)).ToArray();
             var options = new SettingsOption[TrayIconStyles.Length];

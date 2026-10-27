@@ -97,37 +97,22 @@ public partial class SettingsViewModel
          _dragDropPermissionDiagnostic.HasShortcutIssue ||
          _dragDropPermissionDiagnostic.NeedsRelaunch);
 
+    // Diagnose() already returns localized Summary/Detail for every issue —
+    // including the ones this projection used to drop (ShellAboveApp,
+    // ShortcutRunAs, and later FullyElevatedSession read as "正常" through
+    // the old switch's fallback arm). Pass the service texts straight
+    // through; the projection layer owns no issue knowledge of its own.
     private string GetDragDropPermissionSummaryText()
     {
-        if (_dragDropPermissionDiagnostic is null)
-        {
-            return _localizationService.T("Settings.DragDropPermission.NotChecked");
-        }
-
-        return _dragDropPermissionDiagnostic.Issue switch
-        {
-            DragDropDiagnosticIssue.UacDisabled => _localizationService.T("Settings.DragDropPermission.Summary.UacDisabled"),
-            DragDropDiagnosticIssue.PermissionMismatch => _localizationService.T("Settings.DragDropPermission.Summary.PermissionMismatch"),
-            DragDropDiagnosticIssue.AppCompatIssue => _localizationService.T("Settings.DragDropPermission.Summary.AppCompatIssue"),
-            DragDropDiagnosticIssue.StartupShortcutIssue => _localizationService.T("Settings.DragDropPermission.Summary.StartupShortcutIssue"),
-            _ => _localizationService.T("Settings.DragDropPermission.Summary.Ok")
-        };
+        return _dragDropPermissionDiagnostic is null
+            ? _localizationService.T("Settings.DragDropPermission.NotChecked")
+            : _dragDropPermissionDiagnostic.Summary;
     }
 
     private string GetDragDropPermissionDetailText()
     {
-        if (_dragDropPermissionDiagnostic is null)
-        {
-            return _localizationService.T("Settings.DragDropPermission.NotCheckedDetail");
-        }
-
-        return _dragDropPermissionDiagnostic.Issue switch
-        {
-            DragDropDiagnosticIssue.UacDisabled => _localizationService.T("Settings.DragDropPermission.Detail.UacDisabled"),
-            DragDropDiagnosticIssue.PermissionMismatch => _localizationService.T("Settings.DragDropPermission.Detail.PermissionMismatch"),
-            DragDropDiagnosticIssue.AppCompatIssue => _localizationService.T("Settings.DragDropPermission.Detail.AppCompatIssue"),
-            DragDropDiagnosticIssue.StartupShortcutIssue => _localizationService.T("Settings.DragDropPermission.Detail.StartupShortcutIssue"),
-            _ => _localizationService.T("Settings.DragDropPermission.Detail.Ok")
-        };
+        return _dragDropPermissionDiagnostic is null
+            ? _localizationService.T("Settings.DragDropPermission.NotCheckedDetail")
+            : _dragDropPermissionDiagnostic.Detail;
     }
 }

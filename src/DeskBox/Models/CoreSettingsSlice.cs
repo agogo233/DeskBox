@@ -16,7 +16,7 @@ public sealed class CoreSettingsSlice
     public string TrayIconStyle { get; set; } = "Colorful";
 
 /// <summary>
-/// Display language. Valid values: <c>"System"</c>, <c>"zh-CN"</c>, <c>"zh-TW"</c>, <c>"en-US"</c>, <c>"ja-JP"</c>, <c>"de-DE"</c>, <c>"pt-BR"</c>, <c>"hi-IN"</c>, <c>"es-ES"</c>, <c>"fr-FR"</c>, <c>"ar-SA"</c>, <c>"bn-BD"</c>, <c>"ru-RU"</c>.
+/// Display language. Valid values: <c>"System"</c>, <c>"zh-CN"</c>, <c>"zh-TW"</c>, <c>"en-US"</c>, <c>"ja-JP"</c>, <c>"de-DE"</c>, <c>"pt-BR"</c>, <c>"hi-IN"</c>, <c>"es-ES"</c>, <c>"fr-FR"</c>, <c>"ar-SA"</c>, <c>"bn-BD"</c>, <c>"ru-RU"</c>, <c>"ko-KR"</c>.
 /// </summary>
     public string Language { get; set; } = "System";
 
@@ -57,6 +57,31 @@ public sealed class CoreSettingsSlice
     /// <summary>Last time DeskBox successfully attempted an update check.</summary>
     public DateTimeOffset? LastUpdateCheckAt { get; set; }
 
+    /// <summary>
+    /// Whether the release-notes window opens once after DeskBox runs a new
+    /// version for the first time (update installed, or a manual install over
+    /// an older copy).
+    /// </summary>
+    public bool ShowReleaseNotesAfterUpdate { get; set; } = true;
+
+    /// <summary>
+    /// Version observed on the previous run. A mismatch against the current
+    /// version on the next interactive launch triggers the release-notes
+    /// window; it is stamped unconditionally once observed so a suppressed or
+    /// failed showing never repeats on every launch.
+    /// </summary>
+    public string? LastRunVersion { get; set; }
+
+    /// <summary>
+    /// Whether a discovered update is downloaded in the background (direct
+    /// channel only). Installation itself always waits for the user; metered
+    /// connections are skipped by the download trigger.
+    /// </summary>
+    public bool AutoDownloadUpdates { get; set; } = true;
+
+    /// <summary>Whether the update-available toast notifications are shown.</summary>
+    public bool ShowUpdateToastNotification { get; set; } = true;
+
     /// <summary>Whether the global hotkey is enabled.</summary>
     public bool GlobalHotkeyEnabled { get; set; } = true;
 
@@ -87,4 +112,12 @@ public sealed class CoreSettingsSlice
     /// This remains true after the user deletes or disables every file widget.
     /// </summary>
     public bool HasResolvedInitialFileWidgetSetup { get; set; }
+
+    /// <summary>
+    /// When the one-time fully-elevated-desktop informed notice (built-in
+    /// Administrator / UAC-off desktops) was last acknowledged, in UTC ticks.
+    /// Null means it has not been acknowledged yet. Runtime state: resetting
+    /// defaults must not re-arm the notice into a repeat interruption.
+    /// </summary>
+    public long? FullyElevatedNoticeAcknowledgedUtcTicks { get; set; }
 }

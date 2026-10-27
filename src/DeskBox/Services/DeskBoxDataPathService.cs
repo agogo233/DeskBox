@@ -43,9 +43,10 @@ public sealed class DeskBoxDataPathService
     // recovery copy with it; an in-place update over the same
     // PackageFamilyName keeps LocalCache and therefore the snapshots.
     // Guaranteeing uninstall survival on the store channel as well would
-    // require declaring desktop6:FileSystemWriteVirtualization=disabled
-    // (a restricted capability needing store approval) — pending product
-    // decision.
+    // require declaring desktop6:FileSystemWriteVirtualization=disabled —
+    // a restricted capability that is effectively unavailable to third-party
+    // apps (store-lifecycle audit 2026-10-07, option D); the accepted
+    // alternative is the in-product disclosure on the backup settings page.
     public string RecoveryDirectory => IsDevelopmentRoot
         ? $"{RootPath}-Recovery"
         : Path.Combine(

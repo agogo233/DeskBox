@@ -144,6 +144,23 @@ public sealed class AppearanceSettingsEditorTests : IDisposable
     }
 
     [Fact]
+    public void ReadSnapshot_HiddenTrayIconStyle_ProjectsAndStaysSelectable()
+    {
+        (_, AppearanceSettingsViewModel editor) = CreateEditor(
+            _root,
+            settings => settings.Settings.Core.TrayIconStyle = "Hidden");
+
+        Assert.Equal("Hidden", editor.TrayIconStyle);
+
+        // Hidden is offered last; every visible style must stay alongside it
+        // because switching back in Settings is the primary recovery path
+        // once the tray icon is gone.
+        Assert.Equal(
+            ["System", "Colorful", "Black", "White", "Hidden"],
+            editor.AvailableTrayIconStyleOptions.Select(option => option.Value));
+    }
+
+    [Fact]
     public void SliderEdits_WriteThroughTheCoordinatorAndRaiseTheSaveEvent()
     {
         (SettingsService settings, AppearanceSettingsViewModel editor) = CreateEditor(_root);

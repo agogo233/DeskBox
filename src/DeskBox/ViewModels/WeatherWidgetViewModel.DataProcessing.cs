@@ -599,6 +599,7 @@ public sealed partial class WeatherWidgetViewModel
                 "ar-SA" => new System.Globalization.CultureInfo("ar-SA"),
                 "bn-BD" => new System.Globalization.CultureInfo("bn-BD"),
                 "ru-RU" => new System.Globalization.CultureInfo("ru-RU"),
+                "ko-KR" => new System.Globalization.CultureInfo("ko-KR"),
                 _ => new System.Globalization.CultureInfo("en-US")
             };
             return dt.ToString("ddd", culture);

@@ -364,6 +364,16 @@ public sealed class FileWidgetContentAdapter :
         Surface?.NotifyNativeDropBlockedUndisplayable(undisplayableCount);
     }
 
+    internal void NotifyNativeDropZeroResult()
+    {
+        Surface?.NotifyNativeDropZeroResult();
+    }
+
+    internal void NotifyNativeDropImportBusy()
+    {
+        Surface?.NotifyNativeDropImportBusy();
+    }
+
     internal bool IsInternalReorderDrag(DataPackageView dataView)
     {
         return Surface?.IsInternalReorderDrag(dataView) ?? false;

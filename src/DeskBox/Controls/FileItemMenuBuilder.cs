@@ -1,9 +1,10 @@
+using DeskBox.Helpers;
 using DeskBox.Models;
+using DeskBox.Platform;
 using DeskBox.Services;
+using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using Microsoft.UI.Xaml.Controls.Primitives;
-using Microsoft.UI.Xaml.Input;
 
 namespace DeskBox.Controls;
 
@@ -46,35 +47,54 @@ public sealed record FileItemMenuActions(
     Func<WidgetItem, bool>? CanExtractArchive = null,
     Func<WidgetItem, Task>? ExtractArchiveAsync = null,
     Func<IReadOnlyList<WidgetItem>, bool>? CanCompressSelection = null,
-    Func<IReadOnlyList<WidgetItem>, ArchiveCompressionFormat, Task>? CompressSelectionAsync = null);
+    Func<IReadOnlyList<WidgetItem>, ArchiveCompressionFormat, Task>? CompressSelectionAsync = null,
+    Func<WidgetItem, Task>? CreateItemShortcutAsync = null,
+    Func<Task>? EmptyRecycleBinAsync = null);
 
 /// <summary>
-/// Builds the item context menus in the Windows 11 shape: a compact icon
-/// strip on top (cut / copy / rename / delete) with the text rows below
-/// (open family, archive actions, host-unique actions, properties, and the
-/// full system menu escape hatch last). Implemented with CommandBarFlyout;
-/// submenu rows ride in AppBarElementContainer, the documented way to host
-/// MenuFlyoutItem-based submenus in the secondary command list.
+/// Builds the item context menus as a single-column MenuFlyout — one popup
+/// window with the platform backdrop. The retired strip-plus-rows flyout
+/// shape opened as two separate HWNDs and the row window had
+/// no backdrop to show a material through (five failed rounds, see
+/// artifacts/context-menu-enhancement-20261015); MenuFlyout restores the
+/// material and the native submenu/hover/entrance behaviors.
+/// The single-item order mirrors the native classic menu (the desktop
+/// right-click the reference screenshots capture): the open family leads,
+/// extension-style verbs follow, then the stable tail — copy-as-path,
+/// cut/copy, create-shortcut/delete/rename, properties — with the
+/// system-menu escape hatch last. Namespace shortcuts (This PC, Recycle
+/// Bin, Control Panel links) additionally inherit their target's desktop
+/// verbs: Empty Recycle Bin rides right after Open, matching the native
+/// desktop icon menu, while rows that need a filesystem target (Open file
+/// location, Compress) are hidden the way Explorer hides them.
 /// </summary>
 public static class FileItemMenuBuilder
 {
-    public static CommandBarFlyout CreateItemFlyout(
+    public static MenuFlyout CreateItemFlyout(
         WidgetItem item,
         FileItemMenuActions actions)
     {
-        var flyout = CreateExpandedFlyout();
+        var flyout = CreateMenu();
 
-        AddClipboardStrip(flyout, actions, item, includeRename: true);
-        AddDeleteStripButton(flyout, actions);
+        NamespaceShortcutKind namespaceKind =
+            NamespaceShortcutHelper.ResolveKind(item);
+        bool isNamespaceShortcut = namespaceKind != NamespaceShortcutKind.None;
 
         AddOpenRow(flyout, item, actions);
         AddOpenWithRow(flyout, item, actions);
 
+        // Explorer's classic menu pins Open file location as the second row
+        // for links; a PIDL-only namespace link has no filesystem target, so
+        // the native menu omits the row entirely.
+        if (!isNamespaceShortcut)
+        {
+            AddShowInExplorerRow(flyout, item, actions);
+        }
+
         if (actions.CanRunAsAdministrator?.Invoke(item) == true &&
             actions.RunAsAdministratorAsync is not null)
         {
-            flyout.SecondaryCommands.Add(CreateRowButton(
-                flyout,
+            flyout.Items.Add(CreateRow(
                 actions,
                 "Widget.RunAsAdministrator",
                 "\uE7EF",
@@ -85,8 +105,7 @@ public static class FileItemMenuBuilder
         if (actions.CanExtractArchive?.Invoke(item) == true &&
             actions.ExtractArchiveAsync is not null)
         {
-            flyout.SecondaryCommands.Add(CreateRowButton(
-                flyout,
+            flyout.Items.Add(CreateRow(
                 actions,
                 "Widget.ExtractAll",
                 "\uE7F8",
@@ -94,12 +113,23 @@ public static class FileItemMenuBuilder
                 async () => await actions.ExtractArchiveAsync!(item)));
         }
 
-        flyout.SecondaryCommands.Add(new AppBarSeparator());
+        if (namespaceKind == NamespaceShortcutKind.RecycleBin &&
+            actions.EmptyRecycleBinAsync is not null)
+        {
+            AddEmptyRecycleBinRow(flyout, actions);
+        }
 
-        AddCompressToZipRow(flyout, actions);
+        // DeskBox's own archive verbs occupy the extension-verb zone of the
+        // native layout (between the open family and the file-group tail).
+        // The namespace targets have no desktop counterpart, so they skip it.
+        if (!isNamespaceShortcut)
+        {
+            AddCompressToZipRow(flyout, actions);
+        }
 
-        flyout.SecondaryCommands.Add(CreateRowButton(
-            flyout,
+        flyout.Items.Add(new MenuFlyoutSeparator());
+
+        flyout.Items.Add(CreateRow(
             actions,
             "Widget.CopyPath",
             "\uE8C8",
@@ -110,11 +140,26 @@ public static class FileItemMenuBuilder
                 return Task.CompletedTask;
             }));
 
+        flyout.Items.Add(new MenuFlyoutSeparator());
+
+        AddCutCopyRows(flyout, actions);
+
+        flyout.Items.Add(new MenuFlyoutSeparator());
+
+        AddCreateShortcutRow(flyout, item, actions);
+        AddDeleteRow(flyout, actions);
+        AddRenameRow(flyout, item, actions);
+
+        bool hasSurfaceRows = actions.CanRemoveFromStack(item) ||
+            actions.CanMoveItemsBackToDesktop();
+        if (hasSurfaceRows)
+        {
+            flyout.Items.Add(new MenuFlyoutSeparator());
+        }
+
         if (actions.CanRemoveFromStack(item))
         {
-            flyout.SecondaryCommands.Add(new AppBarSeparator());
-            flyout.SecondaryCommands.Add(CreateRowButton(
-                flyout,
+            flyout.Items.Add(CreateRow(
                 actions,
                 "Widget.Stack.RemoveItem",
                 "\uE8FB",
@@ -128,8 +173,7 @@ public static class FileItemMenuBuilder
 
         if (actions.CanMoveItemsBackToDesktop())
         {
-            flyout.SecondaryCommands.Add(CreateRowButton(
-                flyout,
+            flyout.Items.Add(CreateRow(
                 actions,
                 "Widget.MoveBackToDesktop",
                 "\uE74A",
@@ -138,22 +182,9 @@ public static class FileItemMenuBuilder
                     actions.GetSelectedItems())));
         }
 
-        flyout.SecondaryCommands.Add(new AppBarSeparator());
+        flyout.Items.Add(new MenuFlyoutSeparator());
 
-        flyout.SecondaryCommands.Add(CreateRowButton(
-            flyout,
-            actions,
-            "Widget.ShowInExplorer",
-            "\uE838",
-            null,
-            () =>
-            {
-                actions.ShowInExplorer(item);
-                return Task.CompletedTask;
-            }));
-
-        flyout.SecondaryCommands.Add(CreateRowButton(
-            flyout,
+        flyout.Items.Add(CreateRow(
             actions,
             "Common.Properties",
             "\uE946",
@@ -169,16 +200,12 @@ public static class FileItemMenuBuilder
         return flyout;
     }
 
-    public static CommandBarFlyout CreateMultiSelectionFlyout(
+    public static MenuFlyout CreateMultiSelectionFlyout(
         FileItemMenuActions actions)
     {
-        var flyout = CreateExpandedFlyout();
+        var flyout = CreateMenu();
 
-        AddClipboardStrip(flyout, actions, null, includeRename: false);
-        AddDeleteStripButton(flyout, actions);
-
-        flyout.SecondaryCommands.Add(CreateRowButton(
-            flyout,
+        flyout.Items.Add(CreateRow(
             actions,
             "Widget.Open",
             "\uE8E5",
@@ -191,12 +218,16 @@ public static class FileItemMenuBuilder
                 }
             }));
 
+        flyout.Items.Add(new MenuFlyoutSeparator());
+
+        AddCutCopyRows(flyout, actions);
+        AddDeleteRow(flyout, actions);
+
+        flyout.Items.Add(new MenuFlyoutSeparator());
+
         AddCompressToZipRow(flyout, actions);
 
-        flyout.SecondaryCommands.Add(new AppBarSeparator());
-
-        flyout.SecondaryCommands.Add(CreateRowButton(
-            flyout,
+        flyout.Items.Add(CreateRow(
             actions,
             "Widget.CopyPath",
             "\uE8C8",
@@ -209,8 +240,7 @@ public static class FileItemMenuBuilder
 
         if (actions.CanCreateManualStack)
         {
-            flyout.SecondaryCommands.Add(CreateRowButton(
-                flyout,
+            flyout.Items.Add(CreateRow(
                 actions,
                 "Widget.Stack.Start",
                 "\uE8B7",
@@ -225,8 +255,7 @@ public static class FileItemMenuBuilder
 
         if (actions.CanMoveItemsBackToDesktop())
         {
-            flyout.SecondaryCommands.Add(CreateRowButton(
-                flyout,
+            flyout.Items.Add(CreateRow(
                 actions,
                 "Widget.MoveBackToDesktop",
                 "\uE74A",
@@ -239,50 +268,34 @@ public static class FileItemMenuBuilder
     }
 
     /// <summary>
-    /// The icon strip: cut / copy / rename, matching the Windows 11 command
-    /// order (cut, copy, rename, share, delete — share has no grid
-    /// equivalent). Rename is single-selection only.
+    /// Cut / copy, the first of the native classic file groups; rename moved
+    /// to the second group (create shortcut / delete / rename) where the
+    /// classic menu keeps it.
     /// </summary>
-    private static void AddClipboardStrip(
-        CommandBarFlyout flyout,
-        FileItemMenuActions actions,
-        WidgetItem? renameTarget,
-        bool includeRename)
+    private static void AddCutCopyRows(
+        MenuFlyout flyout,
+        FileItemMenuActions actions)
     {
-        flyout.PrimaryCommands.Add(CreateStripButton(
-            flyout,
+        flyout.Items.Add(CreateRow(
             actions,
             "Common.Cut",
             "\uE8C6",
             "Ctrl+X",
             async () => await actions.CopySelectionToClipboardAsync(true)));
 
-        flyout.PrimaryCommands.Add(CreateStripButton(
-            flyout,
+        flyout.Items.Add(CreateRow(
             actions,
             "Common.Copy",
             "\uE8C8",
             "Ctrl+C",
             async () => await actions.CopySelectionToClipboardAsync(false)));
-
-        if (includeRename && renameTarget is not null)
-        {
-            flyout.PrimaryCommands.Add(CreateStripButton(
-                flyout,
-                actions,
-                "Common.Rename",
-                "\uE8AC",
-                "F2",
-                async () => await actions.RenameItemAsync(renameTarget)));
-        }
     }
 
-    private static void AddDeleteStripButton(
-        CommandBarFlyout flyout,
+    private static void AddDeleteRow(
+        MenuFlyout flyout,
         FileItemMenuActions actions)
     {
-        flyout.PrimaryCommands.Add(CreateStripButton(
-            flyout,
+        flyout.Items.Add(CreateRow(
             actions,
             "Widget.MoveToRecycleBin",
             "\uE74D",
@@ -291,13 +304,47 @@ public static class FileItemMenuBuilder
                 actions.GetSelectedItems())));
     }
 
-    private static void AddOpenRow(
-        CommandBarFlyout flyout,
+    /// <summary>
+    /// Create shortcut — the first row of the native classic tail group
+    /// (create shortcut / delete / rename), offered for every item.
+    /// </summary>
+    private static void AddCreateShortcutRow(
+        MenuFlyout flyout,
         WidgetItem item,
         FileItemMenuActions actions)
     {
-        flyout.SecondaryCommands.Add(CreateRowButton(
-            flyout,
+        if (actions.CreateItemShortcutAsync is null)
+        {
+            return;
+        }
+
+        flyout.Items.Add(CreateRow(
+            actions,
+            "Widget.CreateShortcut",
+            "\uE71B",
+            null,
+            async () => await actions.CreateItemShortcutAsync!(item)));
+    }
+
+    private static void AddRenameRow(
+        MenuFlyout flyout,
+        WidgetItem item,
+        FileItemMenuActions actions)
+    {
+        flyout.Items.Add(CreateRow(
+            actions,
+            "Common.Rename",
+            "\uE8AC",
+            "F2",
+            async () => await actions.RenameItemAsync(item)));
+    }
+
+    private static void AddOpenRow(
+        MenuFlyout flyout,
+        WidgetItem item,
+        FileItemMenuActions actions)
+    {
+        flyout.Items.Add(CreateRow(
             actions,
             "Widget.Open",
             "\uE8E5",
@@ -305,8 +352,65 @@ public static class FileItemMenuBuilder
             async () => await actions.OpenItemAsync(item)));
     }
 
+    private static void AddShowInExplorerRow(
+        MenuFlyout flyout,
+        WidgetItem item,
+        FileItemMenuActions actions)
+    {
+        flyout.Items.Add(CreateRow(
+            actions,
+            "Widget.ShowInExplorer",
+            "\uE838",
+            null,
+            () =>
+            {
+                actions.ShowInExplorer(item);
+                return Task.CompletedTask;
+            }));
+    }
+
+    /// <summary>
+    /// Empty Recycle Bin for the bin's namespace shortcut — the target
+    /// desktop icon's own verb, kept in its native slot right after the
+    /// open family. Native grays the verb for an empty bin; the aggregate
+    /// query is Shell work, so it runs on a low-priority UI pass after the
+    /// menu is up, never in the right-tap callback. Until it answers, the
+    /// row stays enabled and the click path re-checks before invoking.
+    /// </summary>
+    private static void AddEmptyRecycleBinRow(
+        MenuFlyout flyout,
+        FileItemMenuActions actions)
+    {
+        MenuFlyoutItem row = CreateRow(
+            actions,
+            "Widget.EmptyRecycleBin",
+            "\uE74D",
+            null,
+            async () => await actions.EmptyRecycleBinAsync!());
+        flyout.Opened += (_, _) => ScheduleRecycleBinEmptyStateCheck(row);
+        flyout.Items.Add(row);
+    }
+
+    private static void ScheduleRecycleBinEmptyStateCheck(MenuFlyoutItem row)
+    {
+        DispatcherQueue? queue = DispatcherQueue.GetForCurrentThread();
+        if (queue is null)
+        {
+            return;
+        }
+
+        _ = queue.TryEnqueue(DispatcherQueuePriority.Low, () =>
+        {
+            if (ShellRecycleBinInterop.TryQueryTotalItemCount(out long totalItems) &&
+                totalItems == 0)
+            {
+                row.IsEnabled = false;
+            }
+        });
+    }
+
     private static void AddOpenWithRow(
-        CommandBarFlyout flyout,
+        MenuFlyout flyout,
         WidgetItem item,
         FileItemMenuActions actions)
     {
@@ -340,77 +444,41 @@ public static class FileItemMenuBuilder
     }
 
     /// <summary>
-    /// A secondary row with an attached submenu: the platform draws the
-    /// chevron (AppBarButtonHasFlyoutChevronVisibility is collapsed inside
-    /// CommandBarFlyout by default, re-enabled per row) and opens it on
-    /// click; hover opens after a short delay like the Windows 11 menu.
-    /// Picking any entry closes the whole menu round. Nested
-    /// MenuFlyoutSubItem hosting inside AppBarElementContainer renders
-    /// half-width and refuses to dismiss, which is why the list is its own
-    /// flyout.
+    /// A row with a native MenuFlyoutSubItem submenu: the platform draws the
+    /// chevron, opens on hover with its own timing, and dismisses the whole
+    /// menu round on selection. The retired two-window flyout shape needed
+    /// a container-wrapper hack, a chevron resource hack, and a manual
+    /// hover debounce here — all gone with the migration.
     /// </summary>
     private static void AddSubmenuRow(
-        CommandBarFlyout flyout,
+        MenuFlyout flyout,
         FileItemMenuActions actions,
         string localizationKey,
         string glyph,
         IReadOnlyList<MenuFlyoutItemBase> submenuItems,
         Action? submenuClosed = null)
     {
-        var row = new AppBarButton
+        var row = new MenuFlyoutSubItem
         {
-            Label = actions.Localize(localizationKey),
+            Text = actions.Localize(localizationKey),
             Icon = new FontIcon { Glyph = glyph }
         };
-        row.Resources["AppBarButtonHasFlyoutChevronVisibility"] =
-            Visibility.Visible;
 
-        var menu = new MenuFlyout();
         foreach (MenuFlyoutItemBase entry in submenuItems)
         {
-            menu.Items.Add(entry);
+            row.Items.Add(entry);
         }
 
-        // Same monitor-bounds-only rule as the parent menu; the submenu
-        // regularly extends past the widget window.
-        menu.ShouldConstrainToRootBounds = false;
-
-        foreach (MenuFlyoutItem entry in submenuItems
-                     .OfType<MenuFlyoutItem>())
+        if (submenuClosed is not null)
         {
-            entry.Click += (_, _) => flyout.Hide();
+            flyout.Closed += (_, _) => submenuClosed();
         }
 
-        row.Flyout = menu;
-
-        var hoverTimer = row.DispatcherQueue.CreateTimer();
-        hoverTimer.Interval = TimeSpan.FromMilliseconds(180);
-        hoverTimer.Tick += (_, _) =>
-        {
-            hoverTimer.Stop();
-            if (!menu.IsOpen)
-            {
-                FlyoutBase.ShowAttachedFlyout(row);
-            }
-        };
-        row.PointerEntered += (_, _) => hoverTimer.Start();
-        row.PointerExited += (_, _) => hoverTimer.Stop();
-
-        flyout.Closed += (_, _) =>
-        {
-            hoverTimer.Stop();
-            menu.Hide();
-            submenuClosed?.Invoke();
-        };
-        flyout.SecondaryCommands.Add(row);
+        flyout.Items.Add(row);
     }
 
-    private static CommandBarFlyout CreateExpandedFlyout() => new()
+    private static MenuFlyout CreateMenu() => new()
     {
-        // AlwaysExpanded removes the overflow/collapse button and the
-        // collapsed-then-expand opening animation (the two-step visual lag
-        // on first show); the menu opens fully formed like Windows 11.
-        AlwaysExpanded = true,
         // Grid widgets are small windows; the default root-bounds
         // constraint shoves the menu far away when the item sits near the
         // widget edge. Like the native Shell menu, only the monitor bounds
@@ -419,7 +487,7 @@ public static class FileItemMenuBuilder
     };
 
     private static void AddCompressToZipRow(
-        CommandBarFlyout flyout,
+        MenuFlyout flyout,
         FileItemMenuActions actions)
     {
         if (actions.CanCompressSelection?.Invoke(
@@ -464,7 +532,7 @@ public static class FileItemMenuBuilder
     }
 
     private static void AddShowMoreOptionsRow(
-        CommandBarFlyout flyout,
+        MenuFlyout flyout,
         WidgetItem item,
         FileItemMenuActions actions)
     {
@@ -473,8 +541,7 @@ public static class FileItemMenuBuilder
             return;
         }
 
-        flyout.SecondaryCommands.Add(CreateRowButton(
-            flyout,
+        flyout.Items.Add(CreateRow(
             actions,
             "Widget.MoreSystemOperations",
             "\uE712",
@@ -482,81 +549,26 @@ public static class FileItemMenuBuilder
             async () => await actions.ShowSystemContextMenuAsync(item)));
     }
 
-    private static AppBarButton CreateStripButton(
-        CommandBarFlyout flyout,
+    private static MenuFlyoutItem CreateRow(
         FileItemMenuActions actions,
         string localizationKey,
         string glyph,
         string? acceleratorText,
         Func<Task> onClick)
     {
-        AppBarButton button = CreateAppBarButton(
-            flyout,
-            actions,
-            localizationKey,
-            glyph,
-            acceleratorText,
-            onClick);
-        // The strip renders icon-only, like the Windows 11 menu; the label
-        // doubles as the tooltip.
-        ToolTipService.SetToolTip(
-            button,
-            string.IsNullOrEmpty(acceleratorText)
-                ? actions.Localize(localizationKey)
-                : $"{actions.Localize(localizationKey)} ({acceleratorText})");
-        return button;
-    }
-
-    private static AppBarButton CreateRowButton(
-        CommandBarFlyout flyout,
-        FileItemMenuActions actions,
-        string localizationKey,
-        string glyph,
-        string? acceleratorText,
-        Func<Task> onClick)
-    {
-        AppBarButton button = CreateAppBarButton(
-            flyout,
-            actions,
-            localizationKey,
-            glyph,
-            acceleratorText,
-            onClick);
-        // Overflow rows otherwise size to their label alone, which makes the
-        // menu feel wider than the Windows 11 reference; a uniform floor
-        // keeps the menu compact and consistent. Must stay OFF the primary
-        // strip buttons — wide strip buttons trigger dynamic overflow and
-        // the whole strip collapses into text rows.
-        button.MinWidth = 232;
-        return button;
-    }
-
-    private static AppBarButton CreateAppBarButton(
-        CommandBarFlyout flyout,
-        FileItemMenuActions actions,
-        string localizationKey,
-        string glyph,
-        string? acceleratorText,
-        Func<Task> onClick)
-    {
-        var button = new AppBarButton
+        var row = new MenuFlyoutItem
         {
-            Label = actions.Localize(localizationKey),
+            Text = actions.Localize(localizationKey),
             Icon = new FontIcon { Glyph = glyph }
         };
         if (!string.IsNullOrEmpty(acceleratorText))
         {
-            button.KeyboardAcceleratorTextOverride = acceleratorText;
+            row.KeyboardAcceleratorTextOverride = acceleratorText;
         }
 
-        button.Click += async (_, _) =>
-        {
-            // Strip buttons keep the flyout open by default; the Windows 11
-            // menu closes on every command, so hide explicitly (harmless
-            // for secondary rows, which already close).
-            flyout.Hide();
-            await onClick();
-        };
-        return button;
+        // MenuFlyout closes itself on selection; the retired strip-plus-rows
+        // rows needed an explicit Hide on every command.
+        row.Click += async (_, _) => await onClick();
+        return row;
     }
 }

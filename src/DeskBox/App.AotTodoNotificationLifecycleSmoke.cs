@@ -563,8 +563,11 @@ public partial class App
             payload.Tag != tag ||
             payload.Group != group ||
             !payload.Texts.SequenceEqual([title, message]) ||
-            string.IsNullOrWhiteSpace(payload.InputId) ||
-            payload.InputSelectionIds.Count == 0 ||
+            // Aggregates deliberately carry no selection input: there is no
+            // single completable target, so the product keeps the plain toast
+            // lifecycle with one view action reusing the body arguments.
+            !string.IsNullOrWhiteSpace(payload.InputId) ||
+            payload.InputSelectionIds.Count != 0 ||
             payload.Actions.Count != 1 ||
             !HasAotTodoNotificationArguments(
                 payload.LaunchArguments,

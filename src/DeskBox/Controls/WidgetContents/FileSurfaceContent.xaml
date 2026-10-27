@@ -797,6 +797,25 @@
                 </Grid>
             </Canvas>
 
+            <Border
+                x:Name="NameExpansionOverlay"
+                Canvas.ZIndex="22"
+                HorizontalAlignment="Left"
+                VerticalAlignment="Top"
+                Background="Transparent"
+                BorderThickness="1"
+                CornerRadius="2"
+                IsHitTestVisible="False"
+                Visibility="Collapsed">
+                <TextBlock
+                    x:Name="NameExpansionText"
+                    Margin="4,2"
+                    HorizontalAlignment="Center"
+                    TextAlignment="Center"
+                    TextTrimming="CharacterEllipsis"
+                    TextWrapping="Wrap" />
+            </Border>
+
             <TextBox
                 x:Name="ItemRenameTextBox"
                 Canvas.ZIndex="30"

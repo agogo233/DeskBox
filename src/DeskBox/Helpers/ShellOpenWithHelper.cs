@@ -7,13 +7,15 @@ namespace DeskBox.Helpers;
 /// One recommended "Open with" application, backed by a live Shell
 /// association handler. The handler must stay alive until the menu entry is
 /// invoked or disposed, matching the Shell lifetime rule for menu hosts.
+/// The native pointer is held raw and called through vtable slots — see
+/// <see cref="ComVtable"/> for why this is not a ComImport RCW.
 /// </summary>
 public sealed class OpenWithHandlerEntry : IDisposable
 {
-    private ShellOpenWithInterop.ShellOpenWithAssocHandler? _handler;
+    private IntPtr _handler;
 
     internal OpenWithHandlerEntry(
-        ShellOpenWithInterop.ShellOpenWithAssocHandler handler,
+        IntPtr handler,
         string displayName,
         string? iconSourcePath,
         int iconSourceIndex)
@@ -39,7 +41,7 @@ public sealed class OpenWithHandlerEntry : IDisposable
     /// </summary>
     public bool TryInvoke(string filePath)
     {
-        if (_handler is null || string.IsNullOrWhiteSpace(filePath))
+        if (_handler == IntPtr.Zero || string.IsNullOrWhiteSpace(filePath))
         {
             return false;
         }
@@ -53,7 +55,15 @@ public sealed class OpenWithHandlerEntry : IDisposable
 
         try
         {
-            _handler.Invoke(dataObject);
+            int hr = ShellOpenWithInterop.HandlerInvoke(_handler, dataObject);
+            if (hr < 0)
+            {
+                App.Log(
+                    $"[OpenWith] invoke failed hr=0x{hr:X8} " +
+                    $"handler='{UiName}' file='{filePath}'");
+                return false;
+            }
+
             return true;
         }
         catch (Exception ex)
@@ -71,17 +81,10 @@ public sealed class OpenWithHandlerEntry : IDisposable
 
     public void Dispose()
     {
-        if (_handler is { } handler)
+        if (_handler != IntPtr.Zero)
         {
-            _handler = null;
-            try
-            {
-                Marshal.ReleaseComObject(handler);
-            }
-            catch (COMException)
-            {
-                // The RCW is already gone; nothing to release.
-            }
+            Marshal.Release(_handler);
+            _handler = IntPtr.Zero;
         }
     }
 }
@@ -105,104 +108,43 @@ public static class ShellOpenWithHelper
             return [];
         }
 
+        if (!ShellOpenWithInterop.TryEnumHandlers(extension, out IntPtr enumHandlers))
+        {
+            return [];
+        }
+
         try
         {
-            ShellOpenWithInterop.SHAssocEnumHandlers(
-                extension,
-                ShellOpenWithInterop.AssocFilterRecommended,
-                out IntPtr handlersPtr);
-            if (handlersPtr == IntPtr.Zero)
+            var entries = new List<OpenWithHandlerEntry>();
+            var seen = new HashSet<string>(StringComparer.CurrentCulture);
+            var buffer = new IntPtr[1];
+            while (entries.Count < MaxEntries)
             {
-                return [];
-            }
-
-            var handlers = Marshal.GetObjectForIUnknown(handlersPtr)
-                as ShellOpenWithInterop.ShellOpenWithEnumHandlers;
-            if (handlers is null)
-            {
-                Marshal.Release(handlersPtr);
-                return [];
-            }
-
-            // The RCW owns the reference acquired by GetObjectForIUnknown;
-            // drop the raw reference from SHAssocEnumHandlers so the
-            // enumerator is released once on the RCW.
-            Marshal.Release(handlersPtr);
-            try
-            {
-                var entries = new List<OpenWithHandlerEntry>();
-                var seen = new HashSet<string>(StringComparer.CurrentCulture);
-                var buffer = new IntPtr[1];
-                while (entries.Count < MaxEntries)
+                int nextHr = ShellOpenWithInterop.HandlersNext(
+                    enumHandlers,
+                    buffer,
+                    out uint fetched);
+                if (nextHr < 0 || fetched == 0 || buffer[0] == IntPtr.Zero)
                 {
-                    handlers.Next(1, buffer, out uint fetched);
-                    if (fetched == 0 || buffer[0] == IntPtr.Zero)
-                    {
-                        break;
-                    }
-
-                    IntPtr handlerPtr = buffer[0];
-                    try
-                    {
-                        var handler = Marshal.GetObjectForIUnknown(handlerPtr)
-                            as ShellOpenWithInterop.ShellOpenWithAssocHandler;
-                        if (handler is null)
-                        {
-                            Marshal.Release(handlerPtr);
-                            continue;
-                        }
-
-                        // The RCW owns one reference; drop the raw one from Next.
-                        Marshal.Release(handlerPtr);
-
-                        handler.GetUIName(out IntPtr namePtr);
-                        string? displayName = PtrToStringOrNull(namePtr);
-                        if (displayName is null)
-                        {
-                            Marshal.ReleaseComObject(handler);
-                            continue;
-                        }
-
-                        string? iconPath = null;
-                        int iconIndex = 0;
-                        try
-                        {
-                            handler.GetIconLocation(
-                                out IntPtr iconPtr,
-                                out iconIndex);
-                            iconPath = PtrToStringOrNull(iconPtr);
-                        }
-                        catch (COMException)
-                        {
-                            // No icon location is fine; the entry stays
-                            // text-only.
-                        }
-
-                        if (seen.Add(displayName))
-                        {
-                            entries.Add(new OpenWithHandlerEntry(
-                                handler,
-                                displayName,
-                                iconPath,
-                                iconIndex));
-                        }
-                        else
-                        {
-                            Marshal.ReleaseComObject(handler);
-                        }
-                    }
-                    catch (COMException)
-                    {
-                        // A single broken association must not take the menu down.
-                    }
+                    break;
                 }
 
-                return entries;
+                IntPtr handlerPtr = buffer[0];
+                OpenWithHandlerEntry? entry =
+                    TryCreateEntry(handlerPtr, seen);
+                if (entry is null)
+                {
+                    // Nameless or duplicate handlers drop their reference
+                    // here; kept entries own theirs until Dispose.
+                    Marshal.Release(handlerPtr);
+                }
+                else
+                {
+                    entries.Add(entry);
+                }
             }
-            finally
-            {
-                Marshal.ReleaseComObject(handlers);
-            }
+
+            return entries;
         }
         catch (Exception ex)
         {
@@ -211,6 +153,50 @@ public static class ShellOpenWithHelper
                 ex.Message);
             return [];
         }
+        finally
+        {
+            Marshal.Release(enumHandlers);
+        }
+    }
+
+    private static OpenWithHandlerEntry? TryCreateEntry(
+        IntPtr handlerPtr,
+        HashSet<string> seen)
+    {
+        if (ShellOpenWithInterop.HandlerGetUIName(
+                handlerPtr,
+                out IntPtr namePtr) < 0)
+        {
+            return null;
+        }
+
+        string? displayName = PtrToStringOrNull(namePtr);
+        if (displayName is null)
+        {
+            return null;
+        }
+
+        string? iconPath = null;
+        int iconIndex = 0;
+        if (ShellOpenWithInterop.HandlerGetIconLocation(
+                handlerPtr,
+                out IntPtr iconPtr,
+                out iconIndex) >= 0)
+        {
+            // No icon location is fine; the entry stays text-only.
+            iconPath = PtrToStringOrNull(iconPtr);
+        }
+
+        if (!seen.Add(displayName))
+        {
+            return null;
+        }
+
+        return new OpenWithHandlerEntry(
+            handlerPtr,
+            displayName,
+            iconPath,
+            iconIndex);
     }
 
     /// <summary>

@@ -88,9 +88,16 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
     private CancellationTokenSource? _updateOperationCts;
     private AppUpdateManifest? _availableUpdateManifest;
     private AppUpdateManifest? _latestUpdateManifest;
-    private string? _downloadedUpdateInstallerPath;
     private bool _showManualUpdateFallback;
     private bool _lastUpdateDownloadFailed;
+    // Guards the event mirror against double-applying a download this VM
+    // started itself (its own await path already applies the result).
+    private bool _isVmDownloadInFlight;
+    private bool _updateActivityDismissed;
+    // Captured at construction (UI thread); the service's download events
+    // can arrive from background threads and must marshal back.
+    private readonly Microsoft.UI.Dispatching.DispatcherQueue? _uiDispatcherQueue =
+        Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
     private long _updateBytesReceived;
     private long? _updateTotalBytes;
     private Color _currentAccentColor;
@@ -155,6 +162,9 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
             ? Visibility.Visible
             : Visibility.Collapsed;
     [ObservableProperty] public partial bool AutoCheckForUpdates { get; set; } = true;
+    [ObservableProperty] public partial bool ShowReleaseNotesAfterUpdate { get; set; } = true;
+    [ObservableProperty] public partial bool AutoDownloadUpdates { get; set; } = true;
+    [ObservableProperty] public partial bool ShowUpdateToastNotification { get; set; } = true;
     [ObservableProperty] public partial bool SilentStartup { get; set; }
     [ObservableProperty] public partial bool ShowHoverButtons { get; set; } = true;
     [ObservableProperty] public partial bool ShowHoverActionLockPosition { get; set; }
@@ -214,6 +224,18 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
         _localizationService = localizationService ?? new LocalizationService(settingsService);
         _widgetContentFactory = new WidgetContentFactory(_localizationService);
         _appUpdateService = appUpdateService ?? new AppUpdateService();
+        // The service owns download state so a background auto-download is
+        // visible here too; the mirror skips results this VM initiated.
+        _appUpdateService.DownloadProgressChanged += OnServiceDownloadProgress;
+        _appUpdateService.DownloadCompleted += OnServiceDownloadCompleted;
+        if (_appUpdateService.IsDownloadInProgress)
+        {
+            IsDownloadingUpdate = true;
+            UpdateStatusText = _localizationService.Format(
+                "Settings.Update.Status.Downloading",
+                _availableUpdateManifest?.Version ?? string.Empty);
+            UpdateDetailText = _localizationService.T("Settings.Update.Detail.Downloading");
+        }
         _isRestoringDefaults = true;
         UpdateStatusText = _localizationService.T("Settings.Update.Status.Ready");
         UpdateDetailText = GetReadyUpdateDetailText();
@@ -229,6 +251,9 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
         if (StartupService.Current is DirectStartupService directStartup)
             SelectedAutoStartMode = directStartup.Mode.ToString();
         AutoCheckForUpdates = settings.AutoCheckForUpdates;
+        ShowReleaseNotesAfterUpdate = settings.ShowReleaseNotesAfterUpdate;
+        AutoDownloadUpdates = settings.AutoDownloadUpdates;
+        ShowUpdateToastNotification = settings.ShowUpdateToastNotification;
         SilentStartup = settings.SilentStartup;
         ShowHoverButtons = settings.ShowHoverButtons;
         ApplyHoverButtonActionSelection(settings.WidgetHoverButtonActions);

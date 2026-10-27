@@ -226,6 +226,20 @@ public partial class App
             return;
         }
 
+        if (IsTrayIconHiddenByUserSetting())
+        {
+            // A deliberately hidden tray is not a lost surface: the tray host
+            // window (hotkey owner) exists, widgets are typically visible, and
+            // a bare relaunch opens settings — so this session must not be
+            // judged by the "no usable surface" fatal path even when the user
+            // also removed every widget and disabled the hotkey. The
+            // elevation notice is skipped for the same reason: the missing
+            // icon is a preference, not an environment failure.
+            Log("[Startup] Tray icon hidden by user setting; tray host carries the session");
+            MarkStartupLifelineEstablished();
+            return;
+        }
+
         if (WidgetManager?.LoadedWidgetCount > 0)
         {
             // Widgets alone are a usable surface: a boot race that only broke

@@ -37,46 +37,81 @@
             </StackPanel>
         </Grid>
 
-        <ScrollViewer
-            x:Name="NotesScroller"
-            Grid.Row="1"
-            HorizontalScrollBarVisibility="Disabled"
-            VerticalScrollBarVisibility="Auto">
-            <StackPanel
-                x:Name="ContentPanel"
-                MaxWidth="820"
-                Padding="32,24,32,28"
-                Spacing="16">
-                <StackPanel Spacing="4">
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <!-- Version navigation rail: appears only when more than one
+                 version is reachable (PowerToys' What's-New window shape).
+                 Collapsed by default so the single-version experience is
+                 pixel-identical to before. -->
+            <Border
+                x:Name="VersionListHost"
+                Margin="8,12,0,12"
+                BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
+                BorderThickness="0,0,1,0"
+                CornerRadius="6"
+                Visibility="Collapsed">
+                <ListView
+                    x:Name="VersionList"
+                    Width="168"
+                    Padding="0,4"
+                    SelectionChanged="VersionList_SelectionChanged"
+                    SelectionMode="Single">
+                    <ListView.ItemTemplate>
+                        <DataTemplate>
+                            <TextBlock
+                                Margin="10,7"
+                                FontSize="13"
+                                Text="{Binding}" />
+                        </DataTemplate>
+                    </ListView.ItemTemplate>
+                </ListView>
+            </Border>
+
+            <ScrollViewer
+                x:Name="NotesScroller"
+                Grid.Column="1"
+                HorizontalScrollBarVisibility="Disabled"
+                VerticalScrollBarVisibility="Auto">
+                <StackPanel
+                    x:Name="ContentPanel"
+                    MaxWidth="820"
+                    Padding="32,24,32,28"
+                    Spacing="16">
+                    <StackPanel Spacing="4">
+                        <TextBlock
+                            x:Name="HeaderText"
+                            FontSize="28"
+                            FontWeight="SemiBold"
+                            TextWrapping="Wrap" />
+                        <TextBlock
+                            x:Name="MetadataText"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            TextWrapping="Wrap" />
+                    </StackPanel>
+
+                    <Border
+                        Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                        BorderThickness="1"
+                        CornerRadius="10"
+                        Padding="20,18">
+                        <StackPanel
+                            x:Name="MarkdownHost"
+                            Spacing="8" />
+                    </Border>
+
                     <TextBlock
-                        x:Name="HeaderText"
-                        FontSize="28"
-                        FontWeight="SemiBold"
-                        TextWrapping="Wrap" />
-                    <TextBlock
-                        x:Name="MetadataText"
+                        x:Name="FallbackText"
                         Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                        TextWrapping="Wrap" />
+                        TextWrapping="Wrap"
+                        Visibility="Collapsed" />
                 </StackPanel>
-
-                <Border
-                    Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                    BorderThickness="1"
-                    CornerRadius="10"
-                    Padding="20,18">
-                    <StackPanel
-                        x:Name="MarkdownHost"
-                        Spacing="8" />
-                </Border>
-
-                <TextBlock
-                    x:Name="FallbackText"
-                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                    TextWrapping="Wrap"
-                    Visibility="Collapsed" />
-            </StackPanel>
-        </ScrollViewer>
+            </ScrollViewer>
+        </Grid>
 
         <Grid x:Name="FooterBar" Grid.Row="2">
             <!-- Layer fill is the Win11 command-bar/footer material on a Mica base;

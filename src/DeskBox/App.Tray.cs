@@ -23,6 +23,15 @@ namespace DeskBox;
 /// </summary>
 public partial class App
 {
+    /// <summary>Tray icon style that keeps the notification-area icon absent
+    /// for the whole session (see <see cref="IsTrayIconHiddenByUserSetting"/>).</summary>
+    private const string TrayIconStyleHidden = "Hidden";
+
+    // Reads the Core slice, not the AppSettings facade: the facade-access
+    // ratchet forbids new passthrough reads (SettingsSliceOwnershipContract).
+    private bool IsTrayIconHiddenByUserSetting() =>
+        SettingsService.Settings.Core.TrayIconStyle == TrayIconStyleHidden;
+
     private void CreateTrayIcon()
     {
         var localization = LocalizationService;
@@ -238,7 +247,33 @@ public partial class App
             Log($"[Tray] Tray window activation not applied: {ex.Message}");
         }
 
-        StartTrayIconCreationWithRetry();
+        // A user-hidden tray must stay hidden across explorer restarts: the
+        // library's own TaskbarCreated handler (wired in its constructor)
+        // unconditionally re-adds the icon. This subscriber registers after
+        // the library's, so it runs second and removes the re-added icon,
+        // deferred off the message-window callback frame per the
+        // callback-isolation contract. The library creates every icon with
+        // NIS_HIDDEN before promoting it, so nothing visible flashes during
+        // that one dispatcher turn.
+        try
+        {
+            _trayIcon.TrayIcon.MessageWindow.TaskbarCreated +=
+                OnTaskbarCreatedWithTrayHidden;
+        }
+        catch (Exception ex)
+        {
+            Log($"[Tray] Hidden-style taskbar-restart guard not attached: {ex.Message}");
+        }
+
+        if (IsTrayIconHiddenByUserSetting())
+        {
+            Log("[Tray] Tray icon hidden by user setting; skipping icon creation");
+            RemoveTrayIconCreatedByLibraryLoad();
+        }
+        else
+        {
+            StartTrayIconCreationWithRetry();
+        }
 
         try
         {
@@ -300,6 +335,12 @@ public partial class App
         {
             try
             {
+                if (IsTrayIconHiddenByUserSetting())
+                {
+                    Log("[Tray] Tray icon hidden by user setting; creation retry stopped");
+                    return false;
+                }
+
                 if (_trayIcon is { IsCreated: false })
                 {
                     // Keep the process at normal QoS. Tray creation must never
@@ -1347,6 +1388,7 @@ public partial class App
         var settingsWindow = _settingsWindow ?? CreateSettingsWindow();
         settingsWindow.ShowWindow();
         settingsWindow.ShowSection("About");
+        settingsWindow.BringUpdateStatusIntoView();
     }
 
     private void OpenManagedStorageFromTray()
@@ -1361,6 +1403,80 @@ public partial class App
         return Win32Helper.IsSystemDarkMode();
     }
 
+    private void OnTaskbarCreatedWithTrayHidden(object? sender, EventArgs args)
+    {
+        if (!IsTrayIconHiddenByUserSetting())
+        {
+            return;
+        }
+
+        UiDispatcherQueue.TryEnqueue(() =>
+        {
+            if (_trayIcon is { IsCreated: true } && IsTrayIconHiddenByUserSetting())
+            {
+                try
+                {
+                    _trayIcon.TrayIcon.TryRemove();
+                    Log("[Tray] Removed the tray icon re-added by a taskbar restart");
+                }
+                catch (Exception ex)
+                {
+                    Log($"[Tray] Failed to remove the restarted hidden tray icon: {ex.Message}");
+                }
+            }
+        });
+    }
+
+    // H.NotifyIcon's constructor subscribes its own Loaded handler that
+    // calls ForceCreate, so mounting the icon element into the tray host
+    // window creates a visible icon even when the user's style is Hidden —
+    // the hidden branch in CreateTrayIcon only stops OUR retry loop. Remove
+    // whatever that library handler created, and keep a late Loaded removal
+    // subscribed after the library's (multicast order) for a Loaded that
+    // fires after this point.
+    private void RemoveTrayIconCreatedByLibraryLoad()
+    {
+        if (_trayIcon is null)
+        {
+            return;
+        }
+
+        _trayIcon.Loaded += OnTrayIconLoadedWhileHidden;
+        RemoveHiddenTrayIconIfCreated("startup");
+    }
+
+    private void OnTrayIconLoadedWhileHidden(object sender, RoutedEventArgs e)
+    {
+        if (_trayIcon is null)
+        {
+            return;
+        }
+
+        _trayIcon.Loaded -= OnTrayIconLoadedWhileHidden;
+        if (IsTrayIconHiddenByUserSetting())
+        {
+            RemoveHiddenTrayIconIfCreated("library load");
+        }
+    }
+
+    private void RemoveHiddenTrayIconIfCreated(string reason)
+    {
+        if (_trayIcon is not { IsCreated: true })
+        {
+            return;
+        }
+
+        try
+        {
+            _trayIcon.TrayIcon.TryRemove();
+            Log($"[Tray] Removed the hidden tray icon created by the library ({reason})");
+        }
+        catch (Exception ex)
+        {
+            Log($"[Tray] Failed to remove the hidden tray icon created by the library ({reason}): {ex.Message}");
+        }
+    }
+
     private void UpdateTrayIconAppearance()
     {
         if (_trayIcon is null)
@@ -1369,7 +1485,41 @@ public partial class App
         }
 
         string style = SettingsService.Settings.TrayIconStyle ?? "System";
+        if (style == TrayIconStyleHidden)
+        {
+            if (_trayIcon is { IsCreated: true })
+            {
+                try
+                {
+                    _trayIcon.TrayIcon.TryRemove();
+                    Log("[Tray] Tray icon removed (hidden by user setting)");
+                }
+                catch (Exception ex)
+                {
+                    Log($"[Tray] Failed to remove the hidden tray icon: {ex.Message}");
+                }
+            }
+
+            return;
+        }
+
         _trayIcon.Icon = AppBranding.CreateTrayIcon(style, IsDarkThemeActive());
+        if (_trayIcon is { IsCreated: false })
+        {
+            // Coming back from the hidden style at runtime: the settings
+            // window is open, so the taskbar is up and one inline attempt is
+            // enough — the startup retry loop is for the early-logon race
+            // that cannot apply here.
+            try
+            {
+                _trayIcon.ForceCreate(enablesEfficiencyMode: false);
+                Log("[Tray] Tray icon re-created after leaving the hidden style");
+            }
+            catch (Exception ex)
+            {
+                Log($"[Tray] Failed to re-create the tray icon after unhide: {ex.Message}");
+            }
+        }
     }
 
     public void UpdateTrayIcon()

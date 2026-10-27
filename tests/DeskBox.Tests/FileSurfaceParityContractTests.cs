@@ -715,7 +715,7 @@ public sealed class FileSurfaceParityContractTests
         Assert.DoesNotContain("item.IsSelected =", itemVisuals, StringComparison.Ordinal);
         Assert.DoesNotContain("item.IsSelected =", menus, StringComparison.Ordinal);
         Assert.Contains(
-            "GetActiveItemsView().SelectedItems.Contains(item)",
+            "activeView.SelectedItems.Contains(item)",
             itemVisuals,
             StringComparison.Ordinal);
         Assert.Contains(

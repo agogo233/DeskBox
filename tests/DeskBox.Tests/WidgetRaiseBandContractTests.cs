@@ -43,7 +43,7 @@ public sealed class WidgetRaiseBandContractTests
         string activation = SliceMethod(
             manager,
             "public void ActivateAllVisibleWidgetsFromTitle",
-            "private void QueueRequestedLayerRestoreCheck");
+            "private void TryRestoreRaisedWidgetsAfterInteraction");
 
         Assert.Contains(
             "TitleActivationRaisePolicy.ShouldSkipRepeatRaise",

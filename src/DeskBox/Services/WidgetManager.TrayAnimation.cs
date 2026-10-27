@@ -176,6 +176,22 @@ public sealed partial class WidgetManager
             }
             SaveBatchVisibilityState();
             await _trayBatchAnimationDriver.WaitForIdleAsync();
+            if (!WidgetLayerService.UsesQuickRevealMode() &&
+                shownWindows.Count > 0)
+            {
+                // The one-shot band recheck must observe the settled band:
+                // queued from the confirm itself, the delayed callback always
+                // landed inside this raise's own toggle window (animations
+                // run 137ms+ against an 80ms delay) and aborted on the
+                // toggling guard — the guard's only effect was blocking the
+                // raise that queued it. After the idle await the toggle
+                // window has closed; a new raise or hide still aborts the
+                // callback through the generation and session guards.
+                QueueTrayRaiseBandRecheck(
+                    shownWindows,
+                    _trayRaiseBatchGeneration);
+            }
+
             App.LogVerbose($"[TrayBatch] Raise completed raised={_widgetsRaisedFromTray} prepared={windowsToRaise.Count} shown={shownWindows.Count} animated={windowsToAnimate.Count}");
             return _widgetsRaisedFromTray;
         }
@@ -581,6 +597,67 @@ public sealed partial class WidgetManager
             visibleHandles,
             activeHandle);
         WidgetLayerService.ApplyPeerOrderHighestToLowest(visibleHandles);
+    }
+
+    private const int TrayRaiseBandRecheckDelayMs = 80;
+
+    /// <summary>
+    /// One-shot band-integrity recheck after the synchronous raise
+    /// confirmation. While DeskBox is still a background process the group
+    /// lift cannot cross the then-foreground window, so a raise can settle
+    /// into a split band where only the activated widget crossed the line;
+    /// the Activated-driven reassert repairs that only after the user clicks
+    /// a widget, leaving the split visible until then. Unlike the repeated
+    /// v1.0.7 confirmations (removed in v1.2.9 for fighting the user's
+    /// foreground switches) this aborts unless DeskBox still owns the
+    /// foreground, never re-lifts when a foreign window legitimately covers
+    /// the whole band, and skips windows mid title-bar drag.
+    /// </summary>
+    private void QueueTrayRaiseBandRecheck(
+        IReadOnlyList<IDesktopWidgetWindow> windows,
+        long generation)
+    {
+        if (windows.Count == 0)
+        {
+            return;
+        }
+
+        UiDispatch.RunOrDefer(async () =>
+        {
+            await Task.Delay(TrayRaiseBandRecheckDelayMs);
+            if (generation != _trayRaiseBatchGeneration ||
+                !_widgetsRaisedFromTray ||
+                _isTogglingWidgetsDesktopLayer ||
+                IsWidgetInteractionActive ||
+                !IsForegroundDeskBoxWindow())
+            {
+                return;
+            }
+
+            if (windows.Any(window => window.IsTitleBarDragTransitionActive))
+            {
+                return;
+            }
+
+            List<IntPtr> handles = windows
+                .Where(window => window.Visible && Win32Helper.IsWindow(window.WindowHandle))
+                .Select(window => window.WindowHandle)
+                .ToList();
+            if (handles.Count < 2 ||
+                !WidgetLayerService.IsForeignWindowAboveRaisedPeers(
+                    handles,
+                    exemptShellDesktopWindows: true))
+            {
+                return;
+            }
+
+            WidgetLayerService.BringGroupTemporarilyToFront(handles, handles[0]);
+            WidgetLayerService.ApplyPeerOrderHighestToLowest(handles);
+            App.Log(
+                "[ZOrder] Raised band split repaired by delayed recheck " +
+                $"generation={generation} count={handles.Count} " +
+                $"active=0x{handles[0].ToInt64():X}");
+        });
     }
 
     private void SaveBatchVisibilityState()

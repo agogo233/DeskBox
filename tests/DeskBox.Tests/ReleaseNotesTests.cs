@@ -58,6 +58,31 @@ public sealed class ReleaseNotesTests : IDisposable
     }
 
     [Fact]
+    public void CachedVersions_ListsDistinctNewestFirstAndSkipsMalformedFiles()
+    {
+        Directory.CreateDirectory(_cacheRoot);
+        File.WriteAllText(Path.Combine(_cacheRoot, "1.5.9.all.md"), "notes");
+        File.WriteAllText(Path.Combine(_cacheRoot, "1.5.9.zh-CN.md"), "notes");
+        File.WriteAllText(Path.Combine(_cacheRoot, "1.6.0.all.md"), "notes");
+        File.WriteAllText(Path.Combine(_cacheRoot, "1.4.2.en-US.md"), "notes");
+        // No locale segment: cannot be a version-keyed notes cache.
+        File.WriteAllText(Path.Combine(_cacheRoot, "readme.md"), "notes");
+        var service = new ReleaseNotesService(_cacheRoot);
+
+        IReadOnlyList<string> versions = service.GetCachedVersions();
+
+        Assert.Equal(["1.6.0", "1.5.9", "1.4.2"], versions);
+    }
+
+    [Fact]
+    public void CachedVersions_MissingCacheRoot_ReturnsEmpty()
+    {
+        var service = new ReleaseNotesService(_cacheRoot);
+
+        Assert.Empty(service.GetCachedVersions());
+    }
+
+    [Fact]
     public async Task ReleaseNotesService_UsesInlineContentAndCachesIt()
     {
         var manifest = new AppUpdateManifest

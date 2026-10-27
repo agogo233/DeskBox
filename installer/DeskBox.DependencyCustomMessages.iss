@@ -97,3 +97,11 @@ chinesetraditional.DependencyDownloadFailed=%1 下載失敗。%n主要 URL：%2%
 chinesetraditional.DependencyInstallStartFailed=%1 安裝程式無法以系統管理員權限啟動。請允許 Windows 提示，然後再試一次。
 chinesetraditional.DependencyInstallFailed=%1 安裝失敗。結束代碼：%2。%n請確認此 Windows 版本受支援，或手動安裝相依元件後重新執行 DeskBox 安裝程式。
 chinesetraditional.RuntimeDependencyComment=此安裝程式會視需要偵測並下載 .NET 10 Runtime 和 Windows App Runtime 2.5。
+
+korean.DependencyDownloadCancelled=다운로드가 취소되었습니다.
+korean.DependencyDownloadFailedSummary=DeskBox 종속성을 다운로드하지 못했습니다.
+korean.DependencyInstallFailedSummary=DeskBox 종속성을 설치하지 못했습니다.
+korean.DependencyDownloadFailed=%1 다운로드에 실패했습니다.%n기본 URL: %2%n대체 URL: %3%n오류: %4
+korean.DependencyInstallStartFailed=%1 설치 관리자를 관리자 권한으로 시작하지 못했습니다. Windows 프롬프트를 허용한 후 다시 시도하세요.
+korean.DependencyInstallFailed=%1 설치에 실패했습니다. 종료 코드: %2.%n이 Windows 버전이 지원되는지 확인하거나, 종속성을 직접 설치한 후 DeskBox 설치 프로그램을 다시 실행하세요.
+korean.RuntimeDependencyComment=이 설치 프로그램은 필요에 따라 .NET 10 Runtime과 Windows App Runtime 2.5를 감지하여 다운로드합니다.

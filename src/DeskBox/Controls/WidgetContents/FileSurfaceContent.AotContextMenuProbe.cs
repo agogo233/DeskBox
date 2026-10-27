@@ -7,36 +7,40 @@ namespace DeskBox.Controls.WidgetContents;
 
 /// <summary>
 /// Shared probe helpers for the AOT menu smoke fixtures against the
-/// CommandBarFlyout-based item menus (primary strip + secondary rows).
+/// single-column MenuFlyout item menus.
 /// </summary>
 internal static class AotContextMenuProbe
 {
-    internal static AppBarButton FindButton(
-        CommandBarFlyout flyout,
-        string label) =>
-        flyout.PrimaryCommands.OfType<AppBarButton>()
-            .Concat(flyout.SecondaryCommands.OfType<AppBarButton>())
-            .Single(button => string.Equals(
-                button.Label,
-                label,
+    internal static MenuFlyoutItem FindItem(
+        MenuFlyout flyout,
+        string text) =>
+        flyout.Items
+            .OfType<MenuFlyoutItem>()
+            .Single(item => string.Equals(
+                item.Text,
+                text,
                 StringComparison.Ordinal));
 
-    internal static int Count(CommandBarFlyout flyout) =>
-        flyout.PrimaryCommands.Count + flyout.SecondaryCommands.Count;
+    internal static int Count(MenuFlyout flyout) => flyout.Items.Count;
 
     internal static int IndexOf(
-        CommandBarFlyout flyout,
-        AppBarButton target) =>
-        Commands(flyout).ToList().IndexOf(target);
+        MenuFlyout flyout,
+        MenuFlyoutItem target) =>
+        flyout.Items.ToList().IndexOf(target);
 
     internal static IReadOnlyList<AotContextMenuEntrySnapshot> Snapshot(
-        CommandBarFlyout flyout,
-        AppBarButton target) =>
-        Commands(flyout)
+        MenuFlyout flyout,
+        MenuFlyoutItem target) =>
+        flyout.Items
             .Select((element, index) => new AotContextMenuEntrySnapshot(
                 index,
                 element.GetType().Name,
-                element is AppBarButton button ? button.Label : string.Empty,
+                element switch
+                {
+                    MenuFlyoutItem item => item.Text,
+                    MenuFlyoutSubItem sub => sub.Text,
+                    _ => string.Empty
+                },
                 element is not Control control || control.IsEnabled,
                 ReferenceEquals(element, target)))
             .ToArray();
@@ -53,10 +57,6 @@ internal static class AotContextMenuProbe
         throw new InvalidOperationException(
             "The product menu entry did not expose Invoke automation.");
     }
-
-    private static IEnumerable<ICommandBarElement> Commands(
-        CommandBarFlyout flyout) =>
-        flyout.PrimaryCommands.Concat(flyout.SecondaryCommands);
 }
 
 internal sealed record AotContextMenuEntrySnapshot(

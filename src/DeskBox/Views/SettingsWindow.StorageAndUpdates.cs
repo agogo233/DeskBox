@@ -367,6 +367,19 @@ public sealed partial class SettingsWindow
 
     private async void OneClickUpdateButton_Click(object sender, RoutedEventArgs e)
     {
+        await RunOneClickUpdateFlowAsync();
+    }
+
+    /// <summary>
+    /// The one-click update flow, shared by the About-page button and
+    /// external entry points (update-toast activation). Runs check →
+    /// download, or the install confirmation when a download already
+    /// finished; failures surface through the same retry/offline dialogs.
+    /// The caller is responsible for having the window visible and on the
+    /// About section before invoking, so progress stays in view.
+    /// </summary>
+    public async Task RunOneClickUpdateFlowAsync()
+    {
         // If update is already downloaded, show install confirmation dialog.
         if (ViewModel.IsUpdateDownloaded)
         {
@@ -506,6 +519,34 @@ public sealed partial class SettingsWindow
         {
             Win32Helper.OpenFile(url);
         }
+    }
+
+    private void DismissUpdateActivity_Click(object sender, RoutedEventArgs e)
+    {
+        ViewModel.DismissUpdateActivity();
+    }
+
+    /// <summary>
+    /// Scrolls the update status card into view. Called after the tray and
+    /// toast paths land on the About section so the update entry point is on
+    /// screen without hunting for it.
+    /// </summary>
+    public void BringUpdateStatusIntoView()
+    {
+        if (_isClosed)
+        {
+            return;
+        }
+
+        // Section navigation may still be mid-layout; a queued pass runs
+        // after the frame has composed the target panel.
+        _ = DispatcherQueue.TryEnqueue(() =>
+        {
+            if (!_isClosed)
+            {
+                UpdateCheckActionsPanel.StartBringIntoView();
+            }
+        });
     }
 
     public void QueueUpdateInstallResultDialog(string outcome)

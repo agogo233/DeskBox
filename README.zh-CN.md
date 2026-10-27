@@ -7,7 +7,7 @@
 > 目前暂不接受外部 PR 合并——欢迎通过 Issue / Discussion 提交 Bug、功能建议与技术讨论，详见 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
 [![CI](https://github.com/Tianyu199509/DeskBox/actions/workflows/ci.yml/badge.svg)](https://github.com/Tianyu199509/DeskBox/actions/workflows/ci.yml)
-[![1.5.8 版本](https://img.shields.io/badge/release-1.5.8-2563EB.svg)](https://github.com/Tianyu199509/DeskBox/releases/tag/v1.5.8)
+[![1.5.9 版本](https://img.shields.io/badge/release-1.5.9-2563EB.svg)](https://github.com/Tianyu199509/DeskBox/releases/tag/v1.5.9)
 [![Windows 10/11](https://img.shields.io/badge/Windows-10%2F11-0078D4.svg)](#环境要求)
 [![x64 and ARM64](https://img.shields.io/badge/architecture-x64%20%7C%20ARM64-5C2D91.svg)](#下载)
 [![License: GPL v3](https://img.shields.io/badge/license-GPLv3-blue.svg)](LICENSE)
@@ -34,17 +34,17 @@ DeskBox 使用贴近 Windows 原生体验的材质，同时保留普通桌面文
 | **支持平台** | Windows 10/11，x64 与 ARM64 |
 | **技术栈** | C#、WinUI 3、.NET 10 Native AOT、Windows App SDK 2.5.1、Rust 原生 Shell 层 |
 | **数据方式** | 本地优先；文件、随记、待办、设置与布局保存在电脑上 |
-| **界面语言** | 简体中文、繁體中文、English、日本語、Deutsch、Português do Brasil、हिन्दी、Español、Français、العربية、বাংলা、Русский |
+| **界面语言** | 简体中文、繁體中文、English、日本語、Deutsch、Português do Brasil、हिन्दी、Español、Français、العربية、বাংলা、Русский、한국어 |
 | **开源协议** | GPL-3.0-only |
 
-12 种可选语言使用一致的资源键和格式化占位符覆盖范围。
+13 种可选语言使用一致的资源键和格式化占位符覆盖范围。
 
 ## 下载
 
-DeskBox 1.5.8 已进入发版准备阶段。下方 [GitHub Releases](https://github.com/Tianyu199509/DeskBox/releases/tag/v1.5.8) 下载链接会在正式发布后生效。
+DeskBox 1.5.9 已进入发版准备阶段。下方 [GitHub Releases](https://github.com/Tianyu199509/DeskBox/releases/tag/v1.5.9) 下载链接会在正式发布后生效。
 
-- [DeskBox 1.5.8 x64 安装包](https://github.com/Tianyu199509/DeskBox/releases/download/v1.5.8/DeskBox_Setup_1.5.8_x64.exe)，推荐大多数 Intel 和 AMD 电脑使用。
-- [DeskBox 1.5.8 ARM64 安装包](https://github.com/Tianyu199509/DeskBox/releases/download/v1.5.8/DeskBox_Setup_1.5.8_arm64.exe)，推荐骁龙、Surface Pro X 等 Windows on ARM 电脑使用。
+- [DeskBox 1.5.9 x64 安装包](https://github.com/Tianyu199509/DeskBox/releases/download/v1.5.9/DeskBox_Setup_1.5.9_x64.exe)，推荐大多数 Intel 和 AMD 电脑使用。
+- [DeskBox 1.5.9 ARM64 安装包](https://github.com/Tianyu199509/DeskBox/releases/download/v1.5.9/DeskBox_Setup_1.5.9_arm64.exe)，推荐骁龙、Surface Pro X 等 Windows on ARM 电脑使用。
 
 两个安装包都是 Full Native AOT 构建，并内置对应架构的私有 Windows App Runtime 2.5.1，可离线安装，不需要另外下载 .NET 10 或 Windows App Runtime。
 
@@ -129,6 +129,16 @@ DeskBox 1.5.8 已进入发版准备阶段。下方 [GitHub Releases](https://git
 - 支持设置本地备份与恢复；待办、随记和格子样式还可定时备份到你自己的 WebDAV 服务器——密码保存在 Windows 凭据管理器，每个数据域独立开关，远端快照可浏览、可按合并或完全恢复两种模式还原。
 - 可导出经过隐私过滤的一键诊断包用于排查问题。
 - 设置使用可恢复快照，退出时刷新待保存内容；保存失败会明确记录和提示，不再静默恢复默认配置。
+
+## 1.5.9 更新亮点
+
+- **新增韩语界面。** 界面、安装器与开屏引导新增韩语，与既有 12 种语言并列。
+- **文件右键菜单换装 Windows 11 原生形态。** 单竖列行内图标、资源管理器经典序，「打开方式」子菜单列出真实关联应用（含 UWP），空白处新增「新建」「查看」「排序」子菜单，原生 ZIP 压缩与解压。
+- **更从容的更新体验**——后台自动下载（跳过计费网络）、可点的更新 Toast 按钮、更新完成后自动弹出更新内容。
+- **配置清空的恢复提议、全提权桌面清晰告知、托盘图标可隐藏。**
+- **更稳的格子。** 位置扛得住显示器拓扑变化，贴边长条不再唤出跳角，分组胶囊切标签后即时展开，展开格子可缩得更小，待办颜色子菜单不再在 Windows 11 25H2 上闪退。
+
+完整内容见 [更新日志](CHANGELOG.md) 和 [1.5.9 发布说明](docs/releases/v1.5.9.md)。
 
 ## 1.5.8 更新亮点
 
@@ -262,8 +272,8 @@ ISCC.exe /DDeskBoxNativeAot=1 /DDeskBoxBundledRuntime=1 /DMyAppReleaseDir=..\.ar
 预期输出：
 
 ```text
-Output\DeskBox_Setup_1.5.8_x64.exe
-Output\DeskBox_Setup_1.5.8_arm64.exe
+Output\DeskBox_Setup_1.5.9_x64.exe
+Output\DeskBox_Setup_1.5.9_arm64.exe
 ```
 
 ## 项目结构

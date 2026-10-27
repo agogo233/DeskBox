@@ -13,6 +13,13 @@ namespace DeskBox.Services;
 public enum DragDropDiagnosticSeverity
 {
     Ok,
+
+    /// <summary>Environment worth knowing about, but nothing is broken on
+    /// DeskBox's side (fully elevated desktops: features work, one path is
+    /// Windows-limited). Distinct from Warning, which promises an actual
+    /// DeskBox-side defect.</summary>
+    Info,
+
     Warning,
     Error
 }
@@ -21,11 +28,36 @@ public enum DragDropDiagnosticIssue
 {
     None,
     UacDisabled,
+
+    /// <summary>DeskBox and the Explorer shell are both elevated (built-in
+    /// Administrator account, or another elevated desktop). Same-level
+    /// drag-in and the tray work, but Windows/WinUI forbid XAML drag-out in
+    /// an elevated process, so the session gets an informational
+    /// explanation plus the restore path instead of silence.</summary>
+    FullyElevatedSession,
+
     PermissionMismatch,
     AppCompatIssue,
     StartupShortcutIssue,
     ShellAboveApp,
     ShortcutRunAs
+}
+
+/// <summary>
+/// Cause attribution for a fully elevated desktop session. The restore path
+/// differs by cause — the built-in Administrator account needs the Admin
+/// Approval Mode policy (FilterAdministratorToken), UAC-off needs UAC back
+/// on — so the informed notice and the diagnostic card both branch on it.
+/// </summary>
+public enum FullyElevatedSessionAttribution
+{
+    /// <summary>Not a same-level elevated desktop (or DeskBox itself is not
+    /// elevated) — no fully-elevated copy applies.</summary>
+    None,
+
+    UacDisabled,
+    BuiltInAdminAccount,
+    GenericElevatedDesktop
 }
 
 /// <summary>
@@ -37,9 +69,13 @@ public enum DragDropDiagnosticIssue
 /// </summary>
 public enum ShellIntegrityMismatch
 {
-    /// <summary>Process and Explorer share an integrity level; shell
-    /// interaction works. Company machines that force elevation land here —
-    /// they must not be warned at.</summary>
+    /// <summary>Process and Explorer share an integrity level; shell-level
+    /// interaction (drag-in, tray) works. Fully elevated desktops land here
+    /// too — OS-level drag is symmetric and fine, but WinUI cannot start
+    /// XAML drags in an elevated process at all, so these sessions get a
+    /// one-time informed notice (see
+    /// <see cref="FullyElevatedSessionAttribution"/>) rather than a
+    /// warning.</summary>
     None,
 
     /// <summary>DeskBox is elevated while Explorer is not: UIPI blocks OLE
@@ -88,12 +124,14 @@ public sealed record StartupElevationAssessment(
     bool IsCurrentProcessElevated,
     bool IsExplorerElevated,
     bool IsUacDisabled,
-    bool CanRelaunchUnelevated)
+    bool CanRelaunchUnelevated,
+    bool IsBuiltInAdminAccount = false)
 {
     /// <summary>
     /// Asymmetric-integrity verdict derived from the two token snapshots.
-    /// Same-level sessions (including fully elevated desktops) read None:
-    /// drag works there, so no warning is warranted.
+    /// Same-level sessions read None: OS-level drag-in and the tray work at
+    /// equal integrity, so the old asymmetry machinery stays out of their
+    /// way.
     /// </summary>
     public ShellIntegrityMismatch Mismatch =>
         IsCurrentProcessElevated == IsExplorerElevated
@@ -101,6 +139,20 @@ public sealed record StartupElevationAssessment(
             : IsCurrentProcessElevated
                 ? ShellIntegrityMismatch.AppAboveShell
                 : ShellIntegrityMismatch.ShellAboveApp;
+
+    /// <summary>
+    /// Cause attribution for same-level elevated desktops (2026-10-22
+    /// informed-notice batch): same-level sessions are no longer fully
+    /// silent — WinUI forbids XAML drag-out in an elevated process, so the
+    /// one-time notice explains that limit and the restore path. Asymmetric
+    /// sessions read None here; they keep their own notice machinery.
+    /// </summary>
+    public FullyElevatedSessionAttribution FullyElevatedAttribution =>
+        DragDropPermissionService.DecideFullyElevatedSessionAttribution(
+            IsCurrentProcessElevated,
+            IsExplorerElevated,
+            IsUacDisabled,
+            IsBuiltInAdminAccount);
 }
 
 public static class DragDropPermissionService
@@ -153,44 +205,81 @@ public static class DragDropPermissionService
         // elevation on every launch and is invisible to the registry-based
         // AppCompat scan, so it gets its own remediation text.
         bool hasShortcutRunAsIssue = shortcutProbes.Any(probe => probe.HasRunAsFlag);
-        bool permissionMismatch =
-            currentToken.IsElevated == true &&
-            explorerToken.IsElevated == false;
+        // Named elevation locals: the Decide* helpers below take
+        // is-explorer-elevated, and a field review caught an inverted
+        // literal (`IsElevated == false`) at one call site — named locals
+        // keep every consumer on the same polarity.
+        bool isCurrentElevated = currentToken.IsElevated == true;
+        bool isExplorerElevated = explorerToken.IsElevated == true;
+        bool permissionMismatch = isCurrentElevated && !isExplorerElevated;
         // Reverse asymmetry (Medium app under an elevated desktop): UIPI
         // blocks tray creation and cross-level drag here too, but the fix
         // is on the shell side, not a DeskBox relaunch.
-        bool shellAboveApp =
-            currentToken.IsElevated == false &&
-            explorerToken.IsElevated == true;
-        bool needsRelaunch =
-            currentToken.IsElevated == true &&
-            (!isUacDisabled || explorerToken.IsElevated == false);
+        bool shellAboveApp = !isCurrentElevated && isExplorerElevated;
+        FullyElevatedSessionAttribution fullyElevatedAttribution =
+            DecideFullyElevatedSessionAttribution(
+                isCurrentElevated,
+                isExplorerElevated,
+                isUacDisabled,
+                DetectBuiltInAdminAccount());
+        // Diagnostic-facing form of ComputeCanRelaunchUnelevated: "needs
+        // relaunch" must mean "a relaunch would actually land unelevated".
+        // The historical form (elevated && (!uacDisabled || !explorerLow))
+        // returned true on fully elevated desktops with UAC on — lighting
+        // the repair button and steering the user into a restart that
+        // lands elevated again.
+        bool needsRelaunch = ComputeNeedsRelaunchDiagnostic(
+            isCurrentElevated,
+            isUacDisabled,
+            isExplorerElevated);
 
         DragDropDiagnosticSeverity severity =
-            isUacDisabled || permissionMismatch || shellAboveApp || hasAppCompatIssue || hasShortcutRunAsIssue || hasStartupIssue || hasShortcutIssue
+            permissionMismatch || shellAboveApp || hasAppCompatIssue || hasShortcutRunAsIssue || hasStartupIssue || hasShortcutIssue
                 ? DragDropDiagnosticSeverity.Warning
-                : DragDropDiagnosticSeverity.Ok;
+                : isUacDisabled || fullyElevatedAttribution != FullyElevatedSessionAttribution.None
+                    ? DragDropDiagnosticSeverity.Info
+                    : DragDropDiagnosticSeverity.Ok;
 
         DragDropDiagnosticIssue issue;
         string summary;
         string detail;
-        if (isUacDisabled)
-        {
-            issue = DragDropDiagnosticIssue.UacDisabled;
-            summary = Text(localizationService, "Settings.DragDropPermission.Summary.UacDisabled");
-            detail = Text(localizationService, "Settings.DragDropPermission.Detail.UacDisabled");
-        }
-        else if (permissionMismatch)
+        // Environment causes outrank local ones, and asymmetry outranks
+        // UAC-off: an asymmetric session has a DeskBox-side fix while
+        // UAC-off is only the backdrop it happened in.
+        DragDropDiagnosticIssue environmentIssue = DecideEnvironmentIssue(
+            isUacDisabled,
+            permissionMismatch,
+            shellAboveApp,
+            fullyElevatedAttribution);
+        if (environmentIssue == DragDropDiagnosticIssue.PermissionMismatch)
         {
             issue = DragDropDiagnosticIssue.PermissionMismatch;
             summary = Text(localizationService, "Settings.DragDropPermission.Summary.PermissionMismatch");
             detail = Text(localizationService, "Settings.DragDropPermission.Detail.PermissionMismatch");
         }
-        else if (shellAboveApp)
+        else if (environmentIssue == DragDropDiagnosticIssue.ShellAboveApp)
         {
             issue = DragDropDiagnosticIssue.ShellAboveApp;
             summary = Text(localizationService, "Settings.DragDropPermission.Summary.ShellAboveApp");
             detail = Text(localizationService, "Settings.DragDropPermission.Detail.ShellAboveApp");
+        }
+        else if (environmentIssue == DragDropDiagnosticIssue.UacDisabled)
+        {
+            issue = DragDropDiagnosticIssue.UacDisabled;
+            summary = Text(localizationService, "Settings.DragDropPermission.Summary.UacDisabled");
+            detail = Text(localizationService, "Settings.DragDropPermission.Detail.UacDisabled");
+        }
+        else if (environmentIssue == DragDropDiagnosticIssue.FullyElevatedSession)
+        {
+            issue = DragDropDiagnosticIssue.FullyElevatedSession;
+            bool builtInAdmin =
+                fullyElevatedAttribution == FullyElevatedSessionAttribution.BuiltInAdminAccount;
+            summary = Text(localizationService, builtInAdmin
+                ? "Settings.DragDropPermission.Summary.FullyElevatedAdminAccount"
+                : "Settings.DragDropPermission.Summary.FullyElevatedGeneric");
+            detail = Text(localizationService, builtInAdmin
+                ? "Settings.DragDropPermission.Detail.FullyElevatedAdminAccount"
+                : "Settings.DragDropPermission.Detail.FullyElevatedGeneric");
         }
         else if (hasShortcutRunAsIssue)
         {
@@ -315,7 +404,8 @@ public static class DragDropPermissionService
             isCurrentElevated,
             isExplorerElevated,
             isUacDisabled,
-            ComputeCanRelaunchUnelevated(isUacDisabled, isExplorerElevated));
+            ComputeCanRelaunchUnelevated(isUacDisabled, isExplorerElevated),
+            DetectBuiltInAdminAccount());
     }
 
     /// <summary>
@@ -328,6 +418,116 @@ public static class DragDropPermissionService
     public static bool ComputeCanRelaunchUnelevated(bool isUacDisabled, bool isExplorerElevated)
     {
         return !isUacDisabled && !isExplorerElevated;
+    }
+
+    /// <summary>
+    /// Diagnostic-facing twin of <see cref="ComputeCanRelaunchUnelevated"/>:
+    /// "needs relaunch" must mean "a relaunch would actually land
+    /// unelevated". The historical form returned true on fully elevated
+    /// desktops with UAC on, lighting the repair button and steering the
+    /// user into a pointless restart round-trip.
+    /// </summary>
+    internal static bool ComputeNeedsRelaunchDiagnostic(
+        bool isCurrentProcessElevated,
+        bool isUacDisabled,
+        bool isExplorerElevated)
+    {
+        return isCurrentProcessElevated && !isUacDisabled && !isExplorerElevated;
+    }
+
+    /// <summary>
+    /// Cause attribution for a same-level elevated desktop. Pure so the
+    /// priority (UAC-off explanation first, then built-in Administrator,
+    /// then generic) stays pinned by contract tests. Only symmetric
+    /// elevated sessions attribute; asymmetric ones are None because they
+    /// have their own fix machinery.
+    /// </summary>
+    public static FullyElevatedSessionAttribution DecideFullyElevatedSessionAttribution(
+        bool isCurrentProcessElevated,
+        bool isExplorerElevated,
+        bool isUacDisabled,
+        bool isBuiltInAdminAccount)
+    {
+        if (!isCurrentProcessElevated || !isExplorerElevated)
+        {
+            return FullyElevatedSessionAttribution.None;
+        }
+
+        if (isUacDisabled)
+        {
+            return FullyElevatedSessionAttribution.UacDisabled;
+        }
+
+        return isBuiltInAdminAccount
+            ? FullyElevatedSessionAttribution.BuiltInAdminAccount
+            : FullyElevatedSessionAttribution.GenericElevatedDesktop;
+    }
+
+    /// <summary>
+    /// Pure environment-issue selection for the diagnostic card: integrity
+    /// asymmetry outranks UAC-off (an asymmetric session has a DeskBox-side
+    /// fix while UAC-off is only the backdrop), and the fully-elevated
+    /// family ranks below both. Local issues (compat layers, startup,
+    /// shortcuts) only surface when the environment is clean.
+    /// </summary>
+    internal static DragDropDiagnosticIssue DecideEnvironmentIssue(
+        bool isUacDisabled,
+        bool permissionMismatch,
+        bool shellAboveApp,
+        FullyElevatedSessionAttribution fullyElevatedAttribution)
+    {
+        if (permissionMismatch)
+        {
+            return DragDropDiagnosticIssue.PermissionMismatch;
+        }
+
+        if (shellAboveApp)
+        {
+            return DragDropDiagnosticIssue.ShellAboveApp;
+        }
+
+        if (isUacDisabled || fullyElevatedAttribution == FullyElevatedSessionAttribution.UacDisabled)
+        {
+            return DragDropDiagnosticIssue.UacDisabled;
+        }
+
+        return fullyElevatedAttribution is FullyElevatedSessionAttribution.BuiltInAdminAccount
+            or FullyElevatedSessionAttribution.GenericElevatedDesktop
+            ? DragDropDiagnosticIssue.FullyElevatedSession
+            : DragDropDiagnosticIssue.None;
+    }
+
+    /// <summary>
+    /// The built-in Administrator is the only account whose SID ends in
+    /// relative identifier 500 (S-1-5-&lt;authority&gt;-500). The account
+    /// name is not a signal — it is frequently renamed, and unrelated
+    /// accounts can be named "Administrator" — so the RID is the only
+    /// stable identity. Split-parsed rather than EndsWith so e.g. ...-1500
+    /// never matches.
+    /// </summary>
+    internal static bool IsBuiltInAdministratorSid(string? sid)
+    {
+        if (string.IsNullOrWhiteSpace(sid))
+        {
+            return false;
+        }
+
+        // SID components are hyphen-separated (S-1-5-<authority>-500).
+        string[] parts = sid.Split('-');
+        return parts.Length >= 2 && parts[^1] == "500";
+    }
+
+    private static bool DetectBuiltInAdminAccount()
+    {
+        try
+        {
+            using var identity = WindowsIdentity.GetCurrent();
+            return IsBuiltInAdministratorSid(identity.User?.Value);
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     /// <summary>
@@ -450,10 +650,16 @@ public static class DragDropPermissionService
             }
         }
 
-        var after = Diagnose();
         string failureMessage = failures.Count == 0 ? string.Empty : string.Join("; ", failures);
 
-        bool needsRelaunch = before.NeedsRelaunch || after.NeedsRelaunch || before.IsCurrentProcessElevated;
+        // Same predicate as the diagnostic's NeedsRelaunch: on a fully
+        // elevated desktop a restart lands elevated again, so the repair
+        // flow must not steer the user into one even when local entries
+        // (shortcuts, compat layers) were genuinely fixed.
+        bool needsRelaunch = ComputeNeedsRelaunchDiagnostic(
+            before.IsCurrentProcessElevated,
+            before.IsUacDisabled,
+            before.IsExplorerElevated);
         return new DragDropPermissionRepairResult(
             failures.Count == 0,
             needsRelaunch,
@@ -700,47 +906,101 @@ public static class DragDropPermissionService
 
     private const uint SldfRunAsUser = 0x0000_2000;
 
-    /// <summary>
-    /// Standalone COM reader for a shortcut's "Run as administrator" flag.
-    /// Deliberately independent of the TryReadShortcut backend split: the
-    /// flag lives in the link header (IShellLinkDataList::GetFlags /
-    /// SLDF_RUNAS_USER), not in target/arguments, and ComImport interop
-    /// compiles in NativeAOT (same shape as JumpListService). A .lnk with
-    /// this bit relaunches DeskBox elevated on every open, which the
-    /// registry-based AppCompat scan cannot see.
-    /// </summary>
-    [ComImport]
-    [Guid("00021401-0000-0000-C000-000000000046")]
-    private sealed class ShellLinkForFlagProbe
-    {
-    }
+    // Standalone COM reader for a shortcut's "Run as administrator" flag,
+    // deliberately independent of the TryReadShortcut backend split: the
+    // flag lives in the link header (IShellLinkDataList::GetFlags /
+    // SLDF_RUNAS_USER), not in target/arguments, and a .lnk with this bit
+    // relaunches DeskBox elevated on every open, which the registry-based
+    // AppCompat scan cannot see.
+    //
+    // Raw vtable slots throughout (see ComVtable): the old ComImport form
+    // died twice — the co-class constructor was an InvalidProgramException
+    // under NativeAOT (retail acceptance 2026-10-20), and the interface
+    // declaration was missing CopyDataBlock, so GetFlags sat on
+    // RemoveDataBlock's slot and never returned a flags value even on JIT
+    // (real order per ShObjIdl_core.h: AddDataBlock 3, CopyDataBlock 4,
+    // RemoveDataBlock 5, GetFlags 6, SetFlags 7).
+    //
+    // IPersistFile order per objidl.h: GetClassID 3, IsDirty 4, Load 5,
+    // Save 6, SaveCompleted 7, GetCurFile 8.
+    private static readonly Guid s_clsid_ShellLink =
+        new("00021401-0000-0000-C000-000000000046");
 
-    [ComImport]
-    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-    [Guid("45E2B4AE-B1C3-11D0-B92F-00A0C90312E1")]
-    private interface IShellLinkDataList
-    {
-        void AddDataBlock(IntPtr pDataBlock);
-        void RemoveDataBlock(IntPtr pDataBlock);
-        [PreserveSig]
-        int GetFlags(out uint dwFlags);
-        void SetFlags(uint dwFlags);
-    }
+    private static readonly Guid s_iid_IPersistFile =
+        new("0000010b-0000-0000-C000-000000000046");
+
+    private static readonly Guid s_iid_IShellLinkDataList =
+        new("45E2B4AE-B1C3-11D0-B92F-00A0C90312E1");
+
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    private delegate int PersistFileLoadInvoker(
+        IntPtr self,
+        [MarshalAs(UnmanagedType.LPWStr)] string fileName,
+        uint mode);
+
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    private delegate int ShellLinkDataListGetFlagsInvoker(
+        IntPtr self, out uint dwFlags);
 
     internal static bool TryGetShortcutRunAsFlag(string shortcutPath)
     {
+        IntPtr shellLink = IntPtr.Zero;
         try
         {
-            var shellLink = (IShellLinkDataList)(object)new ShellLinkForFlagProbe();
-            ((System.Runtime.InteropServices.ComTypes.IPersistFile)shellLink).Load(shortcutPath, 0);
-            return shellLink.GetFlags(out uint flags) == 0 &&
-                (flags & SldfRunAsUser) != 0;
+            Guid clsid = s_clsid_ShellLink;
+            Guid persistFileIid = s_iid_IPersistFile;
+            if (!ComVtable.TryCreateInProcessInstance(
+                    ref clsid,
+                    ref persistFileIid,
+                    out shellLink))
+            {
+                return false;
+            }
+
+            int loadHr = ComVtable.Slot<PersistFileLoadInvoker>(shellLink, 5)(
+                shellLink,
+                shortcutPath,
+                0);
+            if (loadHr < 0)
+            {
+                return false;
+            }
+
+            Guid dataListIid = s_iid_IShellLinkDataList;
+            int qiHr = ComVtable.QueryInterface(
+                shellLink,
+                ref dataListIid,
+                out IntPtr dataList);
+            if (qiHr < 0 || dataList == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            try
+            {
+                int flagsHr =
+                    ComVtable.Slot<ShellLinkDataListGetFlagsInvoker>(
+                        dataList,
+                        6)(dataList, out uint flags);
+                return flagsHr == 0 && (flags & SldfRunAsUser) != 0;
+            }
+            finally
+            {
+                Marshal.Release(dataList);
+            }
         }
         catch (Exception ex)
         {
             App.Log(
                 $"[DragDropPermission] Run-as flag probe failed for '{shortcutPath}': {ex.Message}");
             return false;
+        }
+        finally
+        {
+            if (shellLink != IntPtr.Zero)
+            {
+                Marshal.Release(shellLink);
+            }
         }
     }
 

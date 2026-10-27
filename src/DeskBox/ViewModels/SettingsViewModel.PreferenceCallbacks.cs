@@ -102,6 +102,36 @@ public partial class SettingsViewModel
         _interactionSettings.SetAutoCheckForUpdates(value);
     }
 
+    partial void OnShowReleaseNotesAfterUpdateChanged(bool value)
+    {
+        if (_isRestoringDefaults)
+        {
+            return;
+        }
+
+        _interactionSettings.SetShowReleaseNotesAfterUpdate(value);
+    }
+
+    partial void OnAutoDownloadUpdatesChanged(bool value)
+    {
+        if (_isRestoringDefaults)
+        {
+            return;
+        }
+
+        _interactionSettings.SetAutoDownloadUpdates(value);
+    }
+
+    partial void OnShowUpdateToastNotificationChanged(bool value)
+    {
+        if (_isRestoringDefaults)
+        {
+            return;
+        }
+
+        _interactionSettings.SetShowUpdateToastNotification(value);
+    }
+
     partial void OnSilentStartupChanged(bool value)
     {
         if (_isRestoringDefaults)
