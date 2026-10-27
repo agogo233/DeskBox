@@ -39,6 +39,7 @@
     <Resource Language="ar-SA" />
     <Resource Language="bn-BD" />
     <Resource Language="ru-RU" />
+    <Resource Language="ko-KR" />
   </Resources>
 
   <Applications>

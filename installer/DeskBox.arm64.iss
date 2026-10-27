@@ -95,6 +95,7 @@ Name: "french"; MessagesFile: "Languages\French.isl"
 Name: "arabic"; MessagesFile: "Languages\Arabic.isl"
 Name: "bengali"; MessagesFile: "Languages\Bengali.islu"
 Name: "russian"; MessagesFile: "Languages\Russian.isl"
+Name: "korean"; MessagesFile: "Languages\Korean.islu"
 
 [Messages]
 #include "DeskBox.HindiBengaliMessages.iss"
@@ -284,6 +285,7 @@ begin
   else if ActiveLanguage = 'russian' then Result := 'ru-RU'
   else if ActiveLanguage = 'chinesesimplified' then Result := 'zh-CN'
   else if ActiveLanguage = 'chinesetraditional' then Result := 'zh-TW'
+  else if ActiveLanguage = 'korean' then Result := 'ko-KR'
   else Result := 'en-US';
 end;
 
