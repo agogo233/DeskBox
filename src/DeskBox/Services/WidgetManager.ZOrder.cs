@@ -1210,8 +1210,6 @@ public sealed partial class WidgetManager
     }
 
     private void RaiseVisibleWidgetsTemporarily(string reason, bool absoluteSettle = false)
-=======
-    private void RaiseVisibleWidgetsTemporarily(string reason)
     {
         if (WidgetLayerService.UsesDesktopPinnedMode())
         {
