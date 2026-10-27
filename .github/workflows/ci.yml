@@ -36,7 +36,11 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: 10.0.x
+          # Must stay on the same feature band as global.json (10.0.402) and
+          # portable-x64.yml: a floating 10.0.x drifts to a newer SDK whose
+          # Microsoft.NET.ILLink.Tasks version breaks --locked-mode restore
+          # against the committed packages.lock.json (NU1004).
+          dotnet-version: 10.0.402
 
       - name: Restore
         shell: pwsh

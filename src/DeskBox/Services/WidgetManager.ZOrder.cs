@@ -36,6 +36,21 @@ public sealed partial class WidgetManager
 
     private const int MaxIdleNormalizeAnimationDefers = 15;
 
+    /// <summary>
+    /// Cap for the reason string carried by queued normalizations; chained
+    /// follow-up suffixes would otherwise grow without bound in pathological
+    /// re-tear loops.
+    /// </summary>
+    private const int MaxNormalizationReasonLength = 96;
+
+    /// <summary>
+    /// Info-level rate limit for the idle band-torn repair log: a tear that
+    /// keeps re-forming (external windows re-splitting the band) must not
+    /// flood the default log at the normalization cadence.
+    /// </summary>
+    private static readonly TimeSpan IdleBandTornInfoLogInterval = TimeSpan.FromSeconds(60);
+    private DateTime _lastIdleBandTornInfoLogUtc = DateTime.MinValue;
+
     // ── Desktop-pinned global bedding self-heal (289/447/468) ──────────
     // Idle peer normalization is deliberately peer-only, so once the whole
     // pinned group leaks above application windows (Explorer lifting the
@@ -319,6 +334,51 @@ public sealed partial class WidgetManager
         return true;
     }
 
+    internal bool OwnsExpandedWidgetLayer(IntPtr windowHandle, long generation)
+    {
+        return WidgetExpandedLayerLeasePolicy.Owns(
+            _expandedWidgetLayerLease,
+            windowHandle,
+            generation);
+    }
+
+    /// <summary>
+    /// Releases an expanded capsule lease for manager-driven teardown (the
+    /// raised session returns the whole group to its resting layer while a
+    /// capsule is still expanded). Unlike ReleaseExpandedWidgetLayer this
+    /// performs no temporary-raise restore and queues no cohesion-exit
+    /// normalization — the teardown caller already owns the group's layer
+    /// transition — and the generation check keeps a preempted owner's stale
+    /// teardown from releasing the live lease.
+    /// </summary>
+    internal bool TearDownExpandedWidgetLayer(
+        IntPtr windowHandle,
+        long generation,
+        string reason)
+    {
+        if (!WidgetExpandedLayerLeasePolicy.Owns(
+                _expandedWidgetLayerLease,
+                windowHandle,
+                generation))
+        {
+            App.LogVerbose(
+                $"[ZOrder] Expanded lease teardown ignored reason={reason} " +
+                $"generation={generation} owner=0x{windowHandle.ToInt64():X} " +
+                $"activeGeneration={_expandedWidgetLayerLease.Generation} " +
+                $"activeOwner=0x{_expandedWidgetLayerLease.WindowHandle.ToInt64():X}");
+            return false;
+        }
+
+        _expandedWidgetLayerLease = WidgetExpandedLayerLeasePolicy.Release(
+            _expandedWidgetLayerLease,
+            windowHandle,
+            generation);
+        App.LogVerbose(
+            $"[ZOrder] Expanded lease torn down reason={reason} " +
+            $"generation={generation} owner=0x{windowHandle.ToInt64():X}");
+        return true;
+    }
+
     private bool HasActiveExpandedWidgetLayerLease()
     {
         if (!_expandedWidgetLayerLease.IsActive)
@@ -343,11 +403,6 @@ public sealed partial class WidgetManager
     public void RestoreRaisedWidgetsToDesktopLayer()
     {
         RestoreRaisedWidgetsToDesktopLayer(force: false);
-    }
-
-    public void ForceRestoreRaisedWidgetsToDesktopLayer()
-    {
-        RestoreRaisedWidgetsToDesktopLayer(force: true);
     }
 
     internal void QueueIdleWidgetZOrderNormalization(
@@ -385,6 +440,14 @@ public sealed partial class WidgetManager
 
         long generation = ++_idlePeerOrderGeneration;
         TimeSpan effectiveDelay = delay ?? TimeSpan.FromMilliseconds(120);
+        // Chained follow-up reasons ("-band-repaired" on a "-band-sweep"
+        // pass, "-animation-deferred") grow without bound in pathological
+        // re-tear loops; cap the carried context so log lines stay readable.
+        if (reason.Length > MaxNormalizationReasonLength)
+        {
+            reason = reason[..MaxNormalizationReasonLength];
+        }
+
         App.UiDispatcherQueue.TryEnqueue(async () =>
         {
             await Task.Delay(effectiveDelay);
@@ -395,6 +458,114 @@ public sealed partial class WidgetManager
 
             NormalizeIdleWidgetZOrder(reason, cohesionExit);
         });
+    }
+
+    // ── Interaction-leak watchdog (坑 #4) ──────────────────────────
+
+    private static readonly TimeSpan InteractionLeakWatchdogInterval = TimeSpan.FromSeconds(2);
+    private static readonly TimeSpan InteractionLeakThreshold = TimeSpan.FromSeconds(10);
+    private DispatcherQueueTimer? _interactionLeakWatchdog;
+    private DateTime _interactionLeakObservedUtc;
+
+    /// <summary>
+    /// First real implementation of the interaction-leak watchdog this
+    /// document has promised since 2026-07-24. A leaked BeginInteraction
+    /// (missing End on an exception path) permanently blocks the restore
+    /// monitor, idle normalization, and the pinned bedding watchdog, and the
+    /// natural resets only run after a restore the leak itself is gating —
+    /// so only an outside observer can break the cycle.
+    /// </summary>
+    private void OnSessionInteractionActiveChanged()
+    {
+        if (!HasUiThreadAccess())
+        {
+            UiDispatch.RunOrDefer(OnSessionInteractionActiveChanged);
+            return;
+        }
+
+        if (_sessionManager.IsInteractionActive)
+        {
+            EnsureInteractionLeakWatchdogArmed();
+        }
+        else
+        {
+            StopInteractionLeakWatchdog();
+        }
+    }
+
+    private void EnsureInteractionLeakWatchdogArmed()
+    {
+        _interactionLeakWatchdog ??= App.UiDispatcherQueue.CreateTimer();
+        _interactionLeakWatchdog.Interval = InteractionLeakWatchdogInterval;
+        _interactionLeakWatchdog.Tick -= InteractionLeakWatchdog_Tick;
+        _interactionLeakWatchdog.Tick += InteractionLeakWatchdog_Tick;
+        if (!_interactionLeakWatchdog.IsRunning)
+        {
+            _interactionLeakObservedUtc = DateTime.UtcNow;
+            _interactionLeakWatchdog.Start();
+        }
+    }
+
+    private void StopInteractionLeakWatchdog()
+    {
+        if (_interactionLeakWatchdog is { } timer)
+        {
+            timer.Stop();
+            timer.Tick -= InteractionLeakWatchdog_Tick;
+        }
+
+        _interactionLeakObservedUtc = DateTime.MinValue;
+    }
+
+    private void InteractionLeakWatchdog_Tick(DispatcherQueueTimer sender, object args)
+    {
+        if (App.IsShuttingDown || !_sessionManager.IsInteractionActive)
+        {
+            return;
+        }
+
+        IntPtr foreground = Win32Helper.GetForegroundWindow();
+        if (foreground != IntPtr.Zero &&
+            (IsDeskBoxForegroundWindow(foreground) ||
+                IsTaskbarWindow(foreground) ||
+                ShellContextMenuProxy.IsMenuRoundInFlight))
+        {
+            // A live interaction whose foreground sits on DeskBox (dynamic
+            // mode), on the taskbar, or inside a proxy-hosted native menu
+            // round (pinned mode) is legal without further proof — the
+            // original design's "real interactions always have a DeskBox
+            // foreground" claim is false in the pinned band.
+            _interactionLeakObservedUtc = DateTime.UtcNow;
+            return;
+        }
+
+        TimeSpan elapsed = DateTime.UtcNow - _interactionLeakObservedUtc;
+        // Clear a phantom depth-one left by a swallowed post-reset End before
+        // the leak threshold judgment: at this point the foreground is
+        // neither DeskBox, taskbar, nor a proxy menu round — no live widget
+        // interaction can hold it, so the depth cannot belong to one.
+        if (_sessionManager.ReconcilePostResetDepth(
+                DateTime.UtcNow,
+                foregroundConsistentWithNoLiveInteraction: foreground != IntPtr.Zero))
+        {
+            QueueIdleWidgetZOrderNormalization("post-reset-depth-reconciled");
+            return;
+        }
+
+        TimeSpan threshold = WidgetLayerService.UsesDesktopPinnedMode()
+            ? InteractionLeakThreshold * 2
+            : InteractionLeakThreshold;
+        if (elapsed < threshold)
+        {
+            return;
+        }
+
+        App.Log(
+            "[TrayBatch] Interaction watchdog reset " +
+            $"elapsedSeconds={(int)elapsed.TotalSeconds} " +
+            $"foreground=0x{foreground.ToInt64():X}");
+        _sessionManager.ForceResetInteractions("interaction-leak-watchdog");
+        QueueIdleWidgetZOrderNormalization("interaction-leak-watchdog");
     }
 
     // ── Desktop-pinned global bedding self-heal (289/447/468) ──────────
@@ -884,6 +1055,95 @@ public sealed partial class WidgetManager
 
         _idleNormalizeAnimationDefers = 0;
 
+        // Band-integrity sweep (2026-10-17): the peer-only reorder below is
+        // blind to a torn band — one widget stranded above foreign windows
+        // while the rest rest at the desktop layer reads as "peer order
+        // unchanged" and is a fixed point of that check. Detect the tear
+        // across ALL visible widgets (the stranded one is by definition no
+        // idle candidate) and repair it with the relative-restore funnel:
+        // BehindForeground/DesktopBottom really move the band, while
+        // PreservePeerOrder (a legitimately raised window owns the
+        // foreground) is the deliberate no-op — that branch heals nothing,
+        // so the sweep verifies the tear is gone before requeueing, or it
+        // would re-detect the same tear every 120ms. Never on cohesion-exit
+        // passes (their job is to preserve the just-collapsed capsule's
+        // relative residue) and never in the pinned band (its own bedding
+        // watchdog owns repairs there).
+        if (!cohesionExit && !WidgetLayerService.UsesDesktopPinnedMode())
+        {
+            List<IDesktopWidgetWindow> bandWindows = GetLoadedDesktopWindows()
+                .Where(window => window.Visible &&
+                    window.WindowHandle != IntPtr.Zero &&
+                    Win32Helper.IsWindow(window.WindowHandle))
+                .ToList();
+            List<IntPtr> bandHandles = GetWindowsInIdleHighestFirstOrder(bandWindows)
+                .Select(window => window.WindowHandle)
+                .ToList();
+            if (bandHandles.Count >= 2 &&
+                !bandWindows.Any(window => window.IsTitleBarDragTransitionActive) &&
+                WidgetLayerService.IsForeignWindowAboveRaisedPeers(
+                    bandHandles,
+                    exemptShellDesktopWindows: true))
+            {
+                // T1 (2026-10-18 review): a DeskBox-owned foreground makes the
+                // heal resolve to PreservePeerOrder, whose only non-short-
+                // circuited form is lifting bedded siblings up to the stranded
+                // z-highest peer — an untracked peer-lift nobody owns the
+                // descent for. Skip the heal entirely; the lingering windows'
+                // own funnels own their descent, and the next normalization
+                // after the foreground leaves DeskBox repairs the band behind
+                // the then-foreground via BehindForeground/DesktopBottom.
+                IntPtr sweepForeground = Win32Helper.GetForegroundWindow();
+                if (sweepForeground != IntPtr.Zero &&
+                    IsDeskBoxForegroundWindow(sweepForeground))
+                {
+                    App.LogVerbose(
+                        "[ZOrder] Idle band tear deferred; DeskBox owns foreground " +
+                        $"reason={reason} count={bandHandles.Count} " +
+                        $"foreground=0x{sweepForeground.ToInt64():X}");
+                    return true;
+                }
+
+                bool healed = WidgetLayerService.RestoreGroupPreservingForeground(
+                    bandHandles,
+                    $"{reason}-band-repair");
+                bool stillTorn = WidgetLayerService.IsForeignWindowAboveRaisedPeers(
+                    bandHandles,
+                    exemptShellDesktopWindows: true);
+                if (healed && !stillTorn)
+                {
+                    if (DateTime.UtcNow - _lastIdleBandTornInfoLogUtc >
+                        IdleBandTornInfoLogInterval)
+                    {
+                        _lastIdleBandTornInfoLogUtc = DateTime.UtcNow;
+                        App.Log(
+                            "[ZOrder] Idle band torn; repaired via relative restore " +
+                            $"reason={reason} count={bandHandles.Count} healed={healed}");
+                    }
+                    else
+                    {
+                        App.LogVerbose(
+                            "[ZOrder] Idle band torn; repaired via relative restore " +
+                            $"reason={reason} count={bandHandles.Count} healed={healed}");
+                    }
+
+                    QueueIdleWidgetZOrderNormalization($"{reason}-band-repaired");
+                }
+                else
+                {
+                    // Unresolved: a legitimately raised window likely owns the
+                    // top (its own Deactivated funnel owns the descent). No
+                    // requeue — the follow-up pass would re-detect the same
+                    // tear and spin at the normalization cadence.
+                    App.LogVerbose(
+                        "[ZOrder] Idle band tear unresolved; deferring to window funnels " +
+                        $"reason={reason} count={bandHandles.Count} healed={healed}");
+                }
+
+                return true;
+            }
+        }
+
         IReadOnlyList<IDesktopWidgetWindow> ordered =
             GetWindowsInIdleHighestFirstOrder(candidates);
         // Normalization is deliberately peer-only. The current highest widget
@@ -894,6 +1154,14 @@ public sealed partial class WidgetManager
         App.LogVerbose(
             $"[ZOrder] Idle peer normalize reason={reason} count={ordered.Count} " +
             $"applied={applied} order={FormatIdlePeerOrder(ordered)}");
+        if (cohesionExit && applied)
+        {
+            // A cohesion-exit pass deliberately leaves the collapsed capsule's
+            // relative residue untouched; follow up with a plain pass so the
+            // band-integrity sweep above can evaluate the settled band.
+            QueueIdleWidgetZOrderNormalization($"{reason}-band-sweep");
+        }
+
         return applied;
     }
 
@@ -942,6 +1210,8 @@ public sealed partial class WidgetManager
     }
 
     private void RaiseVisibleWidgetsTemporarily(string reason, bool absoluteSettle = false)
+=======
+    private void RaiseVisibleWidgetsTemporarily(string reason)
     {
         if (WidgetLayerService.UsesDesktopPinnedMode())
         {
@@ -1078,36 +1348,6 @@ public sealed partial class WidgetManager
             $"active=0x{activeWidgetHandle.ToInt64():X} " +
             $"count={handles.Count} applied={applied}");
         return applied;
-    }
-
-    public bool RequestRestoreRaisedWidgetsToDesktopLayer(string reason = "interaction-ended")
-    {
-        if (!_widgetsRaisedFromTray)
-        {
-            App.LogVerbose($"[TrayBatch] RestoreRequest ignored reason={reason} state=not-raised");
-            return false;
-        }
-
-        if (!UiDispatch.HasAccess)
-        {
-            UiDispatch.RunOrDefer(() => RequestRestoreRaisedWidgetsToDesktopLayer(reason));
-            return true;
-        }
-
-        App.LogVerbose($"[TrayBatch] RestoreRequest held reason={reason} until=next-toggle");
-        return true;
-    }
-
-    private void QueueRequestedLayerRestoreCheck(string reason, TimeSpan delay)
-    {
-        long generation = _trayRaiseBatchGeneration;
-        // RunOrDefer instead of a bare TryEnqueue on App.UiDispatcherQueue:
-        // the bare call would NullReference before dispatcher-init.
-        UiDispatch.RunOrDefer(async () =>
-        {
-            await Task.Delay(delay);
-            TryRestoreRaisedWidgetsAfterInteraction(reason, generation);
-        });
     }
 
     private void TryRestoreRaisedWidgetsAfterInteraction(string reason, long generation)
