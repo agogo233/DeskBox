@@ -296,11 +296,26 @@ try {
             "restore",
             $restoreProject,
             "--artifacts-path", $buildArtifactsDir,
+            "--force-evaluate",
             "-v:minimal"
         ) + $commonProperties
         & $dotnet @restoreArguments 2>&1 | Tee-Object -FilePath $logPath -Append
         if ($LASTEXITCODE -ne 0) {
             throw "AOT retail restore failed for '$restoreProject'. See '$logPath'."
+        }
+    }
+
+    # --force-evaluate rewrites each project's packages.*.lock.json to match
+    # the currently installed SDK band. The publish below uses --no-restore and
+    # consumes the already-restored assets, so the lock files are not needed for
+    # the build itself. Reset them to their committed state so the working tree
+    # stays clean and the publish-time integrity guard (which compares snapshots
+    # taken before and after the restore) does not see a spurious change.
+    $restoredLockFiles = Get-ChildItem -Path $repoRoot -Recurse -Filter "packages.*.lock.json" -File
+    if ($restoredLockFiles.Count -gt 0) {
+        & git -C $repoRoot checkout -- @($restoredLockFiles.FullName)
+        if ($LASTEXITCODE -ne 0) {
+            throw "Failed to reset lock files after --force-evaluate restore."
         }
     }
 
