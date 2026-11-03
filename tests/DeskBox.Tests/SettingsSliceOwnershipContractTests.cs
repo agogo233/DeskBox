@@ -235,6 +235,7 @@ public sealed class SettingsSliceOwnershipContractTests
         ["src/DeskBox/App.AotWeatherSurfacePersistenceSmoke.cs"] = 17,
         ["src/DeskBox/App.DiagnosticsBundle.cs"] = 6,
         ["src/DeskBox/App.ImmediateHiddenWorkingSetTrim.cs"] = 2,
+        ["src/DeskBox/App.SettingsHost.cs"] = 11,
         ["src/DeskBox/App.Tray.cs"] = 3,
         ["src/DeskBox/App.xaml.cs"] = 36,
         ["src/DeskBox/Controls/DesktopOrganizationPreviewCard.xaml.cs"] = 11,
@@ -252,6 +253,7 @@ public sealed class SettingsSliceOwnershipContractTests
         ["src/DeskBox/Controls/WidgetContents/TodoWidgetContent.xaml.cs"] = 1,
         ["src/DeskBox/Controls/WidgetShell.xaml.cs"] = 2,
         ["src/DeskBox/Services/AutoStartDefaultPolicy.cs"] = 1,
+        ["src/DeskBox/Services/CapsuleOverrideResetter.cs"] = 8,
         ["src/DeskBox/Services/DataBackupSettingsPolicy.cs"] = 15,
         ["src/DeskBox/Services/DesktopAutoOrganizationWatcher.cs"] = 13,
         // 5 = legacy 4 + DesktopDoubleClickEnabled read backing the hook
@@ -272,12 +274,14 @@ public sealed class SettingsSliceOwnershipContractTests
         ["src/DeskBox/Services/DirectStartupService.cs"] = 2,
         ["src/DeskBox/Services/DragDropPermissionService.cs"] = 3,
         ["src/DeskBox/Services/EverythingSearchService.cs"] = 12,
-        ["src/DeskBox/Services/FeatureWidgetSettings.cs"] = 13,
+        ["src/DeskBox/Services/FeatureWidgetSettings.cs"] = 15,
         ["src/DeskBox/Services/FileWidgetFolderOpenBehaviorNames.cs"] = 1,
         ["src/DeskBox/Services/FileWidgetIconLayout.cs"] = 6,
         // +1 each: the watchdog chord heartbeat reads the enabled flag once
         // per cycle via RegistrationMaintenanceWanted (feedback 308/371 fix).
         ["src/DeskBox/Services/GlobalHotkeyService.cs"] = 18,
+        ["src/DeskBox/Services/InProcessSettingsHotkeyActions.cs"] = 1,
+        ["src/DeskBox/Services/InProcessSettingsWidgetActions.cs"] = 10,
         ["src/DeskBox/Services/InitialFileWidgetSetupPolicy.cs"] = 2,
         ["src/DeskBox/Services/JumpListService.cs"] = 1,
         ["src/DeskBox/Services/LocalizationService.cs"] = 3,

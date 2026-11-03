@@ -39,7 +39,7 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
             ["src/DeskBox/Services/DesktopOrganizationRecoveryStore.cs"] = 2,
             ["src/DeskBox/Services/FeedbackService.cs"] = 4,
             ["src/DeskBox/Services/GlanceImageService.cs"] = 2,
-            ["src/DeskBox/Services/GlanceWidgetStore.cs"] = 7,
+            ["src/DeskBox/Services/GlanceWidgetStore.cs"] = 8,
             ["src/DeskBox/Services/LocalizationService.cs"] = 1,
             ["src/DeskBox/Services/MusicSettingsStore.cs"] = 3,
             ["src/DeskBox/Services/ManagedStorageMigrationService.cs"] = 2,
@@ -47,8 +47,11 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
             ["src/DeskBox/Services/QuickCaptureStore.cs"] = 2,
             ["src/DeskBox/Services/RecoveryOfferStore.cs"] = 2,
             ["src/DeskBox/Services/SearchHistoryService.cs"] = 2,
+            ["src/DeskBox/Services/SettingsIpcClient.cs"] = 2,
+            ["src/DeskBox/Services/SettingsIpcProtocol.cs"] = 3,
+            ["src/DeskBox/Services/SettingsIpcServer.cs"] = 2,
             ["src/DeskBox/Services/SettingsMigrationService.cs"] = 2,
-            ["src/DeskBox/Services/SettingsService.cs"] = 3,
+            ["src/DeskBox/Services/SettingsService.cs"] = 10,
             // Startup session ledger: read-previous + write-current breadcrumb.
             ["src/DeskBox/Services/StartupSessionLedger.cs"] = 2,
             // Crash event report serialization for the support package.
@@ -83,8 +86,8 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
             Assert.Equal(expectedCount, actual[path]);
         }
 
-        Assert.Equal(43, actual.Count);
-        Assert.Equal(100, actual.Values.Sum());
+        Assert.Equal(46, actual.Count);
+        Assert.Equal(115, actual.Values.Sum());
 
         string[] expectedContextOwners =
         [
@@ -115,6 +118,7 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
             "src/DeskBox/Services/QuickCaptureStore.cs",
             "src/DeskBox/Services/RecoveryOfferStore.cs",
             "src/DeskBox/Services/SearchHistoryService.cs",
+            "src/DeskBox/Services/SettingsIpcProtocol.cs",
             "src/DeskBox/Services/SettingsService.cs",
             "src/DeskBox/Services/StartupSessionLedger.cs",
             "src/DeskBox/Services/SyncRevisionsStore.cs",
@@ -136,7 +140,7 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
             .Order()
             .ToArray();
 
-        Assert.Equal(39, actualContextOwners.Length);
+        Assert.Equal(40, actualContextOwners.Length);
         Assert.Equal(expectedContextOwners, actualContextOwners);
     }
 
@@ -238,10 +242,10 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
 
         var expectedTypeInfoReferences = new Dictionary<string, int>(StringComparer.Ordinal)
         {
-            ["SettingsJsonContext.Default.AppSettings"] = 3,
+            ["SettingsJsonContext.Default.AppSettings"] = 8,
             ["QuickCaptureJsonContext.Default.StoreData"] = 2,
             ["TodoJsonContext.Default.StoreData"] = 3,
-            ["GlancePreferencesJsonContext.Default.Preferences"] = 7,
+            ["GlancePreferencesJsonContext.Default.Preferences"] = 8,
             ["GlanceImageCatalogJsonContext.Default.ImageCatalog"] = 2,
             ["WidgetMetadataJsonContext.Default.StringMap"] = 2,
             ["WidgetMetadataJsonContext.Default.StringListMap"] = 2,
@@ -256,7 +260,7 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
                     Regex.Escape(reference) + @"\b").Count);
         }
 
-        Assert.Equal(24, expectedTypeInfoReferences.Values.Sum());
+        Assert.Equal(30, expectedTypeInfoReferences.Values.Sum());
         Assert.DoesNotContain("JsonSerializerOptions", allPhaseTwoSources, StringComparison.Ordinal);
         Assert.DoesNotContain(
             "new JsonStringEnumConverter()",

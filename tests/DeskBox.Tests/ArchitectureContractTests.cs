@@ -72,14 +72,13 @@ public sealed class ArchitectureContractTests
             ["Todo"] = 38,
             ["Music"] = 16,
             ["Glance"] = 23,
-            ["Search"] = 23,
+            ["Search"] = 25,
             ["QuickCapture"] = 25,
         };
 
     private static readonly Dictionary<string, int> FrozenAmbientWidgetManagerAccess =
         new(StringComparer.Ordinal)
         {
-            ["src/DeskBox/Views/SettingsSections/GlanceWidgetSettingsSection.xaml.cs"] = 9,
             ["src/DeskBox/ViewModels/QuickCaptureWidgetViewModel.Operations.cs"] = 1,
             ["src/DeskBox/Views/SearchPopupWindow.xaml.cs"] = 3,
         };
