@@ -66,13 +66,14 @@ public sealed class ExternalActivationPolicyTests
         string source = File.ReadAllText(TestPaths.FromRepository("src/DeskBox/App.xaml.cs"));
         string handler = Slice(
             source,
-            "private async Task HandleExternalActivationAsync()",
+            "private async Task HandleExternalActivationAsync(bool isStartupInitiated = false)",
             "private bool DrainPendingNativeNotificationActivations()");
 
         Assert.Contains("ExternalActivationPolicy.DecideBareActivation", handler, StringComparison.Ordinal);
         Assert.Contains("WidgetManager.SetAllWidgetsVisibleAsync(true)", handler, StringComparison.Ordinal);
         Assert.Contains("OpenSettings();", handler, StringComparison.Ordinal);
         Assert.Contains("Coalesced duplicate bare activation", handler, StringComparison.Ordinal);
+        Assert.Contains("if (isStartupInitiated)", handler, StringComparison.Ordinal);
         Assert.DoesNotContain("ShowWidgetAsync(", handler, StringComparison.Ordinal);
         Assert.DoesNotContain("FirstOrDefault(", handler, StringComparison.Ordinal);
     }

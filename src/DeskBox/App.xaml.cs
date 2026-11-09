@@ -3766,7 +3766,7 @@ RunCriticalStartupStep("widget-manager", () =>
         {
             if (startupSignalPending)
             {
-                await HandleExternalActivationAsync();
+                await HandleExternalActivationAsync(isStartupInitiated: IsStartupMode);
             }
             else
             {
@@ -3779,7 +3779,7 @@ RunCriticalStartupStep("widget-manager", () =>
                 // stale argument (an unexpected toggle/open-storage).
                 // Running the same handler drains those files harmlessly —
                 // no event means no envelope work, just the file take.
-                await HandleExternalActivationAsync();
+                await HandleExternalActivationAsync(isStartupInitiated: IsStartupMode);
             }
         }
         finally
@@ -3788,7 +3788,7 @@ RunCriticalStartupStep("widget-manager", () =>
         }
     }
 
-    private async Task HandleExternalActivationAsync()
+    private async Task HandleExternalActivationAsync(bool isStartupInitiated = false)
     {
         // An activation racing shutdown would re-show windows the teardown
         // sequence just closed (it runs after the settings-window step has
@@ -3883,6 +3883,20 @@ RunCriticalStartupStep("widget-manager", () =>
                     // first-run flows until it lands. A settled Dismissed
                     // needs no deferral: it already cleared the marker as an
                     // implicit fresh start.
+                    continue;
+                }
+
+                if (isStartupInitiated)
+                {
+                    // A startup-initiated bare activation is the unattended
+                    // boot signal, not a user intent: stay silent instead of
+                    // walking the session through onboarding or opening the
+                    // settings window. Widgets were already restored by the
+                    // startup pipeline, and their visibility honors the
+                    // silent-startup preference — do not force-reveal here.
+                    // User-triggered activations (tray, jump list, toast,
+                    // second-instance) call this with isStartupInitiated
+                    // false and keep the full first-run flow.
                     continue;
                 }
 
