@@ -15,6 +15,7 @@
   "Display.Material.TransparencyOff.Body": "Эффекты прозрачности Windows выключены, поэтому виджеты отображаются сплошным цветом. Включите их в Параметры → Персонализация → Цвета.",
   "Display.Material.BatterySaver.Title": "Экономия заряда приостановила матовое стекло",
   "Display.Material.BatterySaver.Body": "Включена экономия заряда: Windows заменила материал виджетов сплошным цветом. Эффект вернётся после её отключения.",
+  "Display.Material.Dismiss.Action": "Больше не показывать",
   "Settings.Performance.Description": "Настройте баланс качества изображения и потребления ресурсов, а также очистку кэша после скрытия виджетов",
   "Settings.Performance.Mode.Title": "Режим производительности",
   "Settings.Performance.Mode.Description": "Выберите предустановку. Изменение подробных параметров включает пользовательский режим",

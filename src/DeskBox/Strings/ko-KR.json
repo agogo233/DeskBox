@@ -15,6 +15,7 @@
   "Display.Material.TransparencyOff.Body": "Windows에서 “투명 효과”가 꺼져 있어 위젯의 유리 효과가 단색으로 표시됩니다. 설정 → 개인 설정 → 색에서 다시 켤 수 있습니다.",
   "Display.Material.BatterySaver.Title": "배터리 절전 모드로 유리 효과가 일시 중지됨",
   "Display.Material.BatterySaver.Body": "현재 배터리 절전 모드이며 Windows가 위젯의 유리 재질을 단색으로 전환했습니다. 배터리 절전 모드를 끄면 자동으로 복원됩니다.",
+  "Display.Material.Dismiss.Action": "다시 표시 안 함",
   "Settings.Performance.Description": "시각 효과와 리소스 사용의 균형을 선택하고 위젯이 숨겨진 후의 캐시 정리를 제어합니다",
   "Settings.Performance.Mode.Title": "성능 모드",
   "Settings.Performance.Mode.Description": "프리셋을 선택합니다. 아래 세부 설정을 변경하면 자동으로 사용자 지정으로 전환됩니다",

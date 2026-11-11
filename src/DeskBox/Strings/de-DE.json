@@ -15,6 +15,7 @@
   "Display.Material.TransparencyOff.Body": "Die Transparenzeffekte von Windows sind aus, daher zeigen Widgets eine einfache Farbe statt Milchglas. Sie können sie unter Einstellungen → Personalisierung → Farben wieder aktivieren.",
   "Display.Material.BatterySaver.Title": "Energiesparmodus pausiert den Milchglas-Effekt",
   "Display.Material.BatterySaver.Body": "Der Energiesparmodus ist aktiv, daher ersetzt Windows das Widget-Material durch eine einfache Farbe. Der Effekt kehrt zurück, sobald der Modus endet.",
+  "Display.Material.Dismiss.Action": "Nicht mehr anzeigen",
   "Settings.Performance.Description": "Visuelle Qualität und Ressourcenverbrauch abwägen und die Cache-Freigabe nach dem Ausblenden steuern",
   "Settings.Performance.Mode.Title": "Leistungsmodus",
   "Settings.Performance.Mode.Description": "Wählen Sie eine Voreinstellung. Änderungen an den Details wechseln zu Benutzerdefiniert",

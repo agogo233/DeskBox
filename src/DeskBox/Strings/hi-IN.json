@@ -15,6 +15,7 @@
   "Display.Material.TransparencyOff.Body": "Windows के पारदर्शिता प्रभाव बंद हैं, इसलिए विजेट फ़्रॉस्टेड ग्लास के बजाय सादा रंग दिखाते हैं। सेटिंग्स → निजीकरण → रंग में फिर से चालू करें।",
   "Display.Material.BatterySaver.Title": "बैटरी सेवर ने फ़्रॉस्टेड ग्लास रोक दिया है",
   "Display.Material.BatterySaver.Body": "बैटरी सेवर चालू है, इसलिए Windows ने विजेट का मटीरियल सादे रंग से बदल दिया है। सेवर बंद होते ही इफ़ेक्ट वापस आ जाएगा।",
+  "Display.Material.Dismiss.Action": "दोबारा न दिखाएँ",
   "Settings.Performance.Description": "दृश्य गुणवत्ता और संसाधन उपयोग में संतुलन चुनें तथा विजेट छिपने के बाद कैश सफ़ाई नियंत्रित करें",
   "Settings.Performance.Mode.Title": "प्रदर्शन मोड",
   "Settings.Performance.Mode.Description": "कोई प्रीसेट चुनें। नीचे की विस्तृत सेटिंग बदलने पर कस्टम मोड सक्रिय होगा",

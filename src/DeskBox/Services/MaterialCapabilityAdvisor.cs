@@ -1,3 +1,5 @@
+using DeskBox.Core.Persistence;
+
 namespace DeskBox.Services;
 
 /// <summary>
@@ -12,6 +14,9 @@ internal static class MaterialCapabilityAdvisor
 {
     private static readonly HashSet<string> s_warnedCauses =
         new(StringComparer.Ordinal);
+    private static readonly object s_storeGate = new();
+    private static MaterialDegradationAdvisoryStore? s_store;
+    private static int s_dismissedCache = -1;
     private static int _isRunning;
     private static int s_energySaverSubscribed;
 
@@ -28,6 +33,14 @@ internal static class MaterialCapabilityAdvisor
     {
         if (!SettingsService.IsMicaMaterial(materialType) &&
             !SettingsService.IsAcrylicMaterial(materialType))
+        {
+            return;
+        }
+
+        // The user previously chose "Don't show again": the dismissal survives
+        // restarts via the marker store, so every later evaluation is a no-op
+        // regardless of how often the degrading switch flips.
+        if (IsDismissed())
         {
             return;
         }
@@ -134,6 +147,72 @@ internal static class MaterialCapabilityAdvisor
         catch
         {
             return false;
+        }
+    }
+
+    /// <summary>
+    /// Whether the user previously dismissed the degradation advisory. The
+    /// marker store is read once per process (the degrading switch rarely
+    /// flips back to "not dismissed" without an app restart) and the answer is
+    /// cached; <see cref="MarkDismissed"/> invalidates it in-process.
+    /// </summary>
+    internal static bool IsDismissed()
+    {
+        int cached = Volatile.Read(ref s_dismissedCache);
+        if (cached >= 0)
+        {
+            return cached == 1;
+        }
+
+        lock (s_storeGate)
+        {
+            cached = Volatile.Read(ref s_dismissedCache);
+            if (cached >= 0)
+            {
+                return cached == 1;
+            }
+
+            bool dismissed = GetStore().TryReadDismissedAtUtc() is not null;
+            Volatile.Write(ref s_dismissedCache, dismissed ? 1 : 0);
+            return dismissed;
+        }
+    }
+
+    /// <summary>
+    /// Records the user's "Don't show again" choice. The in-process cache is
+    /// updated synchronously so the current session stops hinting immediately;
+    /// the durable marker write is fire-and-forget and never blocks or throws.
+    /// </summary>
+    internal static void MarkDismissed()
+    {
+        Volatile.Write(ref s_dismissedCache, 1);
+        _ = GetStore().MarkDismissedAsync();
+    }
+
+    /// <summary>
+    /// Replaces the marker store for tests and resets the cached dismissal, so
+    /// each test starts from a clean advisory state.
+    /// </summary>
+    internal static void SetStoreForTesting(MaterialDegradationAdvisoryStore? store)
+    {
+        lock (s_storeGate)
+        {
+            s_store = store;
+            Volatile.Write(ref s_dismissedCache, -1);
+        }
+    }
+
+    private static MaterialDegradationAdvisoryStore GetStore()
+    {
+        MaterialDegradationAdvisoryStore? store = s_store;
+        if (store is not null)
+        {
+            return store;
+        }
+
+        lock (s_storeGate)
+        {
+            return s_store ??= new MaterialDegradationAdvisoryStore();
         }
     }
 }

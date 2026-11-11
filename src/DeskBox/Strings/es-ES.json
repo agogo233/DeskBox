@@ -15,6 +15,7 @@
   "Display.Material.TransparencyOff.Body": "Los efectos de transparencia de Windows están desactivados, así que los widgets muestran un color sólido en lugar del cristal. Reactívalos en Configuración → Personalización → Colores.",
   "Display.Material.BatterySaver.Title": "El ahorro de batería pausó el cristal esmerilado",
   "Display.Material.BatterySaver.Body": "El ahorro de batería está activo y Windows sustituyó el material de los widgets por un color sólido. El efecto vuelve al desactivarse.",
+  "Display.Material.Dismiss.Action": "No volver a mostrar",
   "Settings.Performance.Description": "Equilibra la calidad visual y el uso de recursos, y controla la limpieza de caché tras ocultar los widgets",
   "Settings.Performance.Mode.Title": "Modo de rendimiento",
   "Settings.Performance.Mode.Description": "Elige un preajuste. Al cambiar un ajuste detallado se activa Personalizado",

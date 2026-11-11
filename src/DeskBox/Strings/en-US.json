@@ -15,6 +15,7 @@
   "Display.Material.TransparencyOff.Body": "Windows transparency effects are turned off, so widgets show a solid color instead of frosted glass. Turn them back on under Settings → Personalization → Colors.",
   "Display.Material.BatterySaver.Title": "Battery saver paused frosted glass",
   "Display.Material.BatterySaver.Body": "Battery saver is on, so Windows replaced the widget material with a solid color. Frosted glass returns when battery saver turns off.",
+  "Display.Material.Dismiss.Action": "Don't show again",
   "Settings.Performance.Description": "Balance visual quality and resource usage, and control cache cleanup after widgets are hidden",
   "Settings.Performance.Mode.Title": "Performance mode",
   "Settings.Performance.Mode.Description": "Choose a preset; changing a detailed setting below switches to Custom",

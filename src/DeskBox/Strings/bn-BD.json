@@ -15,6 +15,7 @@
   "Display.Material.TransparencyOff.Body": "Windows স্বচ্ছতা এফেক্ট বন্ধ থাকায় উইজেটগুলো ফ্রস্টেড গ্লাসের বদলে খাঁটি রঙে দেখাচ্ছে। Settings → Personalization → Colors থেকে আবার চালু করুন।",
   "Display.Material.BatterySaver.Title": "ব্যাটারি সেভার ফ্রস্টেড গ্লাস থামিয়ে দিয়েছে",
   "Display.Material.BatterySaver.Body": "ব্যাটারি সেভার চালু থাকায় Windows উইজেটের ম্যাটেরিয়াল খাঁটি রঙে বদলে দিয়েছে। সেভার বন্ধ হলে এফেক্ট ফিরে আসবে।",
+  "Display.Material.Dismiss.Action": "আবার দেখাবেন না",
   "Settings.Performance.Description": "দৃশ্যমান মান ও রিসোর্স ব্যবহারের ভারসাম্য এবং উইজেট লুকানোর পর ক্যাশ পরিষ্কার নিয়ন্ত্রণ করুন",
   "Settings.Performance.Mode.Title": "কর্মক্ষমতা মোড",
   "Settings.Performance.Mode.Description": "একটি প্রিসেট বেছে নিন। নিচের বিস্তারিত সেটিংস বদলালে কাস্টম মোড চালু হবে",

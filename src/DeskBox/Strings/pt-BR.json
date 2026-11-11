@@ -15,6 +15,7 @@
   "Display.Material.TransparencyOff.Body": "Os efeitos de transparência do Windows estão desligados, então os widgets mostram uma cor sólida em vez de vidro fosco. Reative-os em Configurações → Personalização → Cores.",
   "Display.Material.BatterySaver.Title": "A economia de bateria pausou o vidro fosco",
   "Display.Material.BatterySaver.Body": "A economia de bateria está ativa e o Windows substituiu o material dos widgets por uma cor sólida. O efeito volta quando ela for desligada.",
+  "Display.Material.Dismiss.Action": "Não mostrar novamente",
   "Settings.Performance.Description": "Equilibre a qualidade visual e o uso de recursos e controle a limpeza do cache após ocultar os widgets",
   "Settings.Performance.Mode.Title": "Modo de desempenho",
   "Settings.Performance.Mode.Description": "Escolha uma predefinição. Alterar uma configuração detalhada ativa o modo Personalizado",

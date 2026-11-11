@@ -1813,7 +1813,8 @@ RunCriticalStartupStep("widget-manager", () =>
                         titleKey,
                         bodyKey,
                         NotificationIcon.Warning,
-                        "AppearanceMaterialSettings")));
+                        "AppearanceMaterialSettings",
+                        CreateMaterialAdvisoryDismissAction())));
 
             // Configure taskbar Jump List with quick actions
             SafeFireAndForget(
@@ -2910,6 +2911,24 @@ RunCriticalStartupStep("widget-manager", () =>
             }
 
             OpenAboutSettingsFromTray();
+        }
+        else if (notificationArguments.TryGetValue("type", out string? materialAdvisoryType) &&
+                 string.Equals(
+                     materialAdvisoryType,
+                     "material-advisory",
+                     StringComparison.OrdinalIgnoreCase))
+        {
+            if (notificationArguments.TryGetValue("action", out string? materialAdvisoryAction) &&
+                string.Equals(
+                    materialAdvisoryAction,
+                    "dismiss",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                MaterialCapabilityAdvisor.MarkDismissed();
+                App.Log(
+                    "[Material] User dismissed the degradation advisory; " +
+                    "further hints are suppressed.");
+            }
         }
         else if (notificationArguments.TryGetValue("type", out string? settingsNotificationType) &&
                  string.Equals(
@@ -4204,7 +4223,8 @@ RunCriticalStartupStep("widget-manager", () =>
                     titleKey,
                     bodyKey,
                     NotificationIcon.Warning,
-                    "AppearanceMaterialSettings")));
+                    "AppearanceMaterialSettings",
+                    CreateMaterialAdvisoryDismissAction())));
     }
 
     private void OnBackupSettingsChanged()
@@ -4285,6 +4305,32 @@ RunCriticalStartupStep("widget-manager", () =>
     }
 
     /// <summary>
+    /// Builds the "Don't show again" action for the frosted-glass degradation
+    /// advisory. The button carries its own self-contained arguments (a
+    /// native-notification button activation delivers only the button's
+    /// arguments, not the toast's root arguments), so the route below can act
+    /// on it without any parent state.
+    /// </summary>
+    private IReadOnlyList<NativeAppNotificationAction>? CreateMaterialAdvisoryDismissAction()
+    {
+        if (LocalizationService is null)
+        {
+            return null;
+        }
+
+        return
+        [
+            new NativeAppNotificationAction(
+                LocalizationService.T("Display.Material.Dismiss.Action"),
+                new Dictionary<string, string>
+                {
+                    ["type"] = "material-advisory",
+                    ["action"] = "dismiss"
+                })
+        ];
+    }
+
+    /// <summary>
     /// Shows a settings deep-linking notification: toast first, tray
     /// balloon fallback. Returns true only when at least one channel
     /// actually displayed — one-time notices (the fully-elevated informed
@@ -4295,7 +4341,8 @@ RunCriticalStartupStep("widget-manager", () =>
         string titleKey,
         string bodyKey,
         NotificationIcon icon,
-        string? sectionTag = null)
+        string? sectionTag = null,
+        IReadOnlyList<NativeAppNotificationAction>? actions = null)
     {
         if (LocalizationService is null || IsShuttingDown)
         {
@@ -4314,7 +4361,7 @@ RunCriticalStartupStep("widget-manager", () =>
             };
         string title = LocalizationService.T(titleKey);
         string message = LocalizationService.T(bodyKey);
-        if (_nativeNotificationService?.TryShow(title, message, arguments) == true)
+        if (_nativeNotificationService?.TryShow(title, message, arguments, actions) == true)
         {
             return true;
         }

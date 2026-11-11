@@ -15,6 +15,7 @@
   "Display.Material.TransparencyOff.Body": "Windows 已关闭“透明效果”，格子的毛玻璃会以纯色显示。可在 设置 → 个性化 → 颜色 中重新开启。",
   "Display.Material.BatterySaver.Title": "节电模式已暂停毛玻璃效果",
   "Display.Material.BatterySaver.Body": "当前处于节电模式，Windows 已将格子的毛玻璃材质降级为纯色。关闭节电模式后会自动恢复。",
+  "Display.Material.Dismiss.Action": "不再提示",
   "Settings.Performance.Description": "在视觉效果与资源占用之间选择，并控制格子隐藏后的缓存回收",
   "Settings.Performance.Mode.Title": "性能模式",
   "Settings.Performance.Mode.Description": "选择预设；修改下方详细设置后将自动切换为自定义",

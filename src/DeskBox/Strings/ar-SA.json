@@ -15,6 +15,7 @@
   "Display.Material.TransparencyOff.Body": "تأثيرات الشفافية في Windows متوقفة، لذا تظهر الأدوات بلون مصمت بدلاً من الزجاج المطفي. يمكنك إعادة تفعيلها من الإعدادات ← التخصيص ← الألوان.",
   "Display.Material.BatterySaver.Title": "وضع توفير الطاقة أوقف تأثير الزجاج المطفي",
   "Display.Material.BatterySaver.Body": "وضع توفير الطاقة نشط، لذا استبدل Windows مادة الأدوات بلون مصمت. يعود التأثير تلقائياً عند إيقاف الوضع.",
+  "Display.Material.Dismiss.Action": "عدم الإظهار مرة أخرى",
   "Settings.Performance.Description": "وازن بين الجودة المرئية واستخدام الموارد وتحكم في تنظيف ذاكرة التخزين المؤقت بعد إخفاء الأدوات",
   "Settings.Performance.Mode.Title": "وضع الأداء",
   "Settings.Performance.Mode.Description": "اختر إعدادًا مسبقًا. يؤدي تغيير إعداد تفصيلي إلى التبديل إلى الوضع المخصص",

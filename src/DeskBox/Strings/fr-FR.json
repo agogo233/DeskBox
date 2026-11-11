@@ -15,6 +15,7 @@
   "Display.Material.TransparencyOff.Body": "Les effets de transparence de Windows sont désactivés : les widgets affichent une couleur unie au lieu du verre dépoli. Réactivez-les dans Paramètres → Personnalisation → Couleurs.",
   "Display.Material.BatterySaver.Title": "L'économiseur de batterie a suspendu le verre dépoli",
   "Display.Material.BatterySaver.Body": "L'économiseur de batterie est actif : Windows a remplacé le matériau des widgets par une couleur unie. Le verre dépoli revient à la fin du mode.",
+  "Display.Material.Dismiss.Action": "Ne plus afficher",
   "Settings.Performance.Description": "Équilibrez la qualité visuelle et l’utilisation des ressources, et réglez le nettoyage du cache après masquage",
   "Settings.Performance.Mode.Title": "Mode de performances",
   "Settings.Performance.Mode.Description": "Choisissez un préréglage. Modifier un réglage détaillé active le mode Personnalisé",
