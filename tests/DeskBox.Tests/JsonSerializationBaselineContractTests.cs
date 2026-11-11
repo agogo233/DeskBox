@@ -43,6 +43,8 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
             ["src/DeskBox/Services/LocalizationService.cs"] = 1,
             ["src/DeskBox/Services/MusicSettingsStore.cs"] = 3,
             ["src/DeskBox/Services/ManagedStorageMigrationService.cs"] = 2,
+            // "Don't show again" dismissal marker (serialize + deserialize).
+            ["src/DeskBox/Services/MaterialDegradationAdvisoryStore.cs"] = 2,
             ["src/DeskBox/Services/NativeNotificationActivationEnvelopeStore.cs"] = 2,
             ["src/DeskBox/Services/QuickCaptureStore.cs"] = 2,
             ["src/DeskBox/Services/RecoveryOfferStore.cs"] = 2,
@@ -86,8 +88,8 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
             Assert.Equal(expectedCount, actual[path]);
         }
 
-        Assert.Equal(46, actual.Count);
-        Assert.Equal(115, actual.Values.Sum());
+        Assert.Equal(47, actual.Count);
+        Assert.Equal(117, actual.Values.Sum());
 
         string[] expectedContextOwners =
         [
@@ -113,6 +115,7 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
             "src/DeskBox/Services/GlanceWidgetStore.cs",
             "src/DeskBox/Services/LocalizationService.cs",
             "src/DeskBox/Services/ManagedStorageMigrationModels.cs",
+            "src/DeskBox/Services/MaterialDegradationAdvisoryStore.cs",
             "src/DeskBox/Services/MusicSettingsStore.cs",
             "src/DeskBox/Services/NativeNotificationActivationEnvelopeStore.cs",
             "src/DeskBox/Services/QuickCaptureStore.cs",
@@ -140,7 +143,7 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
             .Order()
             .ToArray();
 
-        Assert.Equal(40, actualContextOwners.Length);
+        Assert.Equal(41, actualContextOwners.Length);
         Assert.Equal(expectedContextOwners, actualContextOwners);
     }
 
