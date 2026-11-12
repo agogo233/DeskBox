@@ -11,6 +11,7 @@ on:
       - main
 
 permissions:
+  actions: write
   contents: read
 
 concurrency:
@@ -27,6 +28,13 @@ jobs:
       DOTNET_NOLOGO: 1
 
     steps:
+      - name: Delete old workflow runs
+        uses: Mattraks/delete-workflow-runs@v2
+        with:
+          token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          retain_days: 7
+          keep_minimum_runs: 3
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -55,5 +63,5 @@ jobs:
         with:
           name: ${{ env.ZIP_NAME }}
           path: .artifacts/aot-retail/win-x64/publish
-          retention-days: 30
+          retention-days: 7
           if-no-files-found: error
