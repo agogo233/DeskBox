@@ -40,6 +40,5 @@
   </ItemGroup>
   <ItemGroup>
     <None Update="Rendering\glance.xaml" CopyToOutputDirectory="PreserveNewest" />
-    <None Include="strings\*.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>
