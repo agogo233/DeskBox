@@ -1,3 +1,6 @@
+using DeskBox.Platform;
+using DeskBox.Services;
+
 namespace DeskBox.Helpers;
 
 /// <summary>
@@ -34,7 +37,12 @@ internal static class NativeDropEffectPolicy
         bool followWindows = false,
         bool sameVolume = true,
         bool shortcutOutsideDesktop = false,
-        bool sourcesOnDesktop = true)
+        bool sourcesOnDesktop = true,
+        bool protectDefaultMoveAsCopy = false,
+        bool hasMappedFolder = true,
+        TransferTargetKind targetKind = TransferTargetKind.DirectorySurface,
+        TransferDomain domain = TransferDomain.ExternalInbound,
+        SourceOriginSnapshot? sourceOrigin = null)
     {
         if (hasShellApplicationData)
         {
@@ -55,7 +63,7 @@ internal static class NativeDropEffectPolicy
         }
 
         FileDropIntent intent = FileDropIntentPolicy.ResolveMappedTransfer(
-            hasMappedFolder: true,
+            hasMappedFolder: hasMappedFolder,
             forceCopy: hasVirtualFileData,
             controlDown: (keyState & ControlKeyState) != 0,
             shiftDown: (keyState & ShiftKeyState) != 0,
@@ -70,7 +78,10 @@ internal static class NativeDropEffectPolicy
             // visual still falls back to Copy when Link is not advertised.
             canLink: true,
             shortcutOutsideDesktop: shortcutOutsideDesktop,
-            sourcesOnDesktop: sourcesOnDesktop);
+            sourcesOnDesktop: sourcesOnDesktop,
+            protectDefaultMoveAsCopy: protectDefaultMoveAsCopy,
+            sourceOrigin: sourceOrigin,
+            domain: domain);
         return intent switch
         {
             FileDropIntent.Copy => Copy,
@@ -91,8 +102,16 @@ internal static class NativeDropEffectPolicy
         bool canCopy = true,
         bool canMove = true,
         bool shortcutOutsideDesktop = false,
-        bool sourcesOnDesktop = true)
+        bool sourcesOnDesktop = true,
+        bool protectDefaultMoveAsCopy = false,
+        SourceOriginSnapshot? sourceOrigin = null,
+        TransferDomain domain = TransferDomain.ExternalInbound)
     {
+        if (sourceOrigin?.HasAppExecutionAliasSource == true)
+        {
+            return false;
+        }
+
         FileDropIntent intent = FileDropIntentPolicy.ResolveMappedTransfer(
             hasMappedFolder: true,
             forceCopy: containsTemporaryFiles,
@@ -105,7 +124,10 @@ internal static class NativeDropEffectPolicy
             followWindows: followWindows,
             sameVolume: sameVolume,
             shortcutOutsideDesktop: shortcutOutsideDesktop,
-            sourcesOnDesktop: sourcesOnDesktop);
+            sourcesOnDesktop: sourcesOnDesktop,
+            protectDefaultMoveAsCopy: protectDefaultMoveAsCopy,
+            sourceOrigin: sourceOrigin,
+            domain: domain);
         return intent != FileDropIntent.Move;
     }
 
@@ -113,11 +135,20 @@ internal static class NativeDropEffectPolicy
         bool containsTemporaryFiles,
         uint keyState,
         bool shortcutOutsideDesktop = false,
-        bool sourcesOnDesktop = true)
+        bool sourcesOnDesktop = true,
+        bool followWindows = false,
+        uint allowedEffects = Copy | Move | Link,
+        SourceOriginSnapshot? sourceOrigin = null)
     {
         if (containsTemporaryFiles)
         {
             return false;
+        }
+
+        bool linkAllowed = (allowedEffects & Link) != 0;
+        if (sourceOrigin?.HasAppExecutionAliasSource == true)
+        {
+            return linkAllowed || (allowedEffects & Copy) != 0;
         }
 
         bool altDown = (keyState & AltKeyState) != 0;
@@ -136,7 +167,12 @@ internal static class NativeDropEffectPolicy
             return false;
         }
 
-        return shortcutOutsideDesktop && !sourcesOnDesktop;
+        if (shortcutOutsideDesktop && !sourcesOnDesktop)
+        {
+            return true;
+        }
+
+        return sourceOrigin?.PrefersShortcutByDefault == true && linkAllowed;
     }
 
     public static bool IsRightButtonDrag(uint keyState)
@@ -147,14 +183,20 @@ internal static class NativeDropEffectPolicy
     public static uint ResolveCompletionEffect(
         bool hasExtractedPaths,
         uint allowedEffects,
-        bool createdShellApplicationLinks = false)
+        bool createdShellApplicationLinks = false,
+        bool hasVirtualOnlyData = false)
     {
         if (!hasExtractedPaths)
         {
             return None;
         }
 
-        if (createdShellApplicationLinks)
+        bool linkOnlyOffer =
+            (allowedEffects & (Copy | Move)) == 0 &&
+            (allowedEffects & Link) != 0;
+        if (createdShellApplicationLinks ||
+            linkOnlyOffer ||
+            (hasVirtualOnlyData && (allowedEffects & Copy) == 0))
         {
             return (allowedEffects & Link) != 0
                 ? Link
