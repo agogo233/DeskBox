@@ -201,8 +201,28 @@ public sealed class OnboardingExperienceTests
         Assert.Contains("CompletedOnboardingVersion = CurrentOnboardingVersion", windowCode, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void FinalFeatureSwitches_PersistImmediatelyAndFinishWaitsForSynchronization()
+    {
+        string root = FindRepositoryRoot();
+        string steps = File.ReadAllText(Path.Combine(
+            root,
+            "src/DeskBox/Views/OnboardingWindow.Steps.cs"));
+        string windowCode = File.ReadAllText(Path.Combine(
+            root,
+            "src/DeskBox/Views/OnboardingWindow.xaml.cs"));
 
+        Assert.Contains("PersistFeatureWidgetSelectionAfterAsync", steps, StringComparison.Ordinal);
+        Assert.Contains("reveal: enabled", steps, StringComparison.Ordinal);
+        Assert.Contains("SynchronizeFeatureTogglesFromSettings", steps, StringComparison.Ordinal);
+        Assert.Contains("_settingsService.SettingsChanged += OnFeatureWidgetSettingsChanged", windowCode, StringComparison.Ordinal);
+        Assert.Contains("_settingsService.SettingsChanged -= OnFeatureWidgetSettingsChanged", windowCode, StringComparison.Ordinal);
+        Assert.DoesNotContain("_featureWidgetsSelectedForReveal", steps, StringComparison.Ordinal);
+        Assert.DoesNotContain("ApplyFeatureWidgetSelectionsAsync", steps, StringComparison.Ordinal);
 
+        // NavigateToStepAsync was folded into the synchronous NavigateToStep in
+        // 5deda57c; the stale anchor made IndexOf return -1 and threw
+        // ArgumentOutOfRangeException instead of failing the assertion.
         string completionMethod = windowCode[windowCode.IndexOf(
             "private async Task CompleteOnboardingAsync",
             StringComparison.Ordinal)..windowCode.IndexOf(
