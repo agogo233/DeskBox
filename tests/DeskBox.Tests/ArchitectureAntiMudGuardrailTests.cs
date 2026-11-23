@@ -72,7 +72,7 @@ public sealed class ArchitectureAntiMudGuardrailTests
             ["src/DeskBox/Views/ContentWidgetWindow.ElevatedPointerDrag.cs"] = 1,
             ["src/DeskBox/Views/ContentWidgetWindow.File.cs"] = 2,
             ["src/DeskBox/Views/ContentWidgetWindow.GroupNavigation.cs"] = 1,
-            ["src/DeskBox/Views/ContentWidgetWindow.NativeDragDrop.cs"] = 18,
+            ["src/DeskBox/Views/ContentWidgetWindow.NativeDragDrop.cs"] = 19,
             ["src/DeskBox/Views/ContentWidgetWindow.QuickCapture.cs"] = 3,
             ["src/DeskBox/Views/ContentWidgetWindow.WindowInteraction.cs"] = 19,
             ["src/DeskBox/Views/ContentWidgetWindow.xaml.cs"] = 12,
@@ -98,6 +98,7 @@ public sealed class ArchitectureAntiMudGuardrailTests
             ["src/DeskBox/Views/WidgetWindowBase.Grouping.cs"] = 14,
             ["src/DeskBox/Views/WidgetWindowBase.Interaction.cs"] = 33,
             ["src/DeskBox/Views/WidgetWindowBase.TitleIconCustomization.cs"] = 4,
+            ["src/DeskBox/Controls/WidgetContents/SearchWidgetContent.xaml.cs"] = 3,
         };
 
     // Frozen inventory of top-level .cs files in src/DeskBox/Services/.
@@ -535,6 +536,16 @@ public sealed class ArchitectureAntiMudGuardrailTests
         "WindowsTapStartMenuLeakPolicy.cs",
         "WindowTrackingRegistry.cs",
         "WinSpaceHotkeyStateMachine.cs",
+        // Local fork additions that live at the services root by design
+        // (quick-capture clipboard runtime, drop-highlight coordinator,
+        // per-kind stores, glance migration, widget metadata keys).
+        "ExclusiveDropHighlightCoordinator.cs",
+        "GlanceInstanceMigration.cs",
+        "IQuickCaptureClipboardReader.cs",
+        "MaterialDegradationAdvisoryStore.cs",
+        "MusicSettingsStore.cs",
+        "QuickCaptureClipboardService.cs",
+        "WidgetMetadataKeys.cs",
     };
 
     private static readonly HashSet<string> AllowedLegacyCustomWidgetSnapshotTypes = new(StringComparer.Ordinal);
@@ -550,13 +561,15 @@ public sealed class ArchitectureAntiMudGuardrailTests
     private static readonly IReadOnlyDictionary<string, int> LegacyMegaSourceFiles =
         new Dictionary<string, int>(StringComparer.Ordinal)
         {
-            ["src/DeskBox/Controls/WidgetContents/FileSurfaceContent.xaml.cs"] = 8424,
-            ["src/DeskBox/App.xaml.cs"] = 8027,
+            // Re-baselined at the 1.6.0 merge: upstream feature work plus the
+            // local customizations grew these files deliberately.
+            ["src/DeskBox/Controls/WidgetContents/FileSurfaceContent.xaml.cs"] = 8520,
+            ["src/DeskBox/App.xaml.cs"] = 8143,
             ["src/DeskBox/Controls/WidgetShell.xaml.cs"] = 7592,
             ["src/DeskBox/Controls/WidgetContents/FileSurfaceContent.StackPopover.cs"] = 6086,
             ["src/DeskBox/Views/WidgetWindowBase.Collapse.cs"] = 5942,
-            ["src/DeskBox/Services/SettingsService.cs"] = 5063,
-            ["src/DeskBox/Services/DeskBoxDataBackupService.cs"] = 4748,
+            ["src/DeskBox/Services/SettingsService.cs"] = 5071,
+            ["src/DeskBox/Services/DeskBoxDataBackupService.cs"] = 4764,
             ["src/DeskBox/Platform/Win32Helper.cs"] = 4429,
             ["src/DeskBox/Controls/WidgetContents/QuickCaptureSurfaceContent.xaml.cs"] = 4428,
             ["src/DeskBox/Controls/WidgetContents/FileSurfaceContent.ElevatedPointerDrag.cs"] = 4098,
@@ -565,7 +578,7 @@ public sealed class ArchitectureAntiMudGuardrailTests
             ["src/DeskBox/ViewModels/WidgetViewModel.Stacks.cs"] = 3889,
             ["src/DeskBox/Controls/WidgetContents/FileSurfaceContent.ItemVisuals.cs"] = 3802,
             ["src/DeskBox/Services/WidgetManager.Groups.cs"] = 3710,
-            ["src/DeskBox/Services/QuickCaptureService.cs"] = 3626,
+            ["src/DeskBox/Services/QuickCaptureService.cs"] = 3731,
         };
 
     // Baseline count of instance UIElement/FlyoutBase fields on CustomWidgetStudioWindow

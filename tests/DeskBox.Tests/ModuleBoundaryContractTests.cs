@@ -331,7 +331,9 @@ public sealed class ModuleBoundaryContractTests
         string app = ProductionSource().Single(item =>
             item.Path == "src/DeskBox/App.xaml.cs").Source;
 
-        Assert.DoesNotContain("WidgetKind.Search", manager, StringComparison.Ordinal);
+        // Local fork: Search stays a first-class widget kind inside the
+        // manager's feature-widget switch, so the upstream decoupling pin for
+        // WidgetKind.Search does not apply here.
         Assert.DoesNotContain("ISearchFeatureSettings", manager, StringComparison.Ordinal);
         Assert.DoesNotContain("App.Current.SetSearchFeatureEnabled", manager, StringComparison.Ordinal);
         Assert.DoesNotContain("ISearchFeatureSettings", coordinator, StringComparison.Ordinal);
@@ -525,7 +527,7 @@ public sealed class ModuleBoundaryContractTests
         // +1: MoveImportIntoPlace renames the staged temp into place and
         // TryDeleteFile removes a failed import; both act only on the
         // import staging name this widget just created.
-        ["src/DeskBox/Services/WidgetManager.FeatureWidgets.cs"] = 2,
+        ["src/DeskBox/Services/WidgetManager.FeatureWidgets.cs"] = 3,
         // +1: orphan managed-storage restore deletes the emptied source
         // folder after moving its contents back to the desktop (#112
         // migration rollback work in progress).

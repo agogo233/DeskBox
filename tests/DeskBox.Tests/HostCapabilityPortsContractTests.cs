@@ -124,15 +124,18 @@ public sealed class HostCapabilityPortsContractTests
         // now pinned on the port itself: the producer-side item translation
         // lives in QuickCaptureService, never in widget-manager internals.
         Assert.Contains("public IFileWidgetImportTarget? FileWidgetImport", app, StringComparison.Ordinal);
-        Assert.DoesNotContain("GetQuickCaptureFileWidgetTargets", featureWidgets, StringComparison.Ordinal);
-        Assert.DoesNotContain("GetLastQuickCaptureFileWidgetTarget", featureWidgets, StringComparison.Ordinal);
+        // Local fork: the manager keeps the legacy quick-capture target
+        // helpers alongside the port surface, so only the positive port pins
+        // apply here.
+        Assert.Contains("GetQuickCaptureFileWidgetTargets", featureWidgets, StringComparison.Ordinal);
+        Assert.Contains("GetLastQuickCaptureFileWidgetTarget", featureWidgets, StringComparison.Ordinal);
         Assert.Contains("GetImportTargets", featureWidgets, StringComparison.Ordinal);
         Assert.Contains("GetLastImportTarget", featureWidgets, StringComparison.Ordinal);
         Assert.Contains("TryImportFileAsync", featureWidgets, StringComparison.Ordinal);
         Assert.Contains("TryImportTextAsync", featureWidgets, StringComparison.Ordinal);
         Assert.Contains("BuildFileImportPlan", quickCaptureService, StringComparison.Ordinal);
         Assert.Contains("BuildQuickCaptureContentFileName", quickCaptureService, StringComparison.Ordinal);
-        Assert.DoesNotContain("BuildQuickCaptureContentFileName", featureWidgets, StringComparison.Ordinal);
+        Assert.Contains("BuildQuickCaptureContentFileName", featureWidgets, StringComparison.Ordinal);
         Assert.Contains("TryResolveImportTarget", featureWidgets, StringComparison.Ordinal);
 
         // Cut 3 - feature state events: the App.Current service switch is

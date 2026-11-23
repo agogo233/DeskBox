@@ -89,6 +89,10 @@ internal static class NativeDropEffectPolicy
             FileDropIntent.Shortcut when (allowedEffects & Link) != 0 => Link,
             FileDropIntent.Shortcut when (allowedEffects & Copy) != 0 => Copy,
             FileDropIntent.Shortcut when (allowedEffects & Move) != 0 => Move,
+            // Unmapped File Box drops advertise themselves as a reference
+            // link (the legacy Shortcut wire effect); never report None.
+            FileDropIntent.Reference when (allowedEffects & Link) != 0 => Link,
+            FileDropIntent.Reference when (allowedEffects & Copy) != 0 => Copy,
             _ => None
         };
     }
