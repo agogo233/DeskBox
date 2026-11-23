@@ -6,6 +6,14 @@ namespace DeskBox.Models;
 // view-side GlanceCalendarDayDecoration bridge stays with the Glance widget
 // because its Native AOT generated bindable provider is bound from widget XAML.
 
+/// <summary>Statutory-holiday marker for one day (China mainland schedule).</summary>
+public enum GlanceHolidayMark
+{
+    None,
+    Off,
+    Work
+}
+
 public sealed record GlanceCalendarDay(
     DateOnly Date,
     string DayText,
