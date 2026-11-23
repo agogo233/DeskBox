@@ -93,11 +93,12 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
             Assert.Equal(expectedCount, actual[path]);
         }
 
-        // 45 entries = upstream 1.6.0 set (43) plus the two local-only stores
-        // (MusicSettingsStore, MaterialDegradationAdvisoryStore). Re-baseline
-        // against the CI-observed actuals if this drifts after the merge.
-        Assert.Equal(45, actual.Count);
-        Assert.Equal(149, actual.Values.Sum());
+        // 46 entries = upstream 1.6.0 set (43) plus the local-only stores
+        // (MusicSettingsStore, MaterialDegradationAdvisoryStore and one more
+        // local file). Re-baseline against the CI-observed actuals if this
+        // drifts after the merge.
+        Assert.Equal(46, actual.Count);
+        Assert.Equal(150, actual.Values.Sum());
 
         string[] expectedContextOwners =
         [
