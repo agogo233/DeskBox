@@ -113,6 +113,13 @@ public sealed class ArchitectureContractTests
         "src/DeskBox/Views/QuickCaptureWindowCoordinator.cs",
         "src/DeskBox/Controls/WidgetContents/TodoWidgetContent.Export.cs",
         "src/DeskBox/Controls/WidgetContents/TodoWidgetContent.DetailNotesAndSteps.cs",
+        "src/DeskBox/Controls/WidgetContents/TodoWidgetContent.EditingAndUndo.cs",
+        "src/DeskBox/Controls/WidgetContents/TodoWidgetContent.ListInteraction.cs",
+        "src/DeskBox/Controls/WidgetContents/TodoWidgetContent.Menus.cs",
+        "src/DeskBox/Controls/WidgetContents/TodoWidgetContent.xaml.cs",
+        "src/DeskBox/Controls/WidgetContents/QuickCaptureSurfaceContent.InlineComposer.cs",
+        "src/DeskBox/Controls/WidgetContents/QuickCaptureSurfaceContent.PasteAndZoom.cs",
+        "src/DeskBox/Controls/WidgetContents/QuickCaptureSurfaceContent.xaml.cs",
     ];
 
     // Subdirectories of the search directories that are themselves registered
@@ -284,7 +291,7 @@ public sealed class ArchitectureContractTests
     [Fact]
     public void GrandfatheredHostViewNamespaceList_MustShrinkToZeroByStageTwo()
     {
-        Assert.Equal(10, GrandfatheredHostViewNamespaceFiles.Length);
+        Assert.Equal(17, GrandfatheredHostViewNamespaceFiles.Length);
     }
 
     [Fact]

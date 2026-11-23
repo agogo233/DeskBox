@@ -857,7 +857,7 @@ public sealed class LocalizationService
         }
 
         string? directory = AppContext.BaseDirectory;
-        for (int depth = 0; depth < 12 && !string.IsNullOrEmpty(directory); depth++)
+        while (!string.IsNullOrEmpty(directory))
         {
             string candidate = Path.Combine(directory, "Strings", fileName);
             if (File.Exists(candidate))
