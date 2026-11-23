@@ -310,7 +310,7 @@
     class library, which the WindowsAppSDK targets reject.
   -->
   <ItemGroup>
-    <ProjectReference Include="..\DeskBox.Abstractions\DeskBox.Abstractions.csproj" GlobalPropertyToRemove="WindowsAppSDKSelfContained" />
+    <ProjectReference Include="..\DeskBox.Abstractions\DeskBox.Abstractions.csproj" GlobalPropertiesToRemove="WindowsAppSDKSelfContained;IntermediateOutputPath" />
   </ItemGroup>
 
   <ItemGroup>
