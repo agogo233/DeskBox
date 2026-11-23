@@ -201,13 +201,15 @@ public sealed class FileSettingsEditorTests : IDisposable
         (_, _, ManagedStorageSettingsViewModel storage) = CreateEditors(_root);
 
         SettingsOption[] options = [.. storage.AvailableDragOutActionOptions];
-        Assert.Equal(3, options.Length);
-        Assert.Equal(ManagedDropActions.Move, options[0].Value);
-        Assert.Equal(ManagedDropActions.Copy, options[1].Value);
+        Assert.Equal(4, options.Length);
+        Assert.Equal(ManagedDropActions.Copy, options[0].Value);
+        Assert.Equal(ManagedDropActions.Move, options[1].Value);
         Assert.Equal(ManagedDropActions.FollowWindows, options[2].Value);
-        Assert.Equal("Settings.DropAction.Move", options[0].DisplayName);
-        Assert.Equal("Settings.DropAction.Copy", options[1].DisplayName);
+        Assert.Equal(ManagedDropActions.ShortcutOutsideDesktop, options[3].Value);
+        Assert.Equal("Settings.DropAction.Copy", options[0].DisplayName);
+        Assert.Equal("Settings.DropAction.Move", options[1].DisplayName);
         Assert.Equal("Settings.DropAction.System", options[2].DisplayName);
+        Assert.Equal("Settings.DropAction.ShortcutOutsideDesktop", options[3].DisplayName);
     }
 
     [Fact]
@@ -352,7 +354,7 @@ public sealed class FileSettingsEditorTests : IDisposable
             new ManagedStorageSettingsCoordinator(
                 new SettingsService(Path.Combine(_root, "second"))),
             static key => key == "Settings.DropAction.Move" ? "zh:移动" : key);
-        Assert.Equal("zh:移动", relabeled.AvailableDropActionOptions[0].DisplayName);
+        Assert.Equal("zh:移动", relabeled.AvailableDropActionOptions[1].DisplayName);
     }
 
     [Fact]
