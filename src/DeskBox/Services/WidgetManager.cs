@@ -38,6 +38,11 @@ public sealed record FileWidgetPathConflict(
     FileWidgetPathConflictKind Kind,
     WidgetConfig? ConflictingWidget);
 
+public sealed record QuickCaptureFileWidgetTarget(
+    string WidgetId,
+    string Name,
+    string FolderPath);
+
 public enum WidgetRemovalAction
 {
     RemoveWidgetOnly,
