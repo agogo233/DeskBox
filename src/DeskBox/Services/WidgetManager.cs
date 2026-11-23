@@ -2374,7 +2374,6 @@ public sealed partial class WidgetManager :
                         SetFeatureWidgetEnabledState(WidgetKind.Glance, false);
                     }
                 }
-            }
             else if (config.WidgetKind == WidgetKind.Custom)
             {
                 DeleteCustomWidgetStorageSecretsAndStages(config.Id);
