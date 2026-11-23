@@ -2027,6 +2027,8 @@ public sealed class SettingsServiceTests : IDisposable
     public void NormalizeManagedDropAction_UsesMoveAsSafeDefault(string? value, string expected)
     {
         Assert.Equal(expected, SettingsService.NormalizeManagedDropAction(value));
+    }
+
     [Fact]
     public async Task LoadAsync_MigratesLegacyQuickCaptureClipboardEnabledToClipboardFeatureWidget()
     {
