@@ -1549,6 +1549,71 @@ public sealed partial class WidgetManager
             .ToList();
     }
 
+    public QuickCaptureFileWidgetTarget? GetLastQuickCaptureFileWidgetTarget()
+    {
+        string lastTargetId = _settingsService.Settings.LastQuickCaptureFileWidgetId;
+        if (string.IsNullOrWhiteSpace(lastTargetId))
+        {
+            return null;
+        }
+
+        return GetQuickCaptureFileWidgetTargets()
+            .FirstOrDefault(target => string.Equals(target.WidgetId, lastTargetId, StringComparison.Ordinal));
+    }
+
+    public async Task<string?> SaveQuickCaptureItemToFileWidgetAsync(
+        QuickCaptureItem item,
+        string targetWidgetId,
+        string? imageFileNamePrefix = null)
+    {
+        if (item.IsDeleted ||
+            string.IsNullOrWhiteSpace(targetWidgetId) ||
+            FindConfig(targetWidgetId) is not { } targetConfig ||
+            targetConfig.WidgetKind != WidgetKind.File ||
+            targetConfig.IsDisabled ||
+            IsDeleted(targetWidgetId) ||
+            !TryGetFileWidgetFolderPath(targetConfig, out string targetFolderPath))
+        {
+            return null;
+        }
+
+        Directory.CreateDirectory(targetFolderPath);
+        string? destinationPath = item.Type switch
+        {
+            QuickCaptureItemType.Image => await SaveQuickCaptureImageToFolderAsync(item, targetFolderPath, imageFileNamePrefix),
+            QuickCaptureItemType.Link => await SaveQuickCaptureLinkToFolderAsync(item, targetFolderPath),
+            _ => await SaveQuickCaptureTextToFolderAsync(item, targetFolderPath)
+        };
+
+        if (!string.IsNullOrWhiteSpace(destinationPath))
+        {
+            RememberLastQuickCaptureFileWidgetTarget(targetWidgetId);
+            if (_fileWidgets.TryGetValue(targetWidgetId, out var targetEntry))
+            {
+                await targetEntry.ViewModel.RefreshFromConfigAsync(clearIconCacheBeforeHydration: false);
+                targetEntry.RevealSavedItem(destinationPath);
+            }
+            else
+            {
+                ContentWidgetWindow? contentWindow = _contentWidgets.Values
+                    .Distinct()
+                    .FirstOrDefault(window =>
+                        window.CurrentContent is FileWidgetContentAdapter surface &&
+                        string.Equals(
+                            surface.WidgetId,
+                            targetWidgetId,
+                            StringComparison.Ordinal));
+                if (contentWindow?.CurrentContent is FileWidgetContentAdapter fileSurface)
+                {
+                    await fileSurface.ViewModel.RefreshFromConfigAsync(clearIconCacheBeforeHydration: false);
+                    fileSurface.RevealSavedItem(destinationPath);
+                }
+            }
+        }
+
+        return destinationPath;
+    }
+
     public FileWidgetImportTarget? GetLastImportTarget()
     {
         string lastTargetId = _settingsService.Settings.LastQuickCaptureFileWidgetId;

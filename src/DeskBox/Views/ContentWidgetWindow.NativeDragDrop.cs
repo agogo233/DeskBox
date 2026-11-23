@@ -2396,34 +2396,10 @@ public sealed partial class ContentWidgetWindow
 
         if (!_isXamlRoutedDragActive || capturedSelfDrag is { IsNativeShellDrag: true })
         {
-            await Task.Delay(120, cancellation.Token);
-            if (cancellation.IsCancellationRequested ||
-                !ReferenceEquals(_pendingNativeFileDropCts, cancellation))
-            {
-                return;
-            }
-            if (_isXamlDropPending)
-            {
-                App.LogVerbose("[DropTarget] Native import waiting for XAML result - deferred");
-                // Wait a bit more for XAML result before deciding.
-                await Task.Delay(300, cancellation.Token);
-                if (_isXamlDropPending)
-                {
-                    return;
-                }
-            }
-            if (DateTimeOffset.UtcNow - GetLastXamlDropUtc() <
-                TimeSpan.FromMilliseconds(500))
-            {
-                App.LogVerbose("[DropTarget] Native import skipped after delay because WinUI succeeded");
-                return;
-            }
-            if (gestureId > _lastNativeClaimedGestureId)
-            {
-                _lastNativeClaimedGestureId = gestureId;
-            }
-
-            QueueNativeFileDropImport(
+            CancelPendingNativeFileDropFallback();
+            var cancellation = new CancellationTokenSource();
+            _pendingNativeFileDropCts = cancellation;
+            _ = CompleteNativeFileDropFallbackAsync(
                 ownedPaths,
                 containsTemporaryFiles,
                 copyWhenMapped,
@@ -2435,7 +2411,9 @@ public sealed partial class ContentWidgetWindow
                 hasCapturedItemTarget,
                 itemOrigins,
                 materializationSkippedCount,
-                capturedSelfDrag);
+                capturedSelfDrag,
+                gestureId,
+                cancellation);
             return;
         }
 
@@ -2484,6 +2462,94 @@ public sealed partial class ContentWidgetWindow
                 CleanupNativeTemporaryDropFiles(ownedPaths);
             }
         }
+    }
+
+    private async Task CompleteNativeFileDropFallbackAsync(
+        IReadOnlyList<string> paths,
+        bool containsTemporaryFiles,
+        bool? copyWhenMapped,
+        int screenX,
+        int screenY,
+        FileDropIntent? forcedIntent,
+        uint? allowedEffects,
+        WidgetItem? capturedItemTarget,
+        bool hasCapturedItemTarget,
+        IReadOnlyList<DroppedItemOriginKind>? itemOrigins,
+        int materializationSkippedCount,
+        ActiveDeskBoxDragRegistry.MatchedDragEntry? capturedSelfDrag,
+        long gestureId,
+        CancellationTokenSource cancellation)
+    {
+        bool importOwnsTemporaryFiles = false;
+        try
+        {
+            await Task.Delay(120, cancellation.Token);
+            if (cancellation.IsCancellationRequested ||
+                !ReferenceEquals(_pendingNativeFileDropCts, cancellation))
+            {
+                return;
+            }
+            if (_isXamlDropPending)
+            {
+                App.LogVerbose("[DropTarget] Native import waiting for XAML result - deferred");
+                // Wait a bit more for XAML result before deciding.
+                await Task.Delay(300, cancellation.Token);
+                if (_isXamlDropPending)
+                {
+                    return;
+                }
+            }
+            if (DateTimeOffset.UtcNow - GetLastXamlDropUtc() <
+                TimeSpan.FromMilliseconds(500))
+            {
+                App.LogVerbose("[DropTarget] Native import skipped after delay because WinUI succeeded");
+                return;
+            }
+            if (gestureId > _lastNativeClaimedGestureId)
+            {
+                _lastNativeClaimedGestureId = gestureId;
+            }
+
+            QueueNativeFileDropImport(
+                paths,
+                containsTemporaryFiles,
+                copyWhenMapped,
+                screenX,
+                screenY,
+                forcedIntent,
+                allowedEffects,
+                capturedItemTarget,
+                hasCapturedItemTarget,
+                itemOrigins,
+                materializationSkippedCount,
+                capturedSelfDrag);
+            importOwnsTemporaryFiles = true;
+        }
+        catch (OperationCanceledException)
+        {
+            // The routed WinUI Drop path completed first.
+        }
+        finally
+        {
+            if (ReferenceEquals(_pendingNativeFileDropCts, cancellation))
+            {
+                _pendingNativeFileDropCts = null;
+            }
+
+            if (containsTemporaryFiles && !importOwnsTemporaryFiles)
+            {
+                CleanupNativeTemporaryDropFiles(paths);
+            }
+
+            cancellation.Dispose();
+        }
+    }
+
+    private void CancelPendingNativeFileDropFallback()
+    {
+        CancellationTokenSource? cancellation = _pendingNativeFileDropCts;
+        _pendingNativeFileDropCts = null;
+        cancellation?.Cancel();
     }
 
     private void QueueNativeFileDropImport(

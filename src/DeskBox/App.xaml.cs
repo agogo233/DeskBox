@@ -7802,6 +7802,21 @@ RunCriticalStartupStep("widget-manager", () =>
         return _searchEngineService;
     }
 
+    internal void RefreshQuickCaptureClipboardService(bool captureCurrent = false)
+    {
+        if (IsShuttingDown) return;
+        if (!UiDispatcherQueue.HasThreadAccess)
+        {
+            UiDispatcherQueue.TryEnqueue(() =>
+                RefreshQuickCaptureClipboardService(captureCurrent));
+            return;
+        }
+
+        // The 1.6.0 coordinator no longer takes a capture flag: clipboard
+        // capture is owned by the standalone clipboard feature widget.
+        _quickCaptureSettings?.RefreshFromSettings();
+    }
+
     private void OnFeatureStateChanged(FeatureStateChangedEventArgs e)
     {
         if (e.FeatureId == DeskBoxFeatureIds.Search)
