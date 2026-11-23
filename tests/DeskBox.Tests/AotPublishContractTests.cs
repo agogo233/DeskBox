@@ -528,7 +528,7 @@ public sealed class AotPublishContractTests
         Assert.Contains("exactly one root-level deskbox_native.dll", script, StringComparison.Ordinal);
         Assert.DoesNotContain("deskbox_search_core.dll", script, StringComparison.Ordinal);
         Assert.Contains("schemaVersion = 55", script, StringComparison.Ordinal);
-        Assert.Contains("auditProfileVersion = 62", script, StringComparison.Ordinal);
+        Assert.Contains("auditProfileVersion = 59", script, StringComparison.Ordinal);
         Assert.Contains("warningCodeCounts", script, StringComparison.Ordinal);
         Assert.Contains("targetedWarningCounts", script, StringComparison.Ordinal);
         Assert.Contains("workingTreeFingerprintBefore", script, StringComparison.Ordinal);

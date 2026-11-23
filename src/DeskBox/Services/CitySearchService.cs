@@ -74,7 +74,7 @@ public sealed class CitySearchService : IDisposable
         }
 
         string? directory = AppContext.BaseDirectory;
-        for (int depth = 0; depth < 6 && !string.IsNullOrEmpty(directory); depth++)
+        for (int depth = 0; depth < 12 && !string.IsNullOrEmpty(directory); depth++)
         {
             string candidate = Path.Combine(directory, "Assets", "Cities", "cities.json");
             if (File.Exists(candidate))

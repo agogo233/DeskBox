@@ -26,14 +26,15 @@ public sealed partial class ManagedStorageSettingsViewModel : ObservableObject
 {
     private static readonly string[] DropActions =
     [
-        ManagedDropActions.Move,
         ManagedDropActions.Copy,
+        ManagedDropActions.Move,
         ManagedDropActions.FollowWindows,
         ManagedDropActions.ShortcutOutsideDesktop
     ];
 
     private static readonly string[] DropActionNameKeys =
     [
+        "Settings.DropAction.Copy",
         "Settings.DropAction.Move",
         "Settings.DropAction.System",
         "Settings.DropAction.ShortcutOutsideDesktop"

@@ -174,6 +174,19 @@ public sealed class AotCurrentStateInvariantsTests
             "UpdateSourceTrigger",
         };
 
+        // Local fork (pluginization roadmap stage 2 pilot): MusicSettingsSection
+        // is an extracted-but-not-yet-instantiated control. SettingsViewModel
+        // intentionally exposes no Music properties until batch D rebinds the
+        // live template, so these pre-migration binding names stay exempt
+        // (mirrors SettingsWiringContractTests).
+        HashSet<string> pendingMigrationBindings = new(StringComparer.Ordinal)
+        {
+            "AvailableMusicDisplayModeOptions",
+            "SelectedMusicDisplayMode",
+            "MusicUseArtworkBackdrop",
+            "MusicEnableCoverHoverMotion",
+        };
+
         var missingBindings = new List<string>();
         foreach (string xamlPath in Directory.EnumerateFiles(srcRoot, "*.xaml", SearchOption.AllDirectories))
         {
@@ -206,7 +219,8 @@ public sealed class AotCurrentStateInvariantsTests
                     continue;
                 }
 
-                if (!aotBindableProperties.Contains(propName))
+                if (!aotBindableProperties.Contains(propName) &&
+                    !pendingMigrationBindings.Contains(propName))
                 {
                     missingBindings.Add($"{relPath}: {{Binding {body}}}");
                 }
@@ -262,11 +276,11 @@ public sealed class AotCurrentStateInvariantsTests
     }
 
     [Fact]
-    public void RustAbiSurface_RemainsAtVersion2Capability511AndTenExports()
+    public void RustAbiSurface_RemainsAtVersion2Capability1023AndTenExports()
     {
         string rust = Read("native/deskbox-native/src/lib.rs");
         Assert.Contains("pub const DESKBOX_NATIVE_ABI_VERSION: u32 = 2", rust, StringComparison.Ordinal);
-        Assert.Contains("assert_eq!(deskbox_native_capabilities(), 511);", rust, StringComparison.Ordinal);
+        Assert.Contains("assert_eq!(deskbox_native_capabilities(), 1023);", rust, StringComparison.Ordinal);
         Assert.Equal(10, Regex.Matches(rust, Regex.Escape("#[unsafe(no_mangle)]")).Count);
     }
 
