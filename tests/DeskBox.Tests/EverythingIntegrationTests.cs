@@ -104,11 +104,7 @@ public sealed class EverythingIntegrationTests
         string ipcClient = File.ReadAllText(TestPaths.FromRepository(
             "src/DeskBox/Platform/EverythingNativeMethods.cs"));
 
-        // Local fork: the optional Everything SDK integration packages the SDK
-        // DLL (EverythingSdkArchitecture-gated); the IPC client code itself
-        // stays SDK-free and the EverythingSdk.dll name only appears as the
-        // packaged payload link.
-        Assert.Contains("<TargetPath>EverythingSdk.dll</TargetPath>", project, StringComparison.Ordinal);
+        Assert.DoesNotContain("<TargetPath>EverythingSdk.dll</TargetPath>", project, StringComparison.Ordinal);
         Assert.DoesNotContain("EverythingSdk.dll", ipcClient, StringComparison.Ordinal);
         Assert.DoesNotContain("DeskBoxSearchCore", project, StringComparison.Ordinal);
         Assert.DoesNotContain("deskbox-search-core", cargo, StringComparison.Ordinal);

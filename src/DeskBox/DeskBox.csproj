@@ -314,25 +314,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <None Remove="ThirdParty\Everything\Everything64.dll" />
-    <None Remove="ThirdParty\Everything\EverythingARM64.dll" />
-    <Content Include="ThirdParty\Everything\Everything64.dll" Condition="'$(EverythingSdkArchitecture)' == 'x64'">
-      <Link>EverythingSdk.dll</Link>
-      <TargetPath>EverythingSdk.dll</TargetPath>
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
-    </Content>
-    <Content Include="ThirdParty\Everything\EverythingARM64.dll" Condition="'$(EverythingSdkArchitecture)' == 'ARM64'">
-      <Link>EverythingSdk.dll</Link>
-      <TargetPath>EverythingSdk.dll</TargetPath>
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
-    </Content>
-    <None Update="ThirdParty\Everything\LICENSE.txt">
-      <TargetPath>ThirdParty\Everything\LICENSE.txt</TargetPath>
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
-    </None>
     <None Update="ThirdParty\PluginCrypto\NOTICES.txt">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
