@@ -149,8 +149,8 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
             .Order()
             .ToArray();
 
-        // Upstream 1.6.0 set (35) plus the two local-only context owners.
-        Assert.Equal(37, actualContextOwners.Length);
+        // Upstream 1.6.0 set (35) plus the three local-only context owners.
+        Assert.Equal(38, actualContextOwners.Length);
         Assert.Equal(expectedContextOwners, actualContextOwners);
 
         // External AOT smoke sources must also stay reflection-free and source-generated.

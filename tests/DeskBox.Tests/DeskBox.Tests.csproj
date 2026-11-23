@@ -117,6 +117,23 @@
     </Copy>
   </Target>
 
+  <!-- The Glance package copies its package-local strings\*.json next to its
+       own assembly, and ProjectReference flow drags them into this project's
+       output root. Windows treats that path as {BaseDirectory}\Strings\, so
+       LocalizationService.OpenLocaleStream would resolve the package's tiny
+       tables first and shadow the host's full resource tables (every T()
+       then returns the key). Drop the transitive copies here; the package's
+       own output keeps them. -->
+  <Target
+    Name="RemoveGlancePackageStringsFromTestOutput"
+    AfterTargets="GetCopyToOutputDirectoryItems">
+    <ItemGroup>
+      <AllItemsFullPathWithTargetPath
+        Remove="@(AllItemsFullPathWithTargetPath)"
+        Condition="$([System.String]::Copy('%(AllItemsFullPathWithTargetPath.Identity)').Contains('DeskBox.GlancePackage')) and $([System.String]::Copy('%(AllItemsFullPathWithTargetPath.Identity)').Contains('\strings\'))" />
+    </ItemGroup>
+  </Target>
+
   <Target
     Name="CopyDeskBoxWinRtDispatcherNativeRuntime"
     AfterTargets="Build">
