@@ -1,4 +1,5 @@
 using DeskBox.Services;
+using System.Reflection;
 using System.Text;
 
 namespace DeskBox.Tests;
@@ -16,29 +17,38 @@ public sealed class LocalizationLoadingDiagnosticsTests
     {
         var sb = new StringBuilder();
         sb.AppendLine($"BaseDirectory: {AppContext.BaseDirectory}");
-        sb.AppendLine($"CurrentDirectory: {Directory.GetCurrentDirectory()}");
         sb.AppendLine($"LocalizationAssembly: {typeof(LocalizationService).Assembly.Location}");
-        sb.AppendLine($"TestAssembly: {typeof(LocalizationLoadingDiagnosticsTests).Assembly.Location}");
         sb.AppendLine($"LocalizationAssembly MVID: {typeof(LocalizationService).Assembly.ManifestModule.ModuleVersionId}");
 
-        string? dir = AppContext.BaseDirectory;
-        for (int depth = 0; depth < 16 && !string.IsNullOrEmpty(dir); depth++)
+        string stringsDir = Path.Combine(AppContext.BaseDirectory, "Strings");
+        if (Directory.Exists(stringsDir))
         {
-            string stringsDir = Path.Combine(dir, "Strings");
-            string? dirFiles = null;
-            if (Directory.Exists(stringsDir))
+            foreach (string file in Directory.EnumerateFiles(stringsDir).Order())
             {
-                dirFiles = string.Join(",", Directory.EnumerateFiles(stringsDir).Select(Path.GetFileName).Order().Take(6));
+                var fi = new FileInfo(file);
+                string head = File.Exists(file)
+                    ? File.ReadAllText(file, Encoding.UTF8)[..Math.Min(120, (int)Math.Min(fi.Length, 120))].Replace("\r", "\\r").Replace("\n", "\\n")
+                    : "<missing>";
+                sb.AppendLine($"{Path.GetFileName(file)}: {fi.Length} bytes | {head}");
             }
-
-            sb.AppendLine(
-                $"depth {depth}: {dir} | " +
-                $"StringsDir={Directory.Exists(stringsDir)} [{dirFiles ?? "-"}] | " +
-                $"repoFile={File.Exists(Path.Combine(dir, "src", "DeskBox", "Strings", "zh-CN.json"))}");
-            dir = Path.GetDirectoryName(Path.TrimEndingDirectorySeparator(dir));
+        }
+        else
+        {
+            sb.AppendLine("bin Strings dir: MISSING");
         }
 
+        foreach (string field in new[] { "_zhCn", "_enUs", "_arSa" })
+        {
+            var fi = typeof(LocalizationService).GetField(field, BindingFlags.NonPublic | BindingFlags.Static);
+            var table = fi?.GetValue(null) as System.Collections.IDictionary;
+            sb.AppendLine($"{field}: {(table is null ? "null" : $"{table.Count} entries")}");
+        }
+
+        sb.AppendLine($"TranslateForCulture(en-US, Weather.Condition.0) = {LocalizationService.TranslateForCulture("en-US", "Weather.Condition.0")}");
+        sb.AppendLine($"TranslateForCulture(zh-CN, Weather.Condition.0) = {LocalizationService.TranslateForCulture("zh-CN", "Weather.Condition.0")}");
+
         var loc = TestServices.CreateLocalizationService();
+        sb.AppendLine($"CurrentCultureName = {loc.CurrentCultureName}");
         sb.AppendLine($"T(Weather.Condition.0) = {loc.T("Weather.Condition.0")}");
         sb.AppendLine($"T(Settings.WindowTitle) = {loc.T("Settings.WindowTitle")}");
 
