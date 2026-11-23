@@ -58,14 +58,6 @@ public enum GlancePhotoClockAlignment
     BottomLeft
 }
 
-/// <summary>Statutory-holiday marker for one day (China mainland schedule).</summary>
-public enum GlanceHolidayMark
-{
-    None,
-    Off,
-    Work
-}
-
 public enum GlanceDisplayElement
 {
     Time,
