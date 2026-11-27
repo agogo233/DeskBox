@@ -17,18 +17,18 @@ public sealed class ToggleSwitchAccessibleNameContractTests
     public static TheoryData<string, int> ToggleSwitchHostFiles => new()
     {
         { "src/DeskBox/Views/SettingsWindow.xaml", 35 },
-        { "src/DeskBox/Views/SettingsSections/SearchSettingsSection.xaml", 12 },
+        { "src/DeskBox/Views/SettingsSections/SearchSettingsSection.xaml", 15 },
         { "src/DeskBox/Views/SettingsSections/GlanceWidgetSettingsSection.xaml", 7 },
         { "src/DeskBox/Views/SettingsSections/AppearanceSettingsSection.xaml", 2 },
         { "src/DeskBox/Views/SettingsSections/FileWidgetSettingsSection.xaml", 11 },
         { "src/DeskBox/Views/SettingsSections/DesktopOrganizationSettingsSection.xaml", 2 },
         { "src/DeskBox/Views/SettingsSections/CapsuleModeSettingsSection.xaml", 2 },
-        { "src/DeskBox/Views/SettingsSections/ClipboardSettingsSection.xaml", 6 },
+        { "src/DeskBox/Views/SettingsSections/ClipboardSettingsSection.xaml", 7 },
         // Local music feature section: same accessibility contract as the
         // other live settings sections.
         { "src/DeskBox/Views/SettingsSections/MusicSettingsSection.xaml", 2 },
         { "src/DeskBox/Controls/WidgetContents/TodoWidgetContent.xaml", 1 },
-        { "src/DeskBox/Views/OnboardingWindow.xaml", 7 },
+        { "src/DeskBox/Views/OnboardingWindow.xaml", 8 },
     };
 
     [Theory]

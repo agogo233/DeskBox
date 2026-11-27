@@ -785,6 +785,18 @@ public sealed partial class WidgetManager
                 continue;
             }
 
+            if (window is WidgetWindowBase activeInputWindow &&
+                activeInputWindow.IsHoldingDesktopPinnedInputOrPopupFocus())
+            {
+                continue;
+            }
+
+            if (WidgetLayerService.IsDesktopHostTopMost(window.WindowHandle))
+            {
+                ResetBeddingLeakTracking();
+                return;
+            }
+
             witness = WidgetLayerService.FindForeignWindowBelow(window.WindowHandle);
             if (witness != IntPtr.Zero)
             {
@@ -822,10 +834,17 @@ public sealed partial class WidgetManager
     {
         ResetBeddingLeakTracking();
 
-        List<IntPtr> handles = GetLoadedDesktopWindows()
-            .Where(window => window.Visible &&
-                window.WindowHandle != IntPtr.Zero &&
-                Win32Helper.IsWindow(window.WindowHandle))
+        IntPtr expandedLeaseOwner = HasActiveExpandedWidgetLayerLease()
+            ? _expandedWidgetLayerLease.WindowHandle
+            : IntPtr.Zero;
+        List<IntPtr> handles = GetWindowsInIdleHighestFirstOrder(
+                GetLoadedDesktopWindows()
+                    .Where(window => window.Visible &&
+                        window.WindowHandle != IntPtr.Zero &&
+                        Win32Helper.IsWindow(window.WindowHandle) &&
+                        !(window is WidgetWindowBase activeInputWindow &&
+                          activeInputWindow.IsHoldingDesktopPinnedInputOrPopupFocus())),
+                expandedLeaseOwner)
             .Select(window => window.WindowHandle)
             .ToList();
         if (handles.Count == 0)
@@ -1190,7 +1209,8 @@ public sealed partial class WidgetManager
     }
 
     private static IReadOnlyList<IDesktopWidgetWindow> GetWindowsInIdleHighestFirstOrder(
-        IEnumerable<IDesktopWidgetWindow> windows)
+        IEnumerable<IDesktopWidgetWindow> windows,
+        IntPtr expandedLeaseOwner = default)
     {
         Dictionary<IntPtr, IDesktopWidgetWindow> byHandle = windows
             .Where(window => window.WindowHandle != IntPtr.Zero)
@@ -1201,12 +1221,18 @@ public sealed partial class WidgetManager
                 byHandle.Values.Select(window =>
                 {
                     Windows.Foundation.Rect bounds = window.RestingAnimationBounds;
+                    bool hasExpandedLease =
+                        (expandedLeaseOwner != IntPtr.Zero && window.WindowHandle == expandedLeaseOwner) ||
+                        (window is WidgetWindowBase leaseBase && leaseBase.HasExpandedWidgetLayerLease);
+                    bool isExpandedCapsule = window is WidgetWindowBase widgetBase && widgetBase.IsExpandedCapsule;
                     return new IdleWidgetZOrderCandidate(
                         window.WindowHandle,
                         GetAnimationWorkAreaKey(window),
                         bounds.Top,
                         bounds.Left,
-                        window.Identity.SurfaceId);
+                        window.Identity.SurfaceId,
+                        HasExpandedLease: hasExpandedLease,
+                        IsExpandedCapsule: isExpandedCapsule);
                 }));
         return ordered
             .Select(candidate => byHandle[candidate.WindowHandle])
@@ -1329,17 +1355,58 @@ public sealed partial class WidgetManager
             DateTime.UtcNow + TimeSpan.FromMilliseconds(400);
     }
 
+    private IntPtr _pendingRaisedGroupReassertHandle;
+    private long _pendingRaisedGroupReassertGeneration;
+    private string _pendingRaisedGroupReassertReason = string.Empty;
+    private bool _raisedGroupReassertQueued;
+
     internal bool ReassertRaisedWidgetGroupAfterDeskBoxActivation(
         IntPtr activeWidgetHandle,
         string reason)
     {
         if (!_widgetsRaisedFromTray ||
+            _isTogglingWidgetsDesktopLayer ||
             WidgetLayerService.UsesDesktopPinnedMode() ||
             activeWidgetHandle == IntPtr.Zero ||
             !Win32Helper.IsWindow(activeWidgetHandle) ||
             !IsForegroundDeskBoxWindow() ||
             DateTime.UtcNow < _suppressRaisedGroupReassertUntilUtc)
         {
+            return false;
+        }
+
+        if (CallbackDepth.Depth > 0)
+        {
+            _pendingRaisedGroupReassertHandle = activeWidgetHandle;
+            _pendingRaisedGroupReassertGeneration = _trayRaiseBatchGeneration;
+            _pendingRaisedGroupReassertReason = reason;
+            if (!_raisedGroupReassertQueued)
+            {
+                _raisedGroupReassertQueued = true;
+                UiDispatch.PostAfterCallback(() =>
+                {
+                    _raisedGroupReassertQueued = false;
+                    IntPtr target = _pendingRaisedGroupReassertHandle;
+                    long generation = _pendingRaisedGroupReassertGeneration;
+                    string deferredReason = _pendingRaisedGroupReassertReason;
+                    _pendingRaisedGroupReassertHandle = IntPtr.Zero;
+                    if (!_widgetsRaisedFromTray ||
+                        _isTogglingWidgetsDesktopLayer ||
+                        generation != _trayRaiseBatchGeneration ||
+                        !Win32Helper.IsWindowInCurrentProcess(target) ||
+                        !WidgetLayerService.IsWindowOrOwnedByWidget(
+                            Win32Helper.GetForegroundWindow(),
+                            target))
+                    {
+                        return;
+                    }
+
+                    _ = ReassertRaisedWidgetGroupAfterDeskBoxActivation(
+                        target,
+                        deferredReason);
+                });
+            }
+
             return false;
         }
 
@@ -1802,7 +1869,7 @@ public sealed partial class WidgetManager
                 return true;
             }
 
-            currentWindow = Win32Helper.GetParent(currentWindow);
+            currentWindow = Win32Helper.GetChildParent(currentWindow);
         }
 
         IntPtr rootWindow = Win32Helper.GetAncestor(pointerWindow, Win32Helper.GA_ROOT);
@@ -1843,7 +1910,7 @@ public sealed partial class WidgetManager
                 return true;
             }
 
-            currentWindow = Win32Helper.GetParent(currentWindow);
+            currentWindow = Win32Helper.GetChildParent(currentWindow);
         }
 
         IntPtr rootWindow = Win32Helper.GetAncestor(hWnd, Win32Helper.GA_ROOT);

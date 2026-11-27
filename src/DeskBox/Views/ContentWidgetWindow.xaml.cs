@@ -45,6 +45,7 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
     private bool _isCommittingTitleRename;
     private bool _isCancellingTitleRename;
     private long _titleRenameOpenedAtTick;
+    private string _titleRenameInitialText = string.Empty;
     private bool _compactPresentationRefreshQueued;
     private INotifyPropertyChanged? _compactPresentationSource;
     private IWidgetFeedbackSource? _feedbackSource;
@@ -128,6 +129,26 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
         CurrentContent is FileWidgetContentAdapter
         {
             IsStackPopoverBlockingSurfaceOpen: true
+        } ||
+        CurrentContent is FileWidgetContentAdapter
+        {
+            HasActiveInlineRename: true
+        } ||
+        CurrentContent is FileWidgetContentAdapter
+        {
+            HasActiveSystemContextMenu: true
+        } ||
+        CurrentContent is TodoWidgetContentAdapter
+        {
+            HasActiveInlineEdit: true
+        } ||
+        CurrentContent is TodoWidgetContentAdapter
+        {
+            HasActiveInlineOverlay: true
+        } ||
+        CurrentContent is CustomWidgetContentAdapter
+        {
+            HasOpenFlyout: true
         };
 
     protected override bool OwnsTransientForegroundWindow(IntPtr foregroundWindow) =>
@@ -135,6 +156,16 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
         (foregroundWindow != IntPtr.Zero &&
          CurrentContent is FileWidgetContentAdapter file &&
          file.ActiveStackPopoverWindowHandle == foregroundWindow);
+
+    protected override bool HasBlockingInlineOverlayOpen() =>
+        CurrentContent is FileWidgetContentAdapter
+        {
+            HasActiveInlineRename: true
+        } ||
+        CurrentContent is TodoWidgetContentAdapter
+        {
+            HasActiveInlineOverlay: true
+        };
 
     protected override void OnCompactBoundsTransitionActiveChanged(bool isActive)
     {
@@ -152,6 +183,14 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
                 new RectInt32(x, y, Math.Max(1, width), Math.Max(1, height)),
                 minW,
                 minH);
+        }
+
+        if (Config.WidgetKind == WidgetKind.Search)
+        {
+            return WidgetPositioningService.GetPhysicalMinimumSizeForBounds(
+                new RectInt32(x, y, Math.Max(1, width), Math.Max(1, height)),
+                120,
+                48);
         }
 
         return base.GetPhysicalMinimumWindowSize(x, y, width, height);
@@ -186,6 +225,7 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
             WeatherWidgetContentAdapter weather => CreateWeatherCompactPresentation(weather, contentMode),
             CustomWidgetContentAdapter custom => CreateCustomCompactPresentation(custom, contentMode, localization),
             ClipboardWidgetContentAdapter clipboard => CreateClipboardCompactPresentation(clipboard, contentMode, localization),
+            SearchWidgetContentAdapter search => CreateSearchCompactPresentation(search, contentMode, localization),
             _ => new WidgetCompactPresentation(
                 _titleViewModel.DisplayName,
                 string.Empty,
@@ -272,6 +312,36 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
                 "|",
                 clipboard.ViewModel.CapsuleRevision,
                 clipboard.ViewModel.IsPaused,
+                summary));
+    }
+
+    private WidgetCompactPresentation CreateSearchCompactPresentation(
+        SearchWidgetContentAdapter search,
+        string contentMode,
+        LocalizationService localization)
+    {
+        bool hidesSensitiveContent =
+            SettingsService.Settings.WidgetShell.WidgetCompactHideSensitiveContent;
+        (string primaryText, string fallbackText) =
+            search.ViewModel.BuildCapsuleSummary(hidesSensitiveContent);
+
+        string summary = contentMode switch
+        {
+            DeskBox.Services.SettingsService.WidgetCompactContentModeMinimal => string.Empty,
+            DeskBox.Services.SettingsService.WidgetCompactContentModeSmart when !hidesSensitiveContent =>
+                string.IsNullOrWhiteSpace(primaryText) ? fallbackText : primaryText,
+            _ => fallbackText
+        };
+
+        return new WidgetCompactPresentation(
+            _titleViewModel.DisplayName,
+            summary,
+            "\uE721",
+            localization.T("Search.Widget.ExpandPopup"),
+            UseStackedText: !string.IsNullOrWhiteSpace(summary),
+            LiveStateKey: string.Join(
+                "|",
+                search.ViewModel.CapsuleRevision,
                 summary));
     }
 
@@ -623,6 +693,12 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
 
     protected override async Task OnCompactPrimaryActionRequestedAsync()
     {
+        if (CurrentContent is SearchWidgetContentAdapter search)
+        {
+            search.ViewModel.OpenFullPopup();
+            return;
+        }
+
         if (CurrentContent is CustomWidgetContentAdapter custom)
         {
             await custom.ViewModel.ExecuteCapsulePrimaryActionAsync();
@@ -1006,27 +1082,53 @@ private bool PrepareTrayShowAnimationCore(bool restoreBoundsForCurrentTopology)
         return prepared && boundsRestored;
     }
 
-    public void ShowPreparedAtDesktopLayer(bool persistVisibility = true)
+    public bool IsTrayShowWindowCloaked => TrayAnimation.IsWindowCloakedForTrayShow;
+
+    public void ShowPreparedAtDesktopLayer(
+        bool persistVisibility = true,
+        bool deferRevealUntilAnimationReady = false)
     {
         ReconcileStaleExpandedWidgetLayerLease();
         ShowWithoutActivation(persistVisibility);
         TrayAnimation.PrepareHiddenState();
         PushToBottom(showWindow: false);
-        TrayAnimation.RevealWindowForTrayShow();
+        if (!WidgetTrayAnimationPreparation.ShouldDeferWindowReveal(
+                deferRevealUntilAnimationReady,
+                IsTrayShowAnimationInFlight))
+        {
+            TrayAnimation.RevealWindowForTrayShow();
+        }
     }
 
-    public void ShowPreparedRaisedFromTray(bool persistVisibility = true)
+    public void ShowPreparedRaisedFromTray(
+        bool persistVisibility = true,
+        bool deferRevealUntilAnimationReady = false)
     {
         ReconcileStaleExpandedWidgetLayerLease();
         ShowWithoutActivation(persistVisibility);
         TrayAnimation.PrepareHiddenState();
         HoldTemporaryTopMost(showWindow: false);
-        TrayAnimation.RevealWindowForTrayShow();
+        if (!WidgetTrayAnimationPreparation.ShouldDeferWindowReveal(
+                deferRevealUntilAnimationReady,
+                IsTrayShowAnimationInFlight))
+        {
+            TrayAnimation.RevealWindowForTrayShow();
+        }
     }
 
     public void PlayTrayShowAnimation()
     {
-        PlayTrayRaiseAnimationAfterFirstFrame();
+        StartTrayRaiseAnimationAfterVisualCommit(activateOnReveal: false);
+    }
+
+    public Task WaitForPreparedTrayShowCommitAsync()
+    {
+        return TrayAnimation.WaitForVisualCommitAsync();
+    }
+
+    public void RevealPreparedTrayShow()
+    {
+        TrayAnimation.RevealWindowForTrayShow();
     }
 
     public void CompleteTrayShowWithoutAnimation()
@@ -1049,9 +1151,8 @@ private bool PrepareTrayShowAnimationCore(bool restoreBoundsForCurrentTopology)
     public void RevealFromTray(bool autoRestore = true)
     {
         PrepareSingleWidgetShowAnimation();
-        ShowPreparedRaisedFromTray();
-        ActivateRaisedFromTrayBatch();
-        PlayTrayShowAnimation();
+        ShowPreparedRaisedFromTray(deferRevealUntilAnimationReady: true);
+        StartTrayRaiseAnimationAfterVisualCommit(activateOnReveal: true);
 
         if (!autoRestore)
         {
@@ -1107,6 +1208,11 @@ private bool PrepareTrayShowAnimationCore(bool restoreBoundsForCurrentTopology)
     protected override void OnWidgetBoundsInteractionStarting()
     {
         base.OnWidgetBoundsInteractionStarting();
+        if (ContentWidgetShell.TitleEditorContent is not null)
+        {
+            CancelTitleRename();
+        }
+
         if (CurrentContent is FileWidgetContentAdapter fileAdapter)
         {
             fileAdapter.CloseOpenStackPopover();
@@ -1119,6 +1225,11 @@ private bool PrepareTrayShowAnimationCore(bool restoreBoundsForCurrentTopology)
         {
             LogTrayWindow($"PrepareHide skipped visible={Visible} hideRunning={IsHideAnimationRunning}");
             return false;
+        }
+
+        if (ContentWidgetShell.TitleEditorContent is not null)
+        {
+            CancelTitleRename();
         }
 
         if (CurrentContent is FileWidgetContentAdapter fileAdapter)
@@ -1195,8 +1306,8 @@ IsHideAnimationRunning = true;
             ResumeContentFromMonitorOcclusion();
         }
 
-        AppWindow.Show();
-        Win32Helper.ShowWindow(HWnd, Win32Helper.SW_SHOWNORMAL);
+        AppWindow.Show(false);
+        Win32Helper.ShowWindow(HWnd, Win32Helper.SW_SHOWNOACTIVATE);
         WidgetLayerService.BringToFront(HWnd);
         HoldTemporaryTopMost();
     }
@@ -1241,7 +1352,10 @@ IsHideAnimationRunning = true;
             return;
         }
 
-        EndExpandedWidgetLayerLease();
+        if (!IsExpandedCapsule)
+        {
+            EndExpandedWidgetLayerLease();
+        }
         CancelPendingDesktopLayerRestore();
     }
 
@@ -1277,6 +1391,16 @@ IsHideAnimationRunning = true;
 
     public void HideWindow()
     {
+        if (ContentWidgetShell.TitleEditorContent is not null)
+        {
+            CancelTitleRename();
+        }
+
+        if (CurrentContent is FileWidgetContentAdapter fileAdapter)
+        {
+            fileAdapter.CloseOpenStackPopover();
+        }
+
         App.Current?.WidgetManager?.CancelWidgetSurfaceSwitch(_config.Id);
         TrayAnimation.Stop();
         TrayAnimation.RevealWindowForTrayShow();
@@ -1415,6 +1539,7 @@ IsHideAnimationRunning = true;
             QuickCaptureWidgetContentAdapter quickCapture => quickCapture.ViewModel,
             CustomWidgetContentAdapter custom => custom.ViewModel,
             ClipboardWidgetContentAdapter clipboard => clipboard.ViewModel,
+            SearchWidgetContentAdapter search => search.ViewModel,
             _ => null
         };
 
@@ -1548,6 +1673,8 @@ IsHideAnimationRunning = true;
                 nameof(ClipboardWidgetViewModel.CapsuleRevision) or
                 nameof(ClipboardWidgetViewModel.TotalItemCount) or
                 nameof(ClipboardWidgetViewModel.IsPaused),
+            WidgetKind.Search => propertyName is
+                nameof(SearchWidgetViewModel.CapsuleRevision),
             _ => true
         };
     }
@@ -1695,6 +1822,7 @@ IsHideAnimationRunning = true;
         }
 
         ContentWidgetShell.ShowHoverButtons = SettingsService.Settings.ShowHoverButtons;
+        _titleViewModel.RefreshDisplayName();
         _titleViewModel.RefreshMetrics();
         ApplyAppearancePreview();
     }

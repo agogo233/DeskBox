@@ -151,7 +151,7 @@ public sealed partial class SettingsWindow
         switch (section)
         {
             case SearchSettingsSection searchSettings:
-                searchSettings.Configure(_searchSettingsViewModel, _localizationService, _hotkeyActions, _hWnd);
+                searchSettings.Configure(_searchSettingsViewModel, _localizationService, _hotkeyActions, _hWnd, _widgetActions);
                 break;
             case FileWidgetSettingsSection fileSettings:
                 fileSettings.FileStack = _fileStackSettingsViewModel;
@@ -171,14 +171,14 @@ public sealed partial class SettingsWindow
                 glanceSettings.Configure(_widgetActions, _hWnd);
                 break;
             case CustomWidgetSettingsSection customWidgetSettings:
-                customWidgetSettings.Configure(_widgetActions, _hWnd);
+                customWidgetSettings.Configure(_widgetActions, _hWnd, _localizationService);
                 customWidgetSettings.SubPageChanged -= OnCustomWidgetSubPageChanged;
                 customWidgetSettings.SubPageChanged += OnCustomWidgetSubPageChanged;
                 customWidgetSettings.NavigateToAiSettingsRequested -= OnNavigateToAiSettingsRequested;
                 customWidgetSettings.NavigateToAiSettingsRequested += OnNavigateToAiSettingsRequested;
                 break;
             case AiSettingsSection aiSettings:
-                aiSettings.Configure(_widgetActions, _hWnd);
+                aiSettings.Configure(_widgetActions, _hWnd, _localizationService);
                 aiSettings.AiConfigurationChanged -= AiSettingsSection_AiConfigurationChanged;
                 aiSettings.AiConfigurationChanged += AiSettingsSection_AiConfigurationChanged;
                 break;
@@ -235,6 +235,7 @@ public sealed partial class SettingsWindow
         {
             section.DataContext = _weatherSettingsViewModel;
             SyncMusicWeatherFeatureEnableState(sectionTag);
+            _ = ViewModel.EnsureWeatherNearbyCitiesInitializedAsync();
         }
 
         if (sectionTag == "Maintenance")
@@ -297,12 +298,6 @@ public sealed partial class SettingsWindow
         CollectResponsiveRows(SettingsRoot);
         UpdateResponsiveLayout(GetWindowWidth());
     }
-
-    private static FrameworkElement? FindSettingsSearchTarget(
-        DependencyObject root,
-        string headerKey,
-        HashSet<DependencyObject> visited) =>
-        FindSettingsSearchTargetWithLocation(root, headerKey, visited, out _, out _);
 
     private static FrameworkElement? FindSettingsSearchTargetWithLocation(
         DependencyObject root,
@@ -412,7 +407,7 @@ public sealed partial class SettingsWindow
         try
         {
             string? folderPath = await FolderPickerService.PickFolderAsync(_hWnd);
-            if (!string.IsNullOrWhiteSpace(folderPath))
+            if (!_isClosed && !string.IsNullOrWhiteSpace(folderPath))
             {
                 _musicSettingsViewModel.LocalLyricsFolder = folderPath;
             }

@@ -374,7 +374,8 @@ public sealed class FileWidgetContentAdapter :
             string.Equals(
                 performance.HiddenCacheCleanupScope,
                 PerformanceSettingsPolicy.HiddenCacheCleanupScopeAllRecreatable,
-                StringComparison.Ordinal))
+                StringComparison.Ordinal) &&
+            (_isCompactCollapsed || Surface is null))
         {
             ViewModel.ReleaseAllItemIcons(resetRenderWindow: true);
         }
@@ -630,6 +631,12 @@ public sealed class FileWidgetContentAdapter :
 
     internal bool IsStackPopoverBlockingSurfaceOpen =>
         Surface?.IsStackPopoverBlockingSurfaceOpen ?? false;
+
+    internal bool HasActiveInlineRename =>
+        Surface?.HasActiveInlineRename ?? false;
+
+    internal bool HasActiveSystemContextMenu =>
+        Surface?.HasActiveSystemContextMenu ?? false;
 
     internal IntPtr ActiveStackPopoverWindowHandle =>
         Surface?.ActiveStackPopoverWindowHandle ?? IntPtr.Zero;

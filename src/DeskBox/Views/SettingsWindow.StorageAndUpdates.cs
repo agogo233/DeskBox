@@ -42,7 +42,7 @@ public sealed partial class SettingsWindow
                 }
 
                 string? folderPath = await FolderPickerService.PickFolderAsync(_hWnd);
-                if (string.IsNullOrWhiteSpace(folderPath))
+                if (string.IsNullOrWhiteSpace(folderPath) || _isClosed || SettingsRoot.XamlRoot is null)
                 {
                     return;
                 }
@@ -187,18 +187,40 @@ public sealed partial class SettingsWindow
         _ = ChangeManagedStoragePathAsync();
     }
 
+    private int _managedStorageWarningRefreshGeneration;
+    private int _managedStorageShortcutRefreshGeneration;
+
     private void RefreshManagedStoragePathWarning()
     {
-        if (!_settingsSectionElements.TryGetValue("AppearanceDetail", out FrameworkElement? el) ||
+        _ = RefreshManagedStoragePathWarningAsync();
+    }
+
+    private async Task RefreshManagedStoragePathWarningAsync()
+    {
+        if (_isClosed ||
+            !_settingsSectionElements.TryGetValue("AppearanceDetail", out FrameworkElement? el) ||
             el is not Views.SettingsSections.FileWidgetSettingsSection section)
         {
             return;
         }
 
-        ManagedStoragePathAssessment assessment =
-            ManagedStoragePathService.AssessPath(ViewModel.ManagedStorageRootPath);
+        int generation = Interlocked.Increment(ref _managedStorageWarningRefreshGeneration);
+        string rootPath = ViewModel.ManagedStorageRootPath;
+        (bool overlapsDesktop, ManagedStoragePathAssessment assessment) = await Task.Run(() =>
+            (
+                ManagedStoragePathService.OverlapsDesktop(rootPath),
+                ManagedStoragePathService.AssessPath(rootPath)
+            ));
+
+        if (_isClosed ||
+            generation != Volatile.Read(ref _managedStorageWarningRefreshGeneration) ||
+            !string.Equals(rootPath, ViewModel.ManagedStorageRootPath, StringComparison.Ordinal))
+        {
+            return;
+        }
+
         var warnings = new List<string>();
-        if (ManagedStoragePathService.OverlapsDesktop(ViewModel.ManagedStorageRootPath))
+        if (overlapsDesktop)
         {
             warnings.Add(_localizationService.T("Settings.ManagedPath.Warning.DesktopOverlap"));
         }
@@ -230,13 +252,37 @@ public sealed partial class SettingsWindow
 
     private void RefreshManagedStorageDesktopShortcutState()
     {
-        if (!_settingsSectionElements.TryGetValue("AppearanceDetail", out FrameworkElement? el) ||
+        _ = RefreshManagedStorageDesktopShortcutStateAsync();
+    }
+
+    private async Task RefreshManagedStorageDesktopShortcutStateAsync()
+    {
+        if (_isClosed ||
+            !_settingsSectionElements.TryGetValue("AppearanceDetail", out FrameworkElement? el) ||
             el is not Views.SettingsSections.FileWidgetSettingsSection section)
         {
             return;
         }
 
-        section.SetDesktopShortcutState(_appActions.HasManagedStorageDesktopShortcut());
+        int generation = Interlocked.Increment(ref _managedStorageShortcutRefreshGeneration);
+        bool hasShortcut;
+        try
+        {
+            hasShortcut = await Task.Run(() => _appActions.HasManagedStorageDesktopShortcut());
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[SettingsWindow] Desktop shortcut state probe failed: {ex.Message}");
+            return;
+        }
+
+        if (_isClosed ||
+            generation != Volatile.Read(ref _managedStorageShortcutRefreshGeneration))
+        {
+            return;
+        }
+
+        section.SetDesktopShortcutState(hasShortcut);
     }
 
     private async void AppearanceDetailSection_DesktopShortcutToggled(
@@ -415,6 +461,11 @@ public sealed partial class SettingsWindow
 
     private async void OpenMicrosoftStoreButton_Click(object sender, RoutedEventArgs e)
     {
+        await LaunchMicrosoftStoreAsync();
+    }
+
+    private async Task LaunchMicrosoftStoreAsync()
+    {
         try
         {
             bool launched = await Launcher.LaunchUriAsync(new Uri(ViewModel.MicrosoftStoreAppLink));
@@ -507,6 +558,12 @@ public sealed partial class SettingsWindow
         var result = ViewModel.StartDownloadedUpdateInstall();
         if (!result.Success)
         {
+            if (result.BlockedByPolicy)
+            {
+                await ShowUpdateInstallResultDialogAsync("blocked-by-policy");
+                return;
+            }
+
             await ShowInstallStartFailedDialogAsync(
                 result.ErrorMessage ?? _localizationService.T("Settings.Update.InstallStartFailedBody"));
             return;
@@ -716,6 +773,43 @@ public sealed partial class SettingsWindow
         SettingsRoot.Loaded += loadedHandler;
     }
 
+    internal readonly record struct UpdateInstallResultDialogSpec(
+        string TitleKey,
+        string BodyKey,
+        bool OfferMicrosoftStoreInsteadOfManualDownload);
+
+    internal static UpdateInstallResultDialogSpec ResolveUpdateInstallResultDialog(string? outcome)
+    {
+        if (string.Equals(outcome, "cancelled", StringComparison.OrdinalIgnoreCase))
+        {
+            return new UpdateInstallResultDialogSpec(
+                "Settings.Update.InstallCancelledTitle",
+                "Settings.Update.InstallCancelledBody",
+                OfferMicrosoftStoreInsteadOfManualDownload: false);
+        }
+
+        if (string.Equals(outcome, "blocked-by-policy", StringComparison.OrdinalIgnoreCase))
+        {
+            return new UpdateInstallResultDialogSpec(
+                "Settings.Update.InstallBlockedByPolicyTitle",
+                "Settings.Update.InstallBlockedByPolicyBody",
+                OfferMicrosoftStoreInsteadOfManualDownload: true);
+        }
+
+        if (string.Equals(outcome, "path-mismatch", StringComparison.OrdinalIgnoreCase))
+        {
+            return new UpdateInstallResultDialogSpec(
+                "Settings.Update.InstallFailedTitle",
+                "Settings.Update.InstallPathMismatchBody",
+                OfferMicrosoftStoreInsteadOfManualDownload: false);
+        }
+
+        return new UpdateInstallResultDialogSpec(
+            "Settings.Update.InstallFailedTitle",
+            "Settings.Update.InstallFailedBody",
+            OfferMicrosoftStoreInsteadOfManualDownload: false);
+    }
+
     private async Task ShowUpdateInstallResultDialogAsync(string outcome)
     {
         if (SettingsRoot.XamlRoot is null)
@@ -723,16 +817,10 @@ public sealed partial class SettingsWindow
             return;
         }
 
-        bool wasCancelled = string.Equals(outcome, "cancelled", StringComparison.OrdinalIgnoreCase);
-        bool pathMismatch = string.Equals(outcome, "path-mismatch", StringComparison.OrdinalIgnoreCase);
-        string titleKey = wasCancelled
-            ? "Settings.Update.InstallCancelledTitle"
-            : "Settings.Update.InstallFailedTitle";
-        string bodyKey = wasCancelled
-            ? "Settings.Update.InstallCancelledBody"
-            : pathMismatch
-                ? "Settings.Update.InstallPathMismatchBody"
-                : "Settings.Update.InstallFailedBody";
+        UpdateInstallResultDialogSpec spec = ResolveUpdateInstallResultDialog(outcome);
+        string primaryButtonText = spec.OfferMicrosoftStoreInsteadOfManualDownload
+            ? _localizationService.T("Settings.Dialog.SupportStoreButton")
+            : ViewModel.UpdateFallbackActionText;
 
         // Queued from the updater process exit path, so it can land while a
         // user dialog is open; route through the same coordinator as the
@@ -740,20 +828,27 @@ public sealed partial class SettingsWindow
         ContentDialogResult choice = await ShowDialogWhenFreeAsync(() => new ContentDialog
         {
             XamlRoot = SettingsRoot.XamlRoot,
-            Title = _localizationService.T(titleKey),
+            Title = _localizationService.T(spec.TitleKey),
             Content = new TextBlock
             {
-                Text = _localizationService.T(bodyKey),
+                Text = _localizationService.T(spec.BodyKey),
                 TextWrapping = TextWrapping.Wrap
             },
-            PrimaryButtonText = ViewModel.UpdateFallbackActionText,
+            PrimaryButtonText = primaryButtonText,
             CloseButtonText = _localizationService.T("Common.Close"),
             DefaultButton = ContentDialogButton.Close
         });
 
         if (choice == ContentDialogResult.Primary)
         {
-            OpenManualUpdateDownload();
+            if (spec.OfferMicrosoftStoreInsteadOfManualDownload)
+            {
+                await LaunchMicrosoftStoreAsync();
+            }
+            else
+            {
+                OpenManualUpdateDownload();
+            }
         }
     }
 

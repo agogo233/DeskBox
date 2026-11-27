@@ -84,6 +84,7 @@ public sealed partial class QuickCapturePopoutWindow : Window
     private long _imageLoadVersion;
     private int _copyFeedbackVersion;
     private DoubleTappedEventHandler? _readerDoubleTappedHandler;
+    private readonly QuickCaptureMaterialBrushCache _materialBrushCache = new();
 
     public QuickCapturePopoutWindow(
         string? itemId,
@@ -319,7 +320,7 @@ public sealed partial class QuickCapturePopoutWindow : Window
         if (initialLoad || !_hasUnsavedChanges)
         {
             _appearancePreset = found.AppearancePreset;
-            _contentFormat = _isEditing ? ResolvePreferredEditorFormat() : found.ContentFormat;
+            _contentFormat = found.ContentFormat;
             if (_isEditing)
             {
                 SetEditorText(found.Body);
@@ -420,10 +421,6 @@ public sealed partial class QuickCapturePopoutWindow : Window
             Title = _localizationService.T("QuickCapture.QuickJotTitle");
             WindowTitleText.Text = Title;
             PopoutMarkdownEditor.PlaceholderText = _localizationService.T("QuickCapture.QuickJotPlaceholder");
-            QuickJotHintText.Text = _localizationService.T(
-                IsEnterSavesActive
-                    ? "QuickCapture.QuickJotHintEnterSaves"
-                    : "QuickCapture.QuickJotHint");
             QuickJotSaveButton.Content = _localizationService.T("Common.Save");
         }
         else
@@ -487,7 +484,7 @@ public sealed partial class QuickCapturePopoutWindow : Window
     {
         bool isDark = RootGrid.ActualTheme == ElementTheme.Dark;
         ContentMaterialSurface.Background =
-            QuickCaptureMaterialBrushCache.GetSurfaceBrush(_appearancePreset, isDark) ??
+            _materialBrushCache.GetSurfaceBrush(_appearancePreset, isDark) ??
             NeutralInteractionBrush.ResolveThemedResource("CardBackgroundFillColorDefaultBrush", RootGrid) ??
             new SolidColorBrush(Colors.Transparent);
     }
@@ -505,7 +502,6 @@ public sealed partial class QuickCapturePopoutWindow : Window
             DoneButton.Visibility = Visibility.Collapsed;
             CopyButton.Visibility = Visibility.Collapsed;
             AddAttachmentButton.Visibility = Visibility.Visible;
-            QuickJotHintText.Visibility = Visibility.Visible;
             QuickJotSaveButton.Visibility = Visibility.Visible;
             PopoutMarkdownView.Visibility = Visibility.Collapsed;
             PopoutMarkdownEditor.Visibility = Visibility.Visible;
@@ -517,7 +513,6 @@ public sealed partial class QuickCapturePopoutWindow : Window
             return;
         }
 
-        QuickJotHintText.Visibility = Visibility.Collapsed;
         QuickJotSaveButton.Visibility = Visibility.Collapsed;
         EditButton.Visibility = !_isEditing ? Visibility.Visible : Visibility.Collapsed;
         DoneButton.Visibility = _isEditing ? Visibility.Visible : Visibility.Collapsed;
@@ -632,16 +627,20 @@ public sealed partial class QuickCapturePopoutWindow : Window
 
     private void ReaderEditorHost_DoubleTapped(object sender, DoubleTappedRoutedEventArgs e)
     {
-        if (_isEditing)
+        if (_isClosed || _isEditing || _item is null)
         {
             return;
         }
 
         double ratio = ComputeReaderClickProportionalRatio(e);
-        if (BeginEditing(ratio))
+        e.Handled = true;
+        DispatcherQueue.TryEnqueue(() =>
         {
-            e.Handled = true;
-        }
+            if (!_isClosed)
+            {
+                _ = BeginEditing(ratio);
+            }
+        });
     }
 
     private bool BeginEditing(double? proportionalVerticalRatio = null)
@@ -651,7 +650,7 @@ public sealed partial class QuickCapturePopoutWindow : Window
             return false;
         }
 
-        _contentFormat = ResolvePreferredEditorFormat();
+        _contentFormat = _item.ContentFormat;
         SetEditorText(_item.Body);
         _isEditing = true;
         RefreshAttachments();
@@ -1890,7 +1889,7 @@ public sealed partial class QuickCapturePopoutWindow : Window
         return Win32Helper.DefSubclassProc(hWnd, message, wParam, lParam);
     }
 
-    private async void OnWindowClosed(object sender, WindowEventArgs args)
+    private void OnWindowClosed(object sender, WindowEventArgs args)
     {
         if (_isClosed)
         {
@@ -1954,6 +1953,7 @@ public sealed partial class QuickCapturePopoutWindow : Window
         }
 
         PopoutMarkdownView.AttachmentOpenRequested -= PopoutMarkdownView_AttachmentOpenRequested;
+        PopoutMarkdownView.TaskToggleRequested -= PopoutMarkdownView_TaskToggleRequested;
         PopoutMarkdownView.AttachmentResolver = null;
         PopoutMarkdownView.ReleaseVisualHandlers();
 
@@ -1962,12 +1962,51 @@ public sealed partial class QuickCapturePopoutWindow : Window
         PopoutMarkdownEditor.CancelRequested -= PopoutMarkdownEditor_CancelRequested;
         PopoutMarkdownEditor.RichPasteRequested -= PopoutMarkdownEditor_RichPasteRequested;
         PopoutMarkdownEditor.ReleaseVisualHandlers();
+        PopoutAttachmentStrip.OpenRequested -= PopoutAttachmentStrip_OpenRequested;
+        PopoutAttachmentStrip.RemoveRequested -= PopoutAttachmentStrip_RemoveRequested;
         PopoutAttachmentStrip.ReleaseVisualHandlers();
         PrimaryImage.Source = null;
 
         RemoveMinimumSizeHook();
-        WindowClosed?.Invoke(this, EventArgs.Empty);
+        _materialBrushCache.Clear();
+        RootGrid.Children.Clear();
+        try
+        {
+            Content = null;
+        }
+        catch (Exception ex)
+        {
+            App.LogVerbose($"[QuickCapturePopout] Content detach on close ignored: {ex.Message}");
+        }
 
+        WindowClosed?.Invoke(this, EventArgs.Empty);
+        _ = PersistCloseStateAsync(
+            shouldAutoSaveQuickJot,
+            trimmedQuickJotText,
+            quickJotFiles,
+            shouldSavePopoutEdit,
+            itemSnapshot,
+            editorText,
+            appearanceSnapshot,
+            formatSnapshot,
+            hasCapturedBounds,
+            itemIdSnapshot,
+            capturedBounds);
+    }
+
+    private async Task PersistCloseStateAsync(
+        bool shouldAutoSaveQuickJot,
+        string trimmedQuickJotText,
+        DroppedFilePath[] quickJotFiles,
+        bool shouldSavePopoutEdit,
+        QuickCaptureItem? itemSnapshot,
+        string editorText,
+        QuickCaptureAppearancePreset appearanceSnapshot,
+        TextContentFormat formatSnapshot,
+        bool hasCapturedBounds,
+        string? itemIdSnapshot,
+        (double X, double Y, double Width, double Height) capturedBounds)
+    {
         try
         {
             if (shouldAutoSaveQuickJot)
@@ -2005,8 +2044,6 @@ public sealed partial class QuickCapturePopoutWindow : Window
         finally
         {
             DisposeStagedQuickJotDropBatches();
-            RootGrid.Children.Clear();
-            Content = null;
         }
     }
 
@@ -2014,22 +2051,5 @@ public sealed partial class QuickCapturePopoutWindow : Window
     {
         double normalizedScale = double.IsFinite(scale) && scale > 0 ? scale : 1.0;
         return Math.Max(1, (int)Math.Round(logicalPixels * normalizedScale, MidpointRounding.AwayFromZero));
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct NativePoint
-    {
-        public int X;
-        public int Y;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct MinMaxInfo
-    {
-        public NativePoint Reserved;
-        public NativePoint MaxSize;
-        public NativePoint MaxPosition;
-        public NativePoint MinTrackSize;
-        public NativePoint MaxTrackSize;
     }
 }

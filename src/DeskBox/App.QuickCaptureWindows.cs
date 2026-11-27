@@ -57,7 +57,7 @@ public partial class App
                 ? history.GetFrecencyBoost
                 : null,
             clipboardPreviewImageResolver: clip =>
-                FeatureWidgetSettings.IsEnabled(SettingsService.Settings, WidgetKind.Clipboard)
+                ClipboardRuntimePolicy.IsMonitoringActive(SettingsService.Settings)
                     ? EnsureClipboardHistoryService().ResolveThumbnailPath(clip)
                     : null);
     }
@@ -66,7 +66,7 @@ public partial class App
         CancellationToken cancellationToken)
     {
         if (IsShuttingDown ||
-            !FeatureWidgetSettings.IsEnabled(SettingsService.Settings, WidgetKind.Clipboard))
+            !ClipboardRuntimePolicy.IsMonitoringActive(SettingsService.Settings))
         {
             return [];
         }
@@ -129,7 +129,7 @@ public partial class App
         {
             string clipId = actionId[clipboardCopyPrefix.Length..].Trim();
             if (!string.IsNullOrWhiteSpace(clipId) &&
-                FeatureWidgetSettings.IsEnabled(SettingsService.Settings, WidgetKind.Clipboard))
+                ClipboardRuntimePolicy.IsMonitoringActive(SettingsService.Settings))
             {
                 ClipboardHistoryService clipService = EnsureClipboardHistoryService();
                 IReadOnlyList<ClipboardHistoryItem> items = await clipService.GetItemsAsync();
@@ -210,6 +210,18 @@ public partial class App
             return;
         }
 
+        if (SettingsService.Settings.Search.SearchSaveHistory)
+        {
+            EnsureSearchHistoryService()?.RecordResult(new Models.SearchResultItem
+            {
+                Kind = Models.SearchResultKind.Todo,
+                Title = result.NormalizedText,
+                Subtitle = LocalizationService.T("Search.Tab.Todo"),
+                TodoWidgetId = result.WidgetId,
+                TodoItemId = result.ItemId
+            });
+        }
+
         if (openAfterSave)
         {
             if (WidgetManager is not null && !string.IsNullOrWhiteSpace(result.WidgetId))
@@ -253,6 +265,20 @@ public partial class App
         }
 
         string createdItemId = writeResult.Item.Id;
+        if (SettingsService.Settings.Search.SearchSaveHistory)
+        {
+            string noteTitle = body.Replace("\r\n", "\n", StringComparison.Ordinal)
+                .Split('\n', StringSplitOptions.RemoveEmptyEntries)
+                .FirstOrDefault()?.Trim() ?? body.Trim();
+            EnsureSearchHistoryService()?.RecordResult(new Models.SearchResultItem
+            {
+                Kind = Models.SearchResultKind.QuickCapture,
+                Title = noteTitle,
+                Subtitle = LocalizationService.T("Search.Tab.Note"),
+                QuickCaptureItemId = createdItemId
+            });
+        }
+
         if (openAfterSave)
         {
             if (WidgetManager is not null)
@@ -404,11 +430,20 @@ public partial class App
 
         if (normalized.Length > 240)
         {
-            normalized = string.Concat(normalized.AsSpan(0, 240), "…");
+            int cut = 240;
+            if (char.IsHighSurrogate(normalized[cut - 1]))
+            {
+                cut--;
+            }
+
+            normalized = string.Concat(normalized.AsSpan(0, cut), "…");
         }
 
         WidgetConfig? todoConfig = SettingsService.Settings.WidgetLayout.Widgets
-            .FirstOrDefault(w => w.WidgetKind == WidgetKind.Todo && !w.IsDisabled);
+            .FirstOrDefault(w =>
+                w.WidgetKind == WidgetKind.Todo &&
+                !w.IsDisabled &&
+                !SettingsService.Settings.WidgetLayout.DeletedWidgetIds.Contains(w.Id, StringComparer.Ordinal));
         if (todoConfig is null)
         {
             ContentWidgetWindow createdWindow = await WidgetManager.CreateTodoWidgetAsync();
@@ -418,6 +453,20 @@ public partial class App
             {
                 return (false, null, null, string.Empty);
             }
+        }
+
+        string newItemId = Guid.NewGuid().ToString("N");
+        bool? liveAdded = await WidgetManager.TryAddExternalTodoItemAsync(
+            todoConfig.Id,
+            normalized,
+            dueDate: null,
+            DeskBox.ViewModels.TodoPriority.Normal,
+            newItemId);
+        if (liveAdded is not null)
+        {
+            return liveAdded.Value
+                ? (true, todoConfig.Id, newItemId, normalized)
+                : (false, null, null, string.Empty);
         }
 
         var store = new TodoWidgetStore(todoConfig.Id);
@@ -431,6 +480,7 @@ public partial class App
         DateTimeOffset now = DateTimeOffset.UtcNow;
         var item = new TodoItem
         {
+            Id = newItemId,
             Text = normalized,
             SortOrder = sortOrder,
             CreatedAt = now,

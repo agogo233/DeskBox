@@ -21,7 +21,7 @@ public interface ISettingsMigration
 public sealed class SettingsMigrationPipeline
 {
     /// <summary>The current schema version that the application expects.</summary>
-    public const int CurrentSchemaVersion = 18;
+    public const int CurrentSchemaVersion = 19;
 
     private readonly List<ISettingsMigration> _migrations = [];
 
@@ -46,6 +46,7 @@ public sealed class SettingsMigrationPipeline
         _migrations.Add(new Migration_15_To_16());
         _migrations.Add(new Migration_16_To_17());
         _migrations.Add(new Migration_17_To_18());
+        _migrations.Add(new Migration_18_To_19());
     }
 
     /// <summary>
@@ -55,20 +56,20 @@ public sealed class SettingsMigrationPipeline
     internal SettingsMigrationPipeline(IEnumerable<ISettingsMigration> migrations)
     {
         _migrations.AddRange(migrations);
+        _migrations.Sort(static (left, right) => left.FromVersion.CompareTo(right.FromVersion));
     }
 
     /// <summary>
     /// Runs all necessary migrations to bring the settings from their current
     /// schema version up to <see cref="CurrentSchemaVersion"/>. Runs
-    /// copy-on-write: every step executes on a deserialized copy of the last
-    /// committed state and a failed step is discarded wholesale, so the
-    /// returned graph is either fully migrated through its recorded
-    /// checkpoint or byte-for-byte the input. A gap in the registered steps
-    /// (a step removed/never added) stops the pipeline the same way a failing
-    /// step does: the schema version stays at the last successful step so the
-    /// misconfigured registry is visible in the log instead of silently
-    /// skipping a step. The caller replaces its settings reference with the
-    /// returned one.
+    /// copy-on-write: clones the input graph once on entry and captures
+    /// pre-step checkpoint bytes only before mutating steps, deserializing a
+    /// checkpoint solely when a step throws so half-applied mutations never
+    /// leak. A gap in the registered steps (a step removed/never added) stops
+    /// the pipeline the same way a failing step does: the schema version stays
+    /// at the last successful step so the misconfigured registry is visible in
+    /// the log instead of silently skipping a step. The caller replaces its
+    /// settings reference with the returned one.
     /// </summary>
     public (AppSettings Settings, bool AnyApplied) RunMigrationsOnCopy(AppSettings settings)
     {
@@ -77,11 +78,27 @@ public sealed class SettingsMigrationPipeline
             return (settings, false);
         }
 
-        AppSettings working = settings;
+        byte[]? lastCheckpointSnapshot = TrySerializeSettings(settings);
+        if (lastCheckpointSnapshot is null)
+        {
+            App.Log(
+                $"[SettingsMigration] Migration from version {settings.SchemaVersion} skipped: " +
+                "the pre-step settings snapshot could not be taken.");
+            return (settings, false);
+        }
+
+        if (TryDeserializeSettings(lastCheckpointSnapshot) is not { } working)
+        {
+            App.Log(
+                $"[SettingsMigration] Migration from version {settings.SchemaVersion} skipped: " +
+                "the pre-step settings snapshot could not be read back.");
+            return (settings, false);
+        }
+
         int version = settings.SchemaVersion;
         bool anyApplied = false;
 
-        foreach (var migration in _migrations.OrderBy(m => m.FromVersion))
+        foreach (ISettingsMigration migration in _migrations)
         {
             if (migration.FromVersion < version)
             {
@@ -103,43 +120,48 @@ public sealed class SettingsMigrationPipeline
                 break;
             }
 
-            byte[]? snapshot = TrySerializeSettings(working);
-            if (snapshot is null)
-            {
-                App.Log(
-                    $"[SettingsMigration] Migration from version {migration.FromVersion} skipped: " +
-                    "the pre-step settings snapshot could not be taken.");
-                break;
-            }
+            bool isVersionAdvanceOnly = migration is Migration_9_To_10
+                or Migration_14_To_15
+                or Migration_17_To_18
+                or Migration_18_To_19;
 
-            if (TryDeserializeSettings(snapshot) is not { } stepCopy)
+            if (anyApplied && !isVersionAdvanceOnly)
             {
-                App.Log(
-                    $"[SettingsMigration] Migration from version {migration.FromVersion} skipped: " +
-                    "the pre-step settings snapshot could not be read back.");
-                break;
+                lastCheckpointSnapshot = TrySerializeSettings(working);
+                if (lastCheckpointSnapshot is null)
+                {
+                    App.Log(
+                        $"[SettingsMigration] Migration from version {migration.FromVersion} skipped: " +
+                        "the pre-step settings snapshot could not be taken.");
+                    break;
+                }
             }
 
             try
             {
-                migration.Migrate(stepCopy);
+                migration.Migrate(working);
             }
             catch (Exception ex)
             {
-                // A failed step must stop the chain and leave the graph
-                // untouched: every later migration assumes the schema the
-                // failed step was supposed to produce, and the discarded copy
-                // carries no half-applied mutations.
+                // A failed step must stop the chain and restore the last
+                // committed checkpoint so half-applied mutations never leak.
                 App.Log(
                     $"[SettingsMigration] Migration from version {migration.FromVersion} failed: {ex.Message}; " +
                     $"state untouched, stopping at schema version {version} (will retry on next launch)");
+                working = anyApplied
+                    ? (TryDeserializeSettings(lastCheckpointSnapshot!) ?? settings)
+                    : settings;
                 break;
             }
 
-            working = stepCopy;
             version = migration.FromVersion + 1;
             anyApplied = true;
             App.Log($"[SettingsMigration] Applied migration from version {migration.FromVersion} to {version}");
+        }
+
+        if (!anyApplied)
+        {
+            return (settings, false);
         }
 
         // Record the checkpoint the chain actually reached. A partial run
@@ -393,15 +415,30 @@ internal sealed class Migration_9_To_10 : ISettingsMigration
 }
 
 /// <summary>
-/// Schema v11 adds the dual-layer text shadow switch (default off, so
-/// existing profiles load correctly without data movement).
+/// Schema v11 preserves an explicit legacy v1.x Search disable onto the
+/// standalone Search hotkey. The local fork keeps WidgetKind.Search as a
+/// first-class widget, so no widget instance or feature-state entry is retired.
 /// </summary>
 internal sealed class Migration_10_To_11 : ISettingsMigration
 {
     public int FromVersion => 10;
 
-    public void Migrate(AppSettings settings)
+    public void Migrate(AppSettings settings) =>
+        _ = MigrateLegacyPre160SearchState(settings);
+
+    internal static bool MigrateLegacyPre160SearchState(AppSettings settings)
     {
+        if (settings.FeatureWidgetEnabledStates is { Count: > 0 } featureStates &&
+            featureStates.Any(static pair =>
+                string.Equals(pair.Key, nameof(WidgetKind.Search), StringComparison.OrdinalIgnoreCase) &&
+                !pair.Value) &&
+            settings.Search.SearchHotkeyEnabled)
+        {
+            settings.Search.SearchHotkeyEnabled = false;
+            return true;
+        }
+
+        return false;
     }
 }
 
@@ -761,10 +798,9 @@ internal sealed class Migration_14_To_15 : ISettingsMigration
 }
 
 /// <summary>
-/// v16 adds ClipboardViewMode (Standard/Compact), flips the default of
-/// ClipboardMoveToTopOnReuse to false, and upgrades v1.5.9 drag-out defaults
-/// safely without clobbering conservative Copy overrides or Windows 10
-/// FollowWindows profiles.
+/// v16 adds ClipboardViewMode (Standard/Compact), preserves explicit v1.5.9
+/// image-clipboard opt-outs, and upgrades v1.5.9 drag-out defaults safely
+/// without clobbering conservative Copy overrides or Windows 10 FollowWindows profiles.
 /// </summary>
 internal sealed class Migration_15_To_16 : ISettingsMigration
 {
@@ -772,7 +808,6 @@ internal sealed class Migration_15_To_16 : ISettingsMigration
 
     public void Migrate(AppSettings settings)
     {
-        settings.Clipboard.ClipboardMoveToTopOnReuse = false;
         if (string.IsNullOrWhiteSpace(settings.Clipboard.ClipboardViewMode))
         {
             settings.Clipboard.ClipboardViewMode = ClipboardSettingsSlice.ViewModeStandard;
@@ -900,9 +935,9 @@ internal sealed class Migration_16_To_17 : ISettingsMigration
 }
 
 /// <summary>
-/// v18 flips the default of KeepCapsuleContentWarm to true so collapsed
-/// capsules retain their inner views and expand without reloading unless the
-/// user explicitly turns capsule cache retention off in Settings.
+/// Schema v18 advances the version checkpoint for 1.6.0 capsule warm-cache
+/// settings (KeepCapsuleContentWarm already defaults to true on fresh and
+/// upgraded v1.5.9 profiles).
 /// </summary>
 internal sealed class Migration_17_To_18 : ISettingsMigration
 {
@@ -910,7 +945,22 @@ internal sealed class Migration_17_To_18 : ISettingsMigration
 
     public void Migrate(AppSettings settings)
     {
-        settings.Performance.KeepCapsuleContentWarm = true;
+    }
+}
+
+/// <summary>
+/// Schema v19 stamps 1.6.1 desktop Search widget preferences
+/// (SearchDesktopHandoffMode, SearchDesktopShowHistory,
+/// SearchDesktopShowRecentOpened, SearchDesktopPrivacyMask) so 1.6.0 builds
+/// enter forward-compatible read-only mode instead of stripping 1.6.1 fields
+/// or misinterpreting FeatureWidgetEnabledStates["Search"].
+/// </summary>
+internal sealed class Migration_18_To_19 : ISettingsMigration
+{
+    public int FromVersion => 18;
+
+    public void Migrate(AppSettings settings)
+    {
     }
 }
 

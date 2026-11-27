@@ -606,6 +606,14 @@ public sealed partial class FileSurfaceContent
 
         // A normally dismissed popover keeps its control tree as a bounded
         // per-surface cache. Reopening it only rebinds the current members.
+        if (!_stackPopoverPopupOpen && !_stackPopoverPopupClosing &&
+            ViewModel.UsesStackPopover && ViewModel.FindStackByKey(stackKey) is { } resolvedStack)
+        {
+            _ = Win32Helper.AllowSetForegroundWindow(uint.MaxValue);
+            ShowStackPopover(resolvedStack);
+            return;
+        }
+
         QueueStackPopoverShow(stackKey);
     }
 
@@ -1782,8 +1790,6 @@ public sealed partial class FileSurfaceContent
         object sender,
         RoutedEventArgs e)
     {
-        App.Current?.WidgetManager?.BeginWidgetInteraction(
-            "surface-stack-popover-close-button");
         CloseStackPopover();
     }
 
@@ -3048,18 +3054,15 @@ public sealed partial class FileSurfaceContent
     /// </summary>
     private void SchedulePopoverDismissIfDeactivated()
     {
-        if (_stackPopoverHostWindow is not { } host)
-        {
-            return;
-        }
-
+        if (_stackPopoverHostWindow is not { } host) return;
         _ = DispatcherQueue.TryEnqueue(() =>
         {
-            if (_stackPopoverPopupOpen &&
-                !_stackPopoverContextMenuOpen &&
-                !_stackPopoverSystemContextMenuOpen &&
-                !_stackPopoverDragActive &&
-                Win32Helper.GetForegroundWindow() != host.WindowHandle)
+            if (!_stackPopoverPopupOpen || _stackPopoverContextMenuOpen || _stackPopoverSystemContextMenuOpen ||
+                _stackPopoverDragActive || _pendingMenuRenameHandoffDepth > 0) return;
+            IntPtr fg = Win32Helper.GetForegroundWindow();
+            if (Win32Helper.GetForegroundWindow() != host.WindowHandle && fg != host.WindowHandle &&
+                !DeskBox.Helpers.TransientInputFocusGuard.IsWindowsTextInputExperienceWindow(fg) &&
+                !DeskBox.Helpers.TransientInputFocusGuard.IsCurrentProcessPopupBridge(fg))
             {
                 StackPopoverHost_DeactivatedByOutsideClick();
             }
@@ -4616,7 +4619,6 @@ public sealed partial class FileSurfaceContent
                 : null;
         }
 
-        if (IsSameStackPopoverWin10ShellDrag()) return null;
         string stackName = _stackPopoverKey is { } key &&
             ViewModel.FindStackByKey(key) is { } stack
                 ? stack.Name
@@ -4720,10 +4722,9 @@ public sealed partial class FileSurfaceContent
                 return;
             }
 
-            bool isWin10SamePopoverDrag = _win10ShellDragInFlight && _stackPopoverDragActive;
             if (!hasFileData ||
                 _isImportBusy ||
-                (_stackPopoverDragActive && !isWin10SamePopoverDrag))
+                _stackPopoverDragActive)
             {
                 _stackPopoverNativeItemTarget = null;
                 _stackPopoverNativeLaunchTarget = null;
@@ -4739,8 +4740,7 @@ public sealed partial class FileSurfaceContent
             }
 
             BeginStackPopoverDragAutoScroll();
-            if (!isWin10SamePopoverDrag &&
-                TryResolveStackPopoverChildIconDropTarget(
+            if (TryResolveStackPopoverChildIconDropTarget(
                     screenX,
                     screenY,
                     out Border? childBorder,
@@ -4805,7 +4805,7 @@ public sealed partial class FileSurfaceContent
             _stackPopoverNativeLaunchTarget = null;
             ClearFolderDropTarget();
             ClearLaunchDropTarget();
-            if (!isWin10SamePopoverDrag && _stackPopoverSurface is { } surface)
+            if (_stackPopoverSurface is { } surface)
             {
                 SetStackMemberDropTarget(surface);
             }

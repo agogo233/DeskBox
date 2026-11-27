@@ -74,15 +74,16 @@ public sealed class ArchitectureContractTests
     private static readonly Dictionary<string, int> FrozenFeatureFileCounts =
         new(StringComparer.Ordinal)
         {
-            // Local fork re-baseline (CI-observed actuals after the 1.6.0
-            // merge): the local feature trees gained search/studio/todo
-            // controls plus the music/weather local customizations.
+            // Local fork re-baseline after the 1.6.2 merge: the upstream
+            // desktop Search widget and split popup partials add seven Search
+            // files, while the local QuickCapture surface extensions were
+            // retired during the earlier merge.
             ["Weather"] = 19,
             ["Todo"] = 50,
             ["Music"] = 25,
             ["Glance"] = 30,
-            ["Search"] = 32,
-            ["QuickCapture"] = 32,
+            ["Search"] = 39,
+            ["QuickCapture"] = 31,
         };
 
     private static readonly Dictionary<string, int> FrozenAmbientWidgetManagerAccess =
@@ -106,8 +107,10 @@ public sealed class ArchitectureContractTests
         "src/DeskBox/Views/SettingsSections/GlanceWidgetSettingsSection.xaml.cs",
         "src/DeskBox/Views/SettingsSections/SearchSettingsSection.xaml.cs",
         "src/DeskBox/Views/SearchPopupWindow.xaml.cs",
+        "src/DeskBox/Views/SearchPopupWindow.CategoryTabs.cs",
         "src/DeskBox/Views/SearchPopupWindow.CommandPalette.cs",
         "src/DeskBox/Views/SearchPopupWindow.OutboundDrag.cs",
+        "src/DeskBox/Views/SearchPopupWindow.WindowInteraction.cs",
         "src/DeskBox/Views/SearchPopupWindow.ResultsAndPreview.cs",
         "src/DeskBox/Views/QuickCapturePopoutWindow.xaml.cs",
         "src/DeskBox/Views/QuickCaptureWindowCoordinator.cs",
@@ -154,6 +157,7 @@ public sealed class ArchitectureContractTests
                 "Ipc",
                 "Lyrics",
                 "Media",
+                "Search",
                 "Shell",
                 "Studio",
                 "WidgetGroups",
@@ -292,7 +296,7 @@ public sealed class ArchitectureContractTests
     [Fact]
     public void GrandfatheredHostViewNamespaceList_MustShrinkToZeroByStageTwo()
     {
-        Assert.Equal(18, GrandfatheredHostViewNamespaceFiles.Length);
+        Assert.Equal(20, GrandfatheredHostViewNamespaceFiles.Length);
     }
 
     [Fact]

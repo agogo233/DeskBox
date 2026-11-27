@@ -44,6 +44,74 @@ public sealed partial class WidgetManager
     private readonly Dictionary<WidgetKind, WidgetWindowProvider> _windowProviders;
     private bool _isApplyingAppearancePreview;
 
+    private Dictionary<WidgetKind, FeatureWidgetHandler> CreateFeatureWidgetHandlers()
+    {
+        FeatureWidgetHandler[] handlers =
+        [
+            new(
+                WidgetKind.QuickCapture,
+                async reveal => await CreateOrShowQuickCaptureWidgetAsync(reveal),
+                SetQuickCaptureEnabledAsync,
+                CloseLoadedQuickCaptureWidgets),
+            new(
+                WidgetKind.Todo,
+                async _ => await CreateTodoWidgetAsync(),
+                SetTodoEnabledAsync,
+                () => HideAndCloseFeatureWidgetAsync(WidgetKind.Todo)),
+            new(
+                WidgetKind.Music,
+                async _ => await CreateSingletonContentFeatureWidgetAsync(WidgetKind.Music),
+                SetContentFeatureWidgetEnabledAsync,
+                () => HideAndCloseFeatureWidgetAsync(WidgetKind.Music)),
+            new(
+                WidgetKind.Weather,
+                async _ => await CreateSingletonContentFeatureWidgetAsync(WidgetKind.Weather),
+                SetWeatherFeatureWidgetEnabledAsync,
+                () => HideAndCloseFeatureWidgetAsync(WidgetKind.Weather)),
+            new(
+                WidgetKind.Clipboard,
+                async _ => await CreateSingletonContentFeatureWidgetAsync(WidgetKind.Clipboard),
+                SetClipboardFeatureWidgetEnabledAsync,
+                () => HideAndCloseFeatureWidgetAsync(WidgetKind.Clipboard)),
+            new(
+                WidgetKind.Search,
+                async _ => await CreateSingletonContentFeatureWidgetAsync(WidgetKind.Search),
+                SetSearchFeatureWidgetEnabledAsync,
+                () => HideAndCloseFeatureWidgetAsync(WidgetKind.Search)),
+            new(
+                WidgetKind.Glance,
+                CreateOrShowGlanceWidgetsAsync,
+                SetGlanceFeatureWidgetEnabledAsync,
+                () => CloseLoadedFeatureWidgetWindows(WidgetKind.Glance)),
+            new(
+                WidgetKind.Custom,
+                CreateOrShowCustomWidgetsAsync,
+                SetCustomFeatureWidgetEnabledAsync,
+                () => CloseLoadedFeatureWidgetWindows(WidgetKind.Custom))
+        ];
+
+        return handlers.ToDictionary(handler => handler.WidgetKind);
+    }
+
+    private (double Width, double Height) GetDefaultFeatureWidgetSize(WidgetKind kind)
+    {
+        return kind switch
+        {
+            WidgetKind.Todo => (
+                Math.Max(_settingsService.Settings.WidgetShell.DefaultWidgetWidth, 320),
+                Math.Max(_settingsService.Settings.WidgetShell.DefaultWidgetHeight, 420)),
+            WidgetKind.Music => (380, 190),
+            WidgetKind.Weather => (200, 200),
+            WidgetKind.Glance => (360, 260),
+            WidgetKind.Custom => (360, 460),
+            WidgetKind.Clipboard => (320, 420),
+            WidgetKind.Search => (420, 290),
+            _ => (
+                _settingsService.Settings.WidgetShell.DefaultWidgetWidth,
+                _settingsService.Settings.WidgetShell.DefaultWidgetHeight)
+        };
+    }
+
     private void ApplyFeatureWidgetEnabledState(WidgetKind kind, bool enabled)
     {
         if (!UiDispatch.HasAccess)
@@ -117,6 +185,28 @@ public sealed partial class WidgetManager
         {
             await SeedQuickCaptureGuideAsync();
         }
+        else if (WidgetGroupSettings.FindByMember(_settingsService.Settings, config.Id) is { } qcGroup)
+        {
+            if (reveal)
+            {
+                await ShowWidgetAsync(config.Id, reveal: true, autoRestoreOnReveal: false);
+            }
+            else if (qcGroup.IsVisible && GetLoadedWindow(qcGroup.ActiveMemberId) is null)
+            {
+                _ = await ShowGroupActiveWindowAsync(qcGroup);
+            }
+
+            if (GetLoadedWindow(qcGroup.ActiveMemberId) is ContentWidgetWindow groupWindow)
+            {
+                if (focusNewInput &&
+                    string.Equals(qcGroup.ActiveMemberId, config.Id, StringComparison.Ordinal))
+                {
+                    groupWindow.TriggerAddAction();
+                }
+
+                return groupWindow;
+            }
+        }
 
         var window = await CreateContentWidgetFromConfigAsync(config);
         if (reveal)
@@ -139,7 +229,7 @@ public sealed partial class WidgetManager
         CustomWidgetHostSnapshotService.RegisterTodoLiveMutationBridge(CreateTodoLiveMutationBridge());
 
         // Single-instance: show existing Todo if one exists
-        var existingConfig = _settingsService.Settings.Widgets
+        var existingConfig = _settingsService.Settings.WidgetLayout.Widgets
             .FirstOrDefault(w => w.WidgetKind == WidgetKind.Todo && !IsDeleted(w.Id));
         if (existingConfig is not null)
         {
@@ -153,6 +243,12 @@ public sealed partial class WidgetManager
                 }
 
                 return existing;
+            }
+
+            if (WidgetGroupSettings.FindByMember(_settingsService.Settings, existingConfig.Id) is { } todoGroup &&
+                GetLoadedWindow(todoGroup.ActiveMemberId) is ContentWidgetWindow groupedTodoWindow)
+            {
+                return groupedTodoWindow;
             }
         }
 
@@ -542,6 +638,7 @@ public sealed partial class WidgetManager
             WidgetKind.Glance => "Glance.Title",
             WidgetKind.Custom => "CustomWidget.Title",
             WidgetKind.Clipboard => "Clipboard.Title",
+            WidgetKind.Search => "Search.Title",
             WidgetKind.Tags => "Tags.Title",
             WidgetKind.SystemMonitor => "SystemMonitor.Title",
             _ => string.Empty
@@ -568,7 +665,7 @@ public sealed partial class WidgetManager
 
         await CommitFeatureWidgetStateAsync(kind, true);
 
-        var existingConfig = _settingsService.Settings.Widgets
+        var existingConfig = _settingsService.Settings.WidgetLayout.Widgets
             .FirstOrDefault(w => w.WidgetKind == kind && !IsDeleted(w.Id));
         if (existingConfig is not null)
         {
@@ -576,6 +673,12 @@ public sealed partial class WidgetManager
             if (_contentWidgets.TryGetValue(existingConfig.Id, out var existing))
             {
                 return existing;
+            }
+
+            if (WidgetGroupSettings.FindByMember(_settingsService.Settings, existingConfig.Id) is { } singletonGroup &&
+                GetLoadedWindow(singletonGroup.ActiveMemberId) is ContentWidgetWindow groupedSingletonWindow)
+            {
+                return groupedSingletonWindow;
             }
         }
 
@@ -592,6 +695,7 @@ public sealed partial class WidgetManager
                 WidgetKind.Glance => 360,
                 WidgetKind.Custom => 360,
                 WidgetKind.Clipboard => 320,
+                WidgetKind.Search => 420,
                 _ => Math.Max(_settingsService.Settings.DefaultWidgetWidth, 320)
             },
             Height = kind switch
@@ -601,6 +705,7 @@ public sealed partial class WidgetManager
                 WidgetKind.Glance => 260,
                 WidgetKind.Custom => 460,
                 WidgetKind.Clipboard => 420,
+                WidgetKind.Search => 290,
                 _ => Math.Max(_settingsService.Settings.DefaultWidgetHeight, 360)
             }
         };
@@ -615,18 +720,30 @@ public sealed partial class WidgetManager
 
     public IReadOnlyList<GlanceWidgetInstanceInfo> GetGlanceWidgetInstances()
     {
-        bool featureEnabled = GetFeatureWidgetEnabledState(WidgetKind.Glance);
-        return _settingsService.Settings.Widgets
-            .Where(widget => widget.WidgetKind == WidgetKind.Glance && !IsDeleted(widget.Id))
-            .Select(widget => new GlanceWidgetInstanceInfo(
-                widget.Id,
-                widget.Name,
-                featureEnabled && !widget.IsDisabled))
-            .ToList();
+        List<GlanceWidgetInstanceInfo> instances = [];
+        _settingsService.MutateGraphUnderLock(() =>
+        {
+            bool featureEnabled = GetFeatureWidgetEnabledState(WidgetKind.Glance);
+            instances = _settingsService.Settings.Widgets
+                .Where(widget => widget.WidgetKind == WidgetKind.Glance && !IsDeleted(widget.Id))
+                .Select(widget => new GlanceWidgetInstanceInfo(
+                    widget.Id,
+                    widget.Name,
+                    featureEnabled && !widget.IsDisabled))
+                .ToList();
+        });
+        return instances;
     }
 
-    public bool IsGlanceFeatureEnabled =>
-        GetFeatureWidgetEnabledState(WidgetKind.Glance);
+    public bool IsGlanceFeatureEnabled
+    {
+        get
+        {
+            bool enabled = false;
+            _settingsService.MutateGraphUnderLock(() => enabled = GetFeatureWidgetEnabledState(WidgetKind.Glance));
+            return enabled;
+        }
+    }
 
     public async Task<GlanceWidgetInstanceInfo> CreateGlanceWidgetAsync(
         string? sourceWidgetId = null)
@@ -1137,13 +1254,36 @@ public sealed partial class WidgetManager
             return false;
         }
 
-        bool shown = await ShowWidgetAsync(widgetId, reveal: true, autoRestoreOnReveal: false);
-        if (shown && _contentWidgets.TryGetValue(widgetId, out var window) && window.Content is Microsoft.UI.Xaml.UIElement root)
+        WidgetGroupConfig? group = WidgetGroupSettings.FindByMember(_settingsService.Settings, widgetId);
+        bool isActiveInGroupOrStandalone =
+            group is null ||
+            string.Equals(group.ActiveMemberId, widgetId, StringComparison.Ordinal);
+
+        if (isActiveInGroupOrStandalone &&
+            _contentWidgets.TryGetValue(widgetId, out ContentWidgetWindow? existingWindow) &&
+            existingWindow.Visible &&
+            !existingWindow.IsClosing &&
+            !existingWindow.IsHideAnimationRunning)
         {
-            DeskBox.Helpers.FluentMotionHelper.PlayDesktopArrivalPulse(root);
+            if (existingWindow.IsTrayShowAnimationInFlight || existingWindow.IsTrayShowWindowCloaked)
+            {
+                return true;
+            }
+
+            existingWindow.RestoreBoundsForCurrentTopology();
+            existingWindow.RaiseTemporarilyFromManager();
+            if (existingWindow.CurrentContent is DeskBox.Controls.WidgetContents.CustomWidgetContentAdapter
+                {
+                    ActiveContentElement: Microsoft.UI.Xaml.UIElement contentRoot
+                })
+            {
+                DeskBox.Helpers.FluentMotionHelper.PlayDesktopArrivalPulse(contentRoot);
+            }
+
+            return true;
         }
 
-        return shown;
+        return await ShowWidgetAsync(widgetId, reveal: true, autoRestoreOnReveal: false);
     }
 
     public Task RemoveCustomWidgetAsync(string widgetId) => RemoveWidgetAsync(widgetId);
@@ -2000,9 +2140,17 @@ public sealed partial class WidgetManager
         string title,
         DateTimeOffset? dueDate,
         TodoPriority priority) =>
+        TryAddExternalTodoItemAsync(widgetId, title, dueDate, priority, explicitItemId: null);
+
+    internal Task<bool?> TryAddExternalTodoItemAsync(
+        string widgetId,
+        string title,
+        DateTimeOffset? dueDate,
+        TodoPriority priority,
+        string? explicitItemId) =>
         RunLiveTodoMutationOnUiAsync(
             widgetId,
-            adapter => adapter.AddExternalItemAsync(title, dueDate, priority),
+            adapter => adapter.AddExternalItemAsync(title, dueDate, priority, explicitItemId),
             result => result);
 
     internal Task<bool?> TryToggleExternalTodoItemAsync(string widgetId, string itemId) =>
@@ -2904,6 +3052,11 @@ public sealed partial class WidgetManager
     private Task SetClipboardFeatureWidgetEnabledAsync(bool enabled, bool reveal)
     {
         return SetContentFeatureWidgetEnabledAsync(WidgetKind.Clipboard, enabled, reveal);
+    }
+
+    private Task SetSearchFeatureWidgetEnabledAsync(bool enabled, bool reveal)
+    {
+        return SetContentFeatureWidgetEnabledAsync(WidgetKind.Search, enabled, reveal);
     }
 
     private Task SetGlanceFeatureWidgetEnabledAsync(bool enabled, bool reveal)

@@ -869,6 +869,21 @@ public sealed class AppSettings
     /// <inheritdoc cref="SearchSettingsSlice.SearchQuickCreateShowHud"/>
     public bool SearchQuickCreateShowHud { get => Search.SearchQuickCreateShowHud; set => Search.SearchQuickCreateShowHud = value; }
 
+    /// <inheritdoc cref="SearchSettingsSlice.SearchCategoryLayout"/>
+    public string SearchCategoryLayout { get => Search.SearchCategoryLayout; set => Search.SearchCategoryLayout = value; }
+
+    /// <inheritdoc cref="SearchSettingsSlice.SearchDesktopHandoffMode"/>
+    public string SearchDesktopHandoffMode { get => Search.SearchDesktopHandoffMode; set => Search.SearchDesktopHandoffMode = value; }
+
+    /// <inheritdoc cref="SearchSettingsSlice.SearchDesktopShowHistory"/>
+    public bool SearchDesktopShowHistory { get => Search.SearchDesktopShowHistory; set => Search.SearchDesktopShowHistory = value; }
+
+    /// <inheritdoc cref="SearchSettingsSlice.SearchDesktopShowRecentOpened"/>
+    public bool SearchDesktopShowRecentOpened { get => Search.SearchDesktopShowRecentOpened; set => Search.SearchDesktopShowRecentOpened = value; }
+
+    /// <inheritdoc cref="SearchSettingsSlice.SearchDesktopPrivacyMask"/>
+    public bool SearchDesktopPrivacyMask { get => Search.SearchDesktopPrivacyMask; set => Search.SearchDesktopPrivacyMask = value; }
+
     // ─── Cloud Backup (roadmap §10 — non-secret provider config only) ───
 
     /// <inheritdoc cref="CloudBackupSettingsSlice.CloudBackupProvider"/>
@@ -983,4 +998,7 @@ public sealed class AppSettings
 
     /// <inheritdoc cref="ClipboardSettingsSlice.ClipboardDoubleCopyAction"/>
     public string ClipboardDoubleCopyAction { get => Clipboard.ClipboardDoubleCopyAction; set => Clipboard.ClipboardDoubleCopyAction = value; }
+
+    /// <inheritdoc cref="ClipboardSettingsSlice.ClipboardFetchUrlTitles"/>
+    public bool ClipboardFetchUrlTitles { get => Clipboard.ClipboardFetchUrlTitles; set => Clipboard.ClipboardFetchUrlTitles = value; }
 }

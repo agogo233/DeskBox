@@ -24,6 +24,7 @@ namespace DeskBox.Controls.WidgetContents;
 public sealed partial class QuickCaptureSurfaceContent
 {
     private readonly List<DroppedFilePath> _pendingInlineAttachments = [];
+    private readonly QuickCaptureMaterialBrushCache _materialBrushCache = new();
     private DispatcherQueueTimer? _relativeTimestampTimer;
     private bool _isInlineComposerOpen;
     private bool _isCommittingInlineComposer;
@@ -88,6 +89,7 @@ public sealed partial class QuickCaptureSurfaceContent
         }
 
         _pendingInlineAttachments.Clear();
+        _materialBrushCache.Clear();
         InlineComposerAttachmentStrip?.ReleaseVisualHandlers();
     }
 
@@ -134,15 +136,6 @@ public sealed partial class QuickCaptureSurfaceContent
             InlineComposerTextBox.FontSize = ViewModel.ContentTextSize;
         }
 
-        if (InlineComposerHintText is not null)
-        {
-            bool enterSaves = SettingsService.NormalizeEditorEnterBehavior(ViewModel.EditorEnterBehavior) ==
-                              SettingsService.EditorEnterBehaviorEnterSaves;
-            InlineComposerHintText.Text = T(enterSaves
-                ? "QuickCapture.QuickJotHintEnterSaves"
-                : "QuickCapture.QuickJotHint");
-        }
-
         if (InlineComposerAttachmentStrip is not null)
         {
             InlineComposerAttachmentStrip.RemoveAutomationName = T("QuickCapture.Detail.RemoveAttachment");
@@ -172,35 +165,35 @@ public sealed partial class QuickCaptureSurfaceContent
         bool isDark = ActualTheme == ElementTheme.Dark;
         if (PaperMaterialSwatch is not null)
         {
-            PaperMaterialSwatch.Background = QuickCaptureMaterialBrushCache.GetSwatchBrush(
+            PaperMaterialSwatch.Background = _materialBrushCache.GetSwatchBrush(
                 QuickCaptureAppearancePreset.Paper,
                 isDark);
         }
 
         if (YellowMaterialSwatch is not null)
         {
-            YellowMaterialSwatch.Background = QuickCaptureMaterialBrushCache.GetSwatchBrush(
+            YellowMaterialSwatch.Background = _materialBrushCache.GetSwatchBrush(
                 QuickCaptureAppearancePreset.StickyYellow,
                 isDark);
         }
 
         if (RoseMaterialSwatch is not null)
         {
-            RoseMaterialSwatch.Background = QuickCaptureMaterialBrushCache.GetSwatchBrush(
+            RoseMaterialSwatch.Background = _materialBrushCache.GetSwatchBrush(
                 QuickCaptureAppearancePreset.Rose,
                 isDark);
         }
 
         if (MintMaterialSwatch is not null)
         {
-            MintMaterialSwatch.Background = QuickCaptureMaterialBrushCache.GetSwatchBrush(
+            MintMaterialSwatch.Background = _materialBrushCache.GetSwatchBrush(
                 QuickCaptureAppearancePreset.Mint,
                 isDark);
         }
 
         if (BlueMaterialSwatch is not null)
         {
-            BlueMaterialSwatch.Background = QuickCaptureMaterialBrushCache.GetSwatchBrush(
+            BlueMaterialSwatch.Background = _materialBrushCache.GetSwatchBrush(
                 QuickCaptureAppearancePreset.MistBlue,
                 isDark);
         }
@@ -221,7 +214,11 @@ public sealed partial class QuickCaptureSurfaceContent
             PlayExpandEntranceAnimation(InlineComposerCard);
         }
 
-        DeskBox.Views.WidgetWindowBase.TryActivateOwnerForKeyboardInput(this, "quick-capture-inline-composer");
+        InteractionBreadcrumbRecorder.Record("qc-inline-open", $"dual={_isDualPane}");
+        DeskBox.Views.WidgetWindowBase.TryActivateOwnerForKeyboardInput(
+            this,
+            "quick-capture-inline-composer",
+            expectTextInput: true);
         DeskBox.Helpers.ImeCompositionGuard.AttachAncestors(InlineComposerTextBox);
         DispatcherQueue.TryEnqueue(() =>
         {
@@ -231,6 +228,81 @@ public sealed partial class QuickCaptureSurfaceContent
                 InlineComposerTextBox.SelectionStart = InlineComposerTextBox.Text.Length;
             }
         });
+    }
+
+    internal static bool ShouldApplyPendingFocusOnActivation(
+        string? pendingFocusTarget,
+        bool isInlineComposerOpen,
+        bool isDetailEditing,
+        bool isSearchExpanded)
+    {
+        if (string.IsNullOrEmpty(pendingFocusTarget))
+        {
+            return false;
+        }
+
+        if (isInlineComposerOpen || isDetailEditing || isSearchExpanded)
+        {
+            return pendingFocusTarget is "InlineComposer" or "DetailEditor" or "Search";
+        }
+
+        return true;
+    }
+
+    internal static string ResolveFocusTargetName(
+        bool isInsideInlineComposer,
+        bool isInsideDetailEditor,
+        bool isInsideSearchBox,
+        bool isItemsList)
+    {
+        if (isInsideInlineComposer)
+        {
+            return "InlineComposer";
+        }
+
+        if (isInsideDetailEditor)
+        {
+            return "DetailEditor";
+        }
+
+        if (isInsideSearchBox)
+        {
+            return "Search";
+        }
+
+        if (isItemsList)
+        {
+            return "Items";
+        }
+
+        return "Root";
+    }
+
+    private static bool IsVisualDescendantOrSelf(DependencyObject? candidate, DependencyObject? ancestor)
+    {
+        for (DependencyObject? current = candidate;
+             current is not null && ancestor is not null;
+             current = VisualTreeHelper.GetParent(current))
+        {
+            if (ReferenceEquals(current, ancestor))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private bool IsTextInputSessionActiveOrFocused()
+    {
+        if (_isInlineComposerOpen || _isDetailEditing || ViewModel.IsSearchExpanded)
+        {
+            return true;
+        }
+
+        return XamlRoot is not null &&
+               FocusManager.GetFocusedElement(XamlRoot) is DependencyObject focused &&
+               TransientInputFocusGuard.IsInsideTextInputControl(focused);
     }
 
     private void RestoreInlineComposerTransientState(
@@ -288,6 +360,26 @@ public sealed partial class QuickCaptureSurfaceContent
         {
             InlineComposerTextBox.FontSize = ViewModel.ContentTextSize;
         }
+
+        UpdateInlineComposerSaveButtonState();
+    }
+
+    private void UpdateInlineComposerSaveButtonState()
+    {
+        if (InlineComposerSaveButton is null)
+        {
+            return;
+        }
+
+        bool canSave = !string.IsNullOrWhiteSpace(InlineComposerTextBox?.Text) ||
+                       _pendingInlineAttachments.Count > 0;
+        InlineComposerSaveButton.IsEnabled = canSave;
+        InlineComposerSaveButton.Opacity = canSave ? 1.0 : 0.38;
+    }
+
+    private void InlineComposerTextBox_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        UpdateInlineComposerSaveButtonState();
     }
 
     private void RefreshInlineComposerAttachments()
@@ -310,6 +402,7 @@ public sealed partial class QuickCaptureSurfaceContent
         InlineComposerAttachmentStrip.Visibility = attachments.Length > 0
             ? Visibility.Visible
             : Visibility.Collapsed;
+        UpdateInlineComposerSaveButtonState();
     }
 
     private async Task CommitInlineComposerAsync()
@@ -565,10 +658,9 @@ public sealed partial class QuickCaptureSurfaceContent
     {
         try
         {
-            IntPtr foreground = Win32Helper.GetForegroundWindow();
-            IntPtr owner = Win32Helper.GetAncestor(foreground, Win32Helper.GA_ROOT);
+            IntPtr owner = ResolveHostOwnerWindowHandle();
             IReadOnlyList<string> files = await FileOpenPickerService.PickMultipleFilesAsync(
-                owner == IntPtr.Zero ? foreground : owner,
+                owner,
                 [],
                 PickerLocationId.Desktop);
             foreach (string path in files.Where(p => !string.IsNullOrWhiteSpace(p) && File.Exists(p)))

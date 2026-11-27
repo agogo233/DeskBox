@@ -602,10 +602,12 @@ public sealed class SettingsIpcFacadeTests : IDisposable
             return Task.CompletedTask;
         }
 
+        public Func<WidgetKind, bool, bool>? SetFeatureWidgetEnabledOverride { get; set; }
+
         public Task<bool> SetFeatureWidgetEnabled(WidgetKind kind, bool enabled)
         {
             SyncToggles.Add((kind, enabled));
-            return Task.FromResult(enabled);
+            return Task.FromResult(SetFeatureWidgetEnabledOverride?.Invoke(kind, enabled) ?? enabled);
         }
 
         public List<(WidgetKind Kind, bool Enabled)> SyncToggles { get; } = [];
@@ -797,6 +799,14 @@ public sealed class SettingsIpcFacadeTests : IDisposable
 
         public Task<DesktopOrganizationUndoResult> AbandonDesktopOrganizationUndoAsync(string historyId) =>
             Task.FromResult(new DesktopOrganizationUndoResult(DesktopOrganizationUndoOutcome.Completed));
+
+        public bool? LastResetChromeInteractiveArg { get; private set; }
+
+        public Task ResetWidgetChromeOverrides(bool interactive)
+        {
+            LastResetChromeInteractiveArg = interactive;
+            return Task.CompletedTask;
+        }
     }
 
     private sealed class FakeAppActions : ISettingsAppActions
@@ -1686,6 +1696,72 @@ public sealed class SettingsIpcFacadeTests : IDisposable
             Assert.True(download.Success);
             Assert.Same(manifest, inProcessStore.DownloadManifestArg);
             Assert.Null(loop.UpdateService.DownloadManifestArg);
+        }
+        finally
+        {
+            await loop.Client.DisposeAsync();
+            await loop.Server.DisposeAsync();
+        }
+    }
+
+    [Fact]
+    public async Task WidgetFacade_RoundTripsGroupRenameAndResetWidgetChromeOverrides()
+    {
+        var settings = new SettingsService(_tempRoot);
+        var loop = await StartLoopbackAsync(PipeName(), settings);
+        try
+        {
+            var remote = new RemoteSettingsWidgetActions(loop.Client, settings);
+            var renameChange = new Contracts.GroupPresentationChange(
+                "grp-1",
+                NavigationStyle: "Top",
+                TitleDisplayMode: "IconOnly",
+                Name: "Workstation");
+            await remote.ApplyGroupPresentation(renameChange);
+            Assert.Single(loop.Widget.GroupPresentations);
+            Assert.Equal("Workstation", loop.Widget.GroupPresentations[0].Name);
+
+            await remote.ResetWidgetChromeOverrides(interactive: true);
+            Assert.True(loop.Widget.LastResetChromeInteractiveArg);
+
+            await remote.ResetWidgetChromeOverrides(interactive: false);
+            Assert.False(loop.Widget.LastResetChromeInteractiveArg);
+        }
+        finally
+        {
+            await loop.Client.DisposeAsync();
+            await loop.Server.DisposeAsync();
+        }
+    }
+
+    [Fact]
+    public async Task RemoteSettingsWidgetActions_OptimisticallySyncsAndRollsBackDesktopSearchFeatureToggle()
+    {
+        var settings = new SettingsService(_tempRoot);
+        var loop = await StartLoopbackAsync(PipeName(), settings);
+        try
+        {
+            var hostMirror = new SettingsService(Path.Combine(_tempRoot, "search-mirror"));
+            await hostMirror.LoadAsync();
+            var remote = new RemoteSettingsWidgetActions(loop.Client, hostMirror);
+
+            Assert.False(remote.IsFeatureWidgetEnabled(WidgetKind.Search));
+
+            bool applied = await remote.SetFeatureWidgetEnabled(WidgetKind.Search, true);
+            Assert.True(applied);
+            Assert.True(remote.IsFeatureWidgetEnabled(WidgetKind.Search));
+
+            // Divergent host response rolls the optimistic mirror back to false.
+            loop.Widget.SetFeatureWidgetEnabledOverride = (_, _) => false;
+            bool refusedApplied = await remote.SetFeatureWidgetEnabled(WidgetKind.Search, true);
+            Assert.False(refusedApplied);
+            Assert.False(remote.IsFeatureWidgetEnabled(WidgetKind.Search));
+
+            // Transport failure when flipping back on also rolls the mirror back cleanly.
+            await loop.Server.DisposeAsync();
+            bool disconnectedApplied = await remote.SetFeatureWidgetEnabled(WidgetKind.Search, true);
+            Assert.False(disconnectedApplied);
+            Assert.False(remote.IsFeatureWidgetEnabled(WidgetKind.Search));
         }
         finally
         {

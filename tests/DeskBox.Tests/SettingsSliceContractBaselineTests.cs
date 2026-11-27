@@ -225,7 +225,7 @@ public sealed class SettingsSliceContractBaselineTests
         Assert.True(s.WeatherShowWind);
         Assert.False(s.WeatherShowPressure);
         Assert.Equal(60, s.WeatherRefreshIntervalMinutes);
-        Assert.False(s.SearchHotkeyEnabled);
+        Assert.True(s.SearchHotkeyEnabled);
         Assert.Equal(HotkeyActivationKind.Chord, s.SearchHotkeyActivationKind);
         Assert.Equal((int)HotkeyModifierKeys.Alt, s.SearchHotkeyModifiers);
         Assert.Equal(0x44, s.SearchHotkeyKey);
@@ -257,6 +257,11 @@ public sealed class SettingsSliceContractBaselineTests
         Assert.Equal("always", s.SearchQuickCreateDisplayMode);
         Assert.Equal("todo", s.SearchQuickCreateDefaultTarget);
         Assert.True(s.SearchQuickCreateShowHud);
+        Assert.Equal(SearchSettingsSlice.DefaultCategoryLayout, s.SearchCategoryLayout);
+        Assert.Equal(SearchSettingsSlice.DefaultDesktopHandoffMode, s.SearchDesktopHandoffMode);
+        Assert.True(s.SearchDesktopShowHistory);
+        Assert.True(s.SearchDesktopShowRecentOpened);
+        Assert.False(s.SearchDesktopPrivacyMask);
         Assert.Equal("none", s.CloudBackupProvider);
         Assert.Equal("", s.CloudBackupServerUrl);
         Assert.Equal("DeskBox/backups", s.CloudBackupRemotePath);
@@ -293,6 +298,7 @@ public sealed class SettingsSliceContractBaselineTests
         Assert.Equal(0x56, s.ClipboardHotkeyKey);
         Assert.Equal("FollowCaret", s.ClipboardPopupPlacementMode);
         Assert.Equal("None", s.ClipboardDoubleCopyAction);
+        Assert.False(s.ClipboardFetchUrlTitles);
     }
 
     [Fact]
@@ -562,6 +568,11 @@ public sealed class SettingsSliceContractBaselineTests
         "searchQuickCreateDisplayMode",
         "searchQuickCreateDefaultTarget",
         "searchQuickCreateShowHud",
+        "searchCategoryLayout",
+        "searchDesktopHandoffMode",
+        "searchDesktopShowHistory",
+        "searchDesktopShowRecentOpened",
+        "searchDesktopPrivacyMask",
         "cloudBackupProvider",
         "cloudBackupServerUrl",
         "cloudBackupRemotePath",
@@ -599,5 +610,6 @@ public sealed class SettingsSliceContractBaselineTests
         "clipboardHotkeyKey",
         "clipboardPopupPlacementMode",
         "clipboardDoubleCopyAction",
+        "clipboardFetchUrlTitles",
     ];
 }

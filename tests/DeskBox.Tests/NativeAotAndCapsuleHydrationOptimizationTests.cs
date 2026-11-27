@@ -173,16 +173,19 @@ public sealed class NativeAotAndCapsuleHydrationOptimizationTests
         }
 
         DispatcherQueueController controller = DispatcherQueueController.CreateOnDedicatedThread();
+        var stickyContext = new StickyDispatcherQueueSynchronizationContext(controller.DispatcherQueue);
         try
         {
             var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             Assert.True(controller.DispatcherQueue.TryEnqueue(async () =>
             {
-                // The headless host installs no dispatcher sync context; without one, await
-                // continuations resume on thread-pool threads and race the low-priority slice
-                // callbacks mutating RenderedItems (observed as a mid-shrink count on CI).
-                SynchronizationContext.SetSynchronizationContext(
-                    new DispatcherQueueSynchronizationContext(controller.DispatcherQueue));
+                // The headless host installs no dispatcher sync context, and WinUI's built-in
+                // DispatcherQueueSynchronizationContext.Post does not re-install itself on the
+                // resumed callback, so a second await would resume on a thread-pool thread and
+                // race low-priority slice callbacks mutating RenderedItems. Keep a sticky sync
+                // context installed across every await so all ViewModel calls stay serialized on
+                // the DispatcherQueue thread just like the real WinUI host.
+                SynchronizationContext.SetSynchronizationContext(stickyContext);
                 try
                 {
                     var settings = new SettingsService();
@@ -205,6 +208,7 @@ public sealed class NativeAotAndCapsuleHydrationOptimizationTests
                         settings,
                         dispatcherQueue: controller.DispatcherQueue);
                     await vm.InitializeAsync();
+                    Assert.True(controller.DispatcherQueue.HasThreadAccess);
                     vm.EnsureProjectionAndRenderWindowSynchronizedForHydration();
                     Assert.Equal(80, vm.RenderedItems.Count);
 
@@ -229,6 +233,7 @@ public sealed class NativeAotAndCapsuleHydrationOptimizationTests
                     }
                     _ = controller.DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, WaitUntilFull);
                     await drained.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                    Assert.True(controller.DispatcherQueue.HasThreadAccess);
                     Assert.Equal(80, vm.RenderedItems.Count);
 
                     // Verify selection restoration fast-forwards immediately without waiting for slices.
@@ -250,6 +255,7 @@ public sealed class NativeAotAndCapsuleHydrationOptimizationTests
         }
         finally
         {
+            stickyContext.MarkShuttingDown();
             await controller.ShutdownQueueAsync();
             try
             {
@@ -299,6 +305,40 @@ public sealed class NativeAotAndCapsuleHydrationOptimizationTests
         string mibcPath = TestPaths.FromRepository("src/DeskBox/Profiles/DeskBox.Startup.mibc");
         Assert.True(File.Exists(mibcPath));
         Assert.True(new FileInfo(mibcPath).Length > 1024);
+    }
+
+    private sealed class StickyDispatcherQueueSynchronizationContext(DispatcherQueue queue) : SynchronizationContext
+    {
+        private volatile bool _isShuttingDown;
+
+        public void MarkShuttingDown() => _isShuttingDown = true;
+
+        public override void Post(SendOrPostCallback d, object? state)
+        {
+            if (!queue.TryEnqueue(() =>
+                {
+                    SynchronizationContext? previous = Current;
+                    SetSynchronizationContext(this);
+                    try
+                    {
+                        d(state);
+                    }
+                    finally
+                    {
+                        SetSynchronizationContext(previous);
+                    }
+                }))
+            {
+                if (_isShuttingDown)
+                {
+                    return;
+                }
+
+                throw new InvalidOperationException("Failed to enqueue continuation on DispatcherQueue.");
+            }
+        }
+
+        public override SynchronizationContext CreateCopy() => this;
     }
 
     private static string ReadUtf8ZipEntry(ZipArchive archive, string entryName)

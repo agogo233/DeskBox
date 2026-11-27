@@ -18,7 +18,11 @@ internal enum DirectInstallScope
 internal static class Program
 {
     private const int InstallRegistrationMismatchExitCode = 20;
+    internal const int PolicyBlockedExitCode = 21;
+    private const int InstallerTimedOutExitCode = 1460;
     private const string UpdateInstallResultArgument = "--update-install-result";
+    internal const string BlockedByPolicyOutcome = "blocked-by-policy";
+    private const string AwaitParentExitArgument = "--await-parent-exit";
 
     // Canonical names from the [Languages] sections of installer/DeskBox.iss
     // and DeskBox.arm64.iss (both list English first). The app maps its
@@ -66,7 +70,7 @@ internal static class Program
                 }
 
                 WaitForParentExit(options.ParentProcessId);
-                return RestartApp(options.AppPath) ? 0 : 3;
+                return RestartApp(options.AppPath, parentProcessId: options.ParentProcessId) ? 0 : 3;
             }
 
             // Wait for the parent to exit BEFORE touching the installer or
@@ -83,16 +87,24 @@ internal static class Program
                 return 2;
             }
 
-            int exitCode = RunInstaller(options, out bool elevationRequired, out bool installerLogWritten);
+            int exitCode = RunInstaller(
+                options,
+                out bool elevationRequired,
+                out bool installerLogWritten,
+                out bool validateAdminCodeSignatures);
             if (exitCode == 0 && !string.IsNullOrWhiteSpace(options.AppPath) && File.Exists(options.AppPath))
             {
-                _ = RestartApp(options.AppPath);
+                _ = RestartApp(options.AppPath, parentProcessId: options.ParentProcessId);
             }
             else if (exitCode != 0)
             {
                 RestartAfterIncompleteUpdate(
                     options,
-                    GetIncompleteUpdateOutcome(exitCode, elevationRequired, installerLogWritten));
+                    GetIncompleteUpdateOutcome(
+                        exitCode,
+                        elevationRequired,
+                        installerLogWritten,
+                        validateAdminCodeSignatures));
             }
 
             return exitCode;
@@ -134,10 +146,12 @@ internal static class Program
     private static int RunInstaller(
         UpdateOptions options,
         out bool elevationRequired,
-        out bool installerLogWritten)
+        out bool installerLogWritten,
+        out bool validateAdminCodeSignatures)
     {
         elevationRequired = false;
         installerLogWritten = false;
+        validateAdminCodeSignatures = false;
         if (!TryGetInstallDirectory(options, out string installDirectory))
         {
             Log("Current installation directory is missing or invalid; refusing to run a silent update without /DIR.");
@@ -153,6 +167,7 @@ internal static class Program
         elevationRequired =
             installScope == DirectInstallScope.AllUsers &&
             !DeskBox.UpdaterPlatform.ShellUnelevatedLaunch.IsCurrentProcessElevated();
+        validateAdminCodeSignatures = elevationRequired && IsAdminCodeSignatureValidationEnabled();
         string installerLanguage = ResolveInstallerLanguage(options.InstallerLanguage);
         if (!string.IsNullOrWhiteSpace(options.InstallerLanguage) && installerLanguage.Length == 0)
         {
@@ -209,6 +224,18 @@ internal static class Program
             Log("Installer launch was cancelled at the elevation prompt.");
             return 2;
         }
+        catch (System.ComponentModel.Win32Exception ex) when (IsPolicyOrSignatureBlockWin32Error(ex.NativeErrorCode))
+        {
+            Log(
+                $"Installer launch was blocked by Windows code-integrity or signature policy " +
+                $"(Win32 error {ex.NativeErrorCode}: {ex.Message}).");
+            return PolicyBlockedExitCode;
+        }
+        catch (System.ComponentModel.Win32Exception ex)
+        {
+            Log($"Installer launch failed with Win32 error {ex.NativeErrorCode}: {ex.Message}");
+            return 3;
+        }
 
         using (process)
         {
@@ -234,7 +261,7 @@ internal static class Program
                 }
 
                 Log($"Installer timed out after {InstallerTimeoutMilliseconds / 60_000} minutes.");
-                return 5;
+                return InstallerTimedOutExitCode;
             }
 
             installerLogWritten =
@@ -242,7 +269,10 @@ internal static class Program
                 File.Exists(installerLogPath) &&
                 (previousLogWriteUtc is null ||
                  File.GetLastWriteTimeUtc(installerLogPath) > previousLogWriteUtc.Value);
-            Log($"Installer exited with code {process.ExitCode} (elevationRequired={elevationRequired}, logWritten={installerLogWritten}).");
+            Log(
+                $"Installer exited with code {process.ExitCode} " +
+                $"(elevationRequired={elevationRequired}, logWritten={installerLogWritten}, " +
+                $"validateAdminCodeSignatures={validateAdminCodeSignatures}).");
             if (process.ExitCode != 0)
             {
                 return process.ExitCode;
@@ -467,21 +497,75 @@ internal static class Program
         _ = RestartApp(options.AppPath, outcome);
     }
 
+    private static bool IsAdminCodeSignatureValidationEnabled()
+    {
+        try
+        {
+            using RegistryKey? key = Registry.LocalMachine.OpenSubKey(
+                @"Software\Microsoft\Windows\CurrentVersion\Policies\System",
+                writable: false);
+            return key?.GetValue("ValidateAdminCodeSignatures") switch
+            {
+                int intValue => intValue != 0,
+                string stringValue when int.TryParse(
+                    stringValue,
+                    NumberStyles.Integer,
+                    CultureInfo.InvariantCulture,
+                    out int parsed) => parsed != 0,
+                _ => false
+            };
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    internal static bool IsPolicyOrSignatureBlockWin32Error(int nativeErrorCode)
+    {
+        // Normalize HRESULT_FROM_WIN32(x) (0x8007xxxx) if a caller passes HResult.
+        int code = (nativeErrorCode & unchecked((int)0xFFFF0000)) == unchecked((int)0x80070000)
+            ? nativeErrorCode & 0xFFFF
+            : nativeErrorCode;
+
+        return code switch
+        {
+            577 => true, // ERROR_INVALID_IMAGE_HASH
+            786 => true, // ERROR_ACCESS_DISABLED_NO_SAFER_UI_BY_POLICY
+            1260 => true, // ERROR_ACCESS_DISABLED_BY_POLICY (AppLocker / SRP)
+            4551 => true, // ERROR_SYSTEM_INTEGRITY_POLICY_VIOLATION (Smart App Control / WDAC)
+            >= 4556 and <= 4559 => true, // ERROR_SYSTEM_INTEGRITY_REPUTATION_* (SAC reputation / offline)
+            >= 4580 and <= 4582 => true, // ERROR_SYSTEM_INTEGRITY_REPUTATION_UNFRIENDLY_FILE / UNATTAINABLE / EXPLICIT_DENY
+            8235 => true, // ERROR_DS_REFERRAL (UAC ValidateAdminCodeSignatures unsigned rejection)
+            _ => false
+        };
+    }
+
     internal static string GetIncompleteUpdateOutcome(
         int exitCode,
         bool elevationRequired = false,
-        bool installerLogWritten = true)
+        bool installerLogWritten = true,
+        bool validateAdminCodeSignatures = false)
     {
         if (exitCode is 2 or 5)
         {
             return "cancelled";
         }
 
+        if (exitCode == PolicyBlockedExitCode ||
+            (exitCode > InstallRegistrationMismatchExitCode && IsPolicyOrSignatureBlockWin32Error(exitCode)))
+        {
+            return BlockedByPolicyOutcome;
+        }
+
         // Inno Setup's asInvoker bootstrapper (SetupLdr) elevates the inner
         // Setup.tmp via ShellExecuteEx("runas") when /ALLUSERS is requested
         // from an unelevated updater. Declining UAC makes SetupLdr exit with
-        // code 1 before the elevated process ever opens its /LOG file.
-        if (exitCode == 1 && elevationRequired && !installerLogWritten)
+        // code 1 before the elevated process ever opens its /LOG file —
+        // unless ValidateAdminCodeSignatures=1 is enforcing signed-only
+        // elevation (Win32 error 8235), which is a policy failure rather than
+        // user cancellation.
+        if (exitCode == 1 && elevationRequired && !installerLogWritten && !validateAdminCodeSignatures)
         {
             return "cancelled";
         }
@@ -491,8 +575,32 @@ internal static class Program
             : "failed";
     }
 
-    private static bool RestartApp(string appPath, string? updateInstallOutcome = null)
+    private static bool IsProcessStillRunning(int processId)
     {
+        if (processId <= 0)
+        {
+            return false;
+        }
+
+        try
+        {
+            using var process = Process.GetProcessById(processId);
+            return !process.HasExited;
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
+        catch
+        {
+            return true;
+        }
+    }
+
+    private static bool RestartApp(string appPath, string? updateInstallOutcome = null, int parentProcessId = 0)
+    {
+        int liveParentPid = IsProcessStillRunning(parentProcessId) ? parentProcessId : 0;
+
         // An elevated updater (it inherits the app's token, and app-update
         // flows on fully elevated desktops run elevated) must not hand that
         // elevation to the restarted app: a post-update DeskBox above the
@@ -508,7 +616,7 @@ internal static class Program
             {
                 if (DeskBox.UpdaterPlatform.ShellUnelevatedLaunch.TryStartAtShellIntegrity(
                         appPath,
-                        BuildRestartArguments(updateInstallOutcome),
+                        BuildRestartArguments(updateInstallOutcome, liveParentPid),
                         Log))
                 {
                     Log($"Restarting app at shell integrity: {appPath} (attempt {attempt})");
@@ -534,7 +642,7 @@ internal static class Program
         // keeps that outcome searchable in the log.
         for (int attempt = 1; attempt <= 3; attempt++)
         {
-            if (TryStartApp(appPath, Path.GetDirectoryName(appPath), updateInstallOutcome))
+            if (TryStartApp(appPath, Path.GetDirectoryName(appPath), updateInstallOutcome, liveParentPid))
             {
                 Log($"Restarting app: {appPath} (attempt {attempt})");
                 return true;
@@ -546,20 +654,30 @@ internal static class Program
             }
         }
 
-        return TryRestartViaStartMenuShortcut(appPath, updateInstallOutcome);
+        return TryRestartViaStartMenuShortcut(appPath, updateInstallOutcome, liveParentPid);
     }
 
-    private static string? BuildRestartArguments(string? updateInstallOutcome)
+    private static string? BuildRestartArguments(string? updateInstallOutcome, int liveParentPid = 0)
     {
-        return string.IsNullOrWhiteSpace(updateInstallOutcome)
-            ? null
-            : $"{UpdateInstallResultArgument} {updateInstallOutcome.Trim()}";
+        List<string> parts = [];
+        if (liveParentPid > 0)
+        {
+            parts.Add($"{AwaitParentExitArgument} {liveParentPid.ToString(CultureInfo.InvariantCulture)}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(updateInstallOutcome))
+        {
+            parts.Add($"{UpdateInstallResultArgument} {updateInstallOutcome.Trim()}");
+        }
+
+        return parts.Count == 0 ? null : string.Join(" ", parts);
     }
 
     private static bool TryStartApp(
         string targetPath,
         string? workingDirectory,
-        string? updateInstallOutcome)
+        string? updateInstallOutcome,
+        int liveParentPid = 0)
     {
         try
         {
@@ -569,6 +687,12 @@ internal static class Program
                 UseShellExecute = true,
                 WorkingDirectory = workingDirectory ?? Environment.CurrentDirectory
             };
+            if (liveParentPid > 0)
+            {
+                startInfo.ArgumentList.Add(AwaitParentExitArgument);
+                startInfo.ArgumentList.Add(liveParentPid.ToString(CultureInfo.InvariantCulture));
+            }
+
             if (!string.IsNullOrWhiteSpace(updateInstallOutcome))
             {
                 startInfo.ArgumentList.Add(UpdateInstallResultArgument);
@@ -585,7 +709,7 @@ internal static class Program
         }
     }
 
-    private static bool TryRestartViaStartMenuShortcut(string appPath, string? updateInstallOutcome)
+    private static bool TryRestartViaStartMenuShortcut(string appPath, string? updateInstallOutcome, int liveParentPid = 0)
     {
         // {autoprograms} resolves per install scope: the user's Programs
         // folder for current-user installs, the common one for all-users
@@ -593,6 +717,7 @@ internal static class Program
         // both locations; the one Setup wrote is the one that exists.
         string? userPrograms = Environment.GetFolderPath(Environment.SpecialFolder.StartMenu);
         string? commonPrograms = Environment.GetFolderPath(Environment.SpecialFolder.CommonStartMenu);
+        string? appDirectory = Path.GetDirectoryName(appPath);
         foreach (string menuRoot in new[] { userPrograms, commonPrograms })
         {
             if (string.IsNullOrWhiteSpace(menuRoot))
@@ -606,7 +731,7 @@ internal static class Program
                 continue;
             }
 
-            if (TryStartApp(shortcutPath, workingDirectory: null, updateInstallOutcome))
+            if (TryStartApp(shortcutPath, workingDirectory: appDirectory, updateInstallOutcome, liveParentPid))
             {
                 Log($"Restarted app via Start Menu shortcut: {shortcutPath}");
                 return true;

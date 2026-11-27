@@ -34,10 +34,8 @@ public sealed partial class SettingsWindow : Window
         DeskBox.Controls.WidgetTitleIcon TitleIcon,
         TextBlock TitleText,
         TextBlock DescriptionText,
-        Button? ResetButton,
         ToggleSwitch? Toggle,
         bool HasSettingsPage,
-        bool HasReset,
         bool HasToggle);
 
     internal const int DefaultWindowWidth = 1000;
@@ -278,8 +276,6 @@ public sealed partial class SettingsWindow : Window
         SettingsRoot.KeyDown += SettingsRoot_KeyDown;
         LogConstructionCheckpoint("bindings-and-responsive-tree");
 
-        WindowsCompatibilityService.ApplySafeBackdrop(this);
-
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(AppTitleBar);
 
@@ -299,7 +295,14 @@ public sealed partial class SettingsWindow : Window
         UpdateTitleBarInsets();
         LogConstructionCheckpoint("native-window");
 
+        // Subscribed only after _appWindow exists: ActualThemeChanged can
+        // also fire on an OS theme flip while RequestedTheme is Default,
+        // and the handler touches _appWindow.TitleBar. Subscribed before
+        // TrackWindow so the initial RequestedTheme application updates the
+        // solid fallback backdrop on Windows 10 immediately.
+        SettingsRoot.ActualThemeChanged += SettingsRoot_ActualThemeChanged;
         _themeService.TrackWindow(this);
+        WindowsCompatibilityService.ApplySettingsBackdrop(this);
         _themeService.AppearanceChanged += OnAppearanceChanged;
         _localizationService.LanguageChanged += OnLanguageChanged;
         ViewModel.PropertyChanged += ViewModel_PropertyChanged;
@@ -335,10 +338,7 @@ public sealed partial class SettingsWindow : Window
         // process has a whole topology-archive system for its widgets;
         // this window only needs the cheap clamp.
         App.Current.DisplayTopologyChanged += SettingsWindow_DisplayTopologyChanged;
-        // Subscribed only after _appWindow exists: ActualThemeChanged can
-        // also fire on an OS theme flip while RequestedTheme is Default,
-        // and the handler touches _appWindow.TitleBar.
-        SettingsRoot.ActualThemeChanged += SettingsRoot_ActualThemeChanged;
+        WindowsCompatibilityService.HighContrastChanged += SettingsWindow_HighContrastChanged;
         Closed += SettingsWindow_Closed;
         constructionStopwatch.Stop();
         LogConstructionCheckpoint("complete");
@@ -358,6 +358,11 @@ public sealed partial class SettingsWindow : Window
         // break in the refresh chain) can never leave the window visibly
         // frozen on a stale theme.
         _themeService.ApplyToWindow(this);
+        if (SystemBackdrop is null)
+        {
+            WindowsCompatibilityService.ApplySettingsBackdrop(this);
+        }
+        ApplyTitleBarButtonColors();
         bool wasShownOnce = _hasShownOnce;
         _appWindow.Show();
         EnsureFirstShowPlacementApplied();
@@ -627,7 +632,26 @@ public sealed partial class SettingsWindow : Window
 
     private void SettingsRoot_ActualThemeChanged(FrameworkElement sender, object args)
     {
+        if (SystemBackdrop is null)
+        {
+            WindowsCompatibilityService.ApplySettingsBackdrop(this);
+        }
+
         ApplyTitleBarButtonColors();
+    }
+
+    private void SettingsWindow_HighContrastChanged()
+    {
+        DispatcherQueue?.TryEnqueue(() =>
+        {
+            if (_isClosed)
+            {
+                return;
+            }
+
+            WindowsCompatibilityService.ApplySettingsBackdrop(this);
+            ApplyTitleBarButtonColors();
+        });
     }
 
     private void SettingsWindow_Closed(object sender, WindowEventArgs args)
@@ -660,6 +684,7 @@ public sealed partial class SettingsWindow : Window
         SettingsRoot.Loaded -= SettingsRoot_Loaded;
         SettingsRoot.KeyDown -= SettingsRoot_KeyDown;
         SettingsRoot.ActualThemeChanged -= SettingsRoot_ActualThemeChanged;
+        WindowsCompatibilityService.HighContrastChanged -= SettingsWindow_HighContrastChanged;
         SettingsRoot.RemoveHandler(UIElement.PointerPressedEvent, _settingsRootPointerPressedHandler);
         SettingsRoot.RemoveHandler(UIElement.PointerReleasedEvent, _settingsRootPointerReleasedHandler);
         if (_cloudBackupCollectionChanged is not null)
@@ -735,7 +760,6 @@ public sealed partial class SettingsWindow : Window
             Microsoft.UI.Xaml.Markup.XamlBindingHelper.GetDataTemplateComponent(section)?.Recycle();
             section.DataContext = null;
         }
-        Win32Helper.ClearWindowTopMost(_hWnd);
         RemoveMinimumSizeHook();
         _themeService.AppearanceChanged -= OnAppearanceChanged;
         _localizationService.LanguageChanged -= OnLanguageChanged;
@@ -800,25 +824,10 @@ public sealed partial class SettingsWindow : Window
     {
         if (SettingsRoot is not null)
         {
-            return SettingsRoot.ActualTheme switch
-            {
-                ElementTheme.Dark => true,
-                ElementTheme.Light => false,
-                _ => _themeService.CurrentTheme switch
-                {
-                    ElementTheme.Dark => true,
-                    ElementTheme.Light => false,
-                    _ => Win32Helper.IsSystemDarkMode()
-                }
-            };
+            return Helpers.NeutralInteractionBrush.IsDarkTheme(SettingsRoot);
         }
 
-        return _themeService.CurrentTheme switch
-        {
-            ElementTheme.Dark => true,
-            ElementTheme.Light => false,
-            _ => Win32Helper.IsSystemDarkMode()
-        };
+        return _themeService.EffectiveTheme == ElementTheme.Dark;
     }
 
     private void ApplyTitleBarButtonColors()
@@ -1234,15 +1243,14 @@ public sealed partial class SettingsWindow : Window
     {
         if (message == WmGetMinMaxInfo && lParam != IntPtr.Zero)
         {
-            IntPtr result = Win32Helper.DefSubclassProc(hWnd, message, wParam, lParam);
-            double scale = GetCurrentDpiScale();
-            unsafe
-            {
-                ref MinMaxInfo minMaxInfo = ref *(MinMaxInfo*)lParam;
-                minMaxInfo.MinTrackSize.X = Math.Max(minMaxInfo.MinTrackSize.X, ToPhysicalPixels(MinWindowWidth, scale));
-                minMaxInfo.MinTrackSize.Y = Math.Max(minMaxInfo.MinTrackSize.Y, ToPhysicalPixels(MinWindowHeight, scale));
-            }
-            return result;
+            return WindowShellState.ApplyMinTrackSizeWithWorkAreaClamp(
+                hWnd,
+                message,
+                wParam,
+                lParam,
+                GetCurrentDpiScale(),
+                MinWindowWidth,
+                MinWindowHeight);
         }
 
         if (message == WmNcDestroy)
@@ -1267,23 +1275,6 @@ public sealed partial class SettingsWindow : Window
         }
 
         return Win32Helper.DefSubclassProc(hWnd, message, wParam, lParam);
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct NativePoint
-    {
-        public int X;
-        public int Y;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct MinMaxInfo
-    {
-        public NativePoint Reserved;
-        public NativePoint MaxSize;
-        public NativePoint MaxPosition;
-        public NativePoint MinTrackSize;
-        public NativePoint MaxTrackSize;
     }
 
     private sealed record SettingsSectionRoute(

@@ -275,7 +275,8 @@ public sealed class SettingsIpcMethodRouter
 
             case SettingsIpcMethods.ClipboardHotkeyState:
                 if (_hotkey is null) return unavailable(method);
-                bool clipboardReg = await _hotkey.IsClipboardHotkeyRegisteredAsync().ConfigureAwait(false);
+                bool clipboardReg = await DeskBox.Platform.UiDispatch.RunAsync(
+                    () => _hotkey.IsClipboardHotkeyRegisteredAsync()).ConfigureAwait(false);
                 return (true, SettingsIpcPayload.EncodeBoolean(clipboardReg), null);
 
             case SettingsIpcMethods.ClipboardHotkeySetEnabled:
@@ -486,6 +487,11 @@ public sealed class SettingsIpcMethodRouter
             case SettingsIpcMethods.AppearanceClearPerWidgetBackgrounds:
                 if (_widget is null) return unavailable(method);
                 await _widget.ClearPerWidgetBackgrounds();
+                return (true, SerializeLayout(_settings), null);
+
+            case SettingsIpcMethods.AppearanceResetWidgetChromeOverrides:
+                if (_widget is null) return unavailable(method);
+                await _widget.ResetWidgetChromeOverrides(SettingsIpcPayload.DecodeBoolean(payload));
                 return (true, SerializeLayout(_settings), null);
 
             case SettingsIpcMethods.SettingsSnapshot:
@@ -823,12 +829,12 @@ public sealed class SettingsIpcMethodRouter
 
             case SettingsIpcMethods.AppShutdownForRestart:
                 if (_appActions is null) return unavailable(method);
-                await _appActions.ShutdownForRestartAsync();
+                _ = _appActions.ShutdownForRestartAsync();
                 return (true, null, null);
 
             case SettingsIpcMethods.AppShutdownForUpdate:
                 if (_appActions is null) return unavailable(method);
-                await _appActions.ShutdownForUpdateAsync();
+                _ = _appActions.ShutdownForUpdateAsync();
                 return (true, null, null);
 
             case SettingsIpcMethods.AppScheduleRestart:
@@ -882,9 +888,13 @@ public sealed class SettingsIpcMethodRouter
                 // its own fetch when no manifest rides along. The window is
                 // XAML-heavy: open on the UI thread and answer immediately
                 // (org-window pattern).
+                Func<CancellationToken, Task<AppUpdateManifest?>>? loader =
+                    manifest is null && notes.AllowLazyFetch
+                        ? ct => _appActions.FetchReleaseNotesManifestAsync(notes.Version, ct)
+                        : null;
                 _ = DeskBox.Platform.UiDispatch.RunAsync(() =>
                 {
-                    _appActions.OpenReleaseNotesWindow(manifest, notes.Version, null, (nint)notes.OwnerHwnd);
+                    _appActions.OpenReleaseNotesWindow(manifest, notes.Version, loader, (nint)notes.OwnerHwnd);
                     return Task.CompletedTask;
                 });
                 return (true, null, null);
@@ -1026,11 +1036,11 @@ public sealed class SettingsIpcMethodRouter
 
             case SettingsIpcMethods.BackupExport:
                 if (_backupCommands is null) return unavailable(method);
-                string exportPath = payload ?? string.Empty;
+                string exportPath = string.Empty;
                 bool exportIncludeClipboard = false;
-                if (exportPath.TrimStart().StartsWith('{'))
+                if (!string.IsNullOrWhiteSpace(payload))
                 {
-                    using JsonDocument exportArgs = JsonDocument.Parse(exportPath);
+                    using JsonDocument exportArgs = JsonDocument.Parse(payload);
                     exportPath = exportArgs.RootElement.TryGetProperty("path", out JsonElement pathEl)
                         ? pathEl.GetString() ?? string.Empty
                         : string.Empty;
@@ -1205,7 +1215,7 @@ public sealed class SettingsIpcMethodRouter
 
             case SettingsIpcMethods.CloudShutdownForRestart:
                 if (_backupRestore is null) return unavailable(method);
-                await _backupRestore.ShutdownForRestartAsync();
+                _ = _backupRestore.ShutdownForRestartAsync();
                 return (true, null, null);
 
             case SettingsIpcMethods.CloudDeleteTemporaryDownload:
@@ -1252,10 +1262,16 @@ public sealed class SettingsIpcMethodRouter
                     return (false, null, "missing payload");
                 }
 
-                AppUpdateDownloadResult downloadResult = await _appUpdate.DownloadUpdateAsync(
-                    downloadManifest,
-                    progress: null,
-                    cancellationToken);
+                AppUpdateDownloadResult downloadResult = AppDistributionService.Current.IsPackaged
+                    ? await DeskBox.Platform.UiDispatch.RunAsync(() =>
+                        _appUpdate.DownloadUpdateAsync(
+                            downloadManifest,
+                            progress: null,
+                            cancellationToken))
+                    : await _appUpdate.DownloadUpdateAsync(
+                        downloadManifest,
+                        progress: null,
+                        cancellationToken);
                 return (true, SettingsIpcPayload.Encode(
                     downloadResult,
                     SettingsIpcJsonContext.Default.AppUpdateDownloadResult), null);
@@ -1513,10 +1529,10 @@ public sealed class SettingsIpcMethodRouter
         string? payload,
         CancellationToken cancellationToken)
     {
-        string rawPath = payload ?? string.Empty;
+        string rawPath = string.Empty;
         string operationId;
-        if (rawPath.StartsWith('{') &&
-            SettingsIpcPayload.Decode(rawPath, SettingsIpcJsonContext.Default.SettingsIpcMigrationPreviewRequest)
+        if (!string.IsNullOrWhiteSpace(payload) &&
+            SettingsIpcPayload.Decode(payload, SettingsIpcJsonContext.Default.SettingsIpcMigrationPreviewRequest)
                 is { } previewReq)
         {
             rawPath = previewReq.Path ?? string.Empty;

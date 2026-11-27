@@ -93,6 +93,12 @@ public sealed partial class CustomWidgetStudioWindow : Window
         _hostBridge = hostBridge ?? NullStudioHostBridge.Instance;
         InitializeComponent();
 
+        if (RootGrid.RequestedTheme == ElementTheme.Default)
+        {
+            RootGrid.RequestedTheme = Win32Helper.IsSystemDarkMode()
+                ? ElementTheme.Dark
+                : ElementTheme.Light;
+        }
         _usesSolidWindowBackdrop = WindowsCompatibilityService.ApplySafeBackdrop(this) == "Solid";
 
         ExtendsContentIntoTitleBar = true;
@@ -681,24 +687,6 @@ public sealed partial class CustomWidgetStudioWindow : Window
             locales,
             out CustomWidgetLocaleCatalog? effectiveLocales);
         string? effectiveLogicJs = logicJs;
-        if (string.IsNullOrWhiteSpace(effectiveLogicJs))
-        {
-            try
-            {
-                using JsonDocument inlineDoc = JsonDocument.Parse(manifestJson);
-                if (inlineDoc.RootElement.ValueKind == JsonValueKind.Object &&
-                    inlineDoc.RootElement.TryGetProperty("script", out JsonElement scriptEl) &&
-                    scriptEl.ValueKind == JsonValueKind.String &&
-                    !string.IsNullOrWhiteSpace(scriptEl.GetString()) &&
-                    !string.Equals(scriptEl.GetString(), CustomWidgetDataStore.LogicJsFileName, StringComparison.OrdinalIgnoreCase))
-                {
-                    effectiveLogicJs = scriptEl.GetString();
-                }
-            }
-            catch (JsonException)
-            {
-            }
-        }
         if (!string.IsNullOrWhiteSpace(effectiveLogicJs))
         {
             manifestJson = CustomWidgetTemplates.SyncManifestScriptPropertyJson(manifestJson, effectiveLogicJs);
@@ -1204,7 +1192,7 @@ public sealed partial class CustomWidgetStudioWindow : Window
         {
             try
             {
-                if (JsonNode.Parse(current) is not JsonObject rootObj ||
+                if (StudioWorkspaceEngine.ParsePermissiveJsonNode(current) is not JsonObject rootObj ||
                     !StudioManifestInspector.TryResolveJsonNodeByPath(rootObj, nodePath, out JsonObject? targetObj) ||
                     targetObj is null)
                 {
@@ -1947,6 +1935,11 @@ public sealed partial class CustomWidgetStudioWindow : Window
 
     private void AppTitleBar_ActualThemeChanged(FrameworkElement sender, object args)
     {
+        if (_usesSolidWindowBackdrop)
+        {
+            _ = WindowsCompatibilityService.ApplySafeBackdrop(this);
+        }
+
         ApplyTitleBarColors();
         _previewTheme.ApplyStageBackdropVisuals();
 

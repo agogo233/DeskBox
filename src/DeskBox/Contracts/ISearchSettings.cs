@@ -34,7 +34,12 @@ public sealed record SearchPreferences(
     bool QuickCreateNoteEnabled = true,
     string QuickCreateDisplayMode = "always",
     string QuickCreateDefaultTarget = "todo",
-    bool QuickCreateShowHud = true);
+    bool QuickCreateShowHud = true,
+    string CategoryLayout = SearchSettingsSlice.DefaultCategoryLayout,
+    string DesktopHandoffMode = SearchSettingsSlice.DefaultDesktopHandoffMode,
+    bool DesktopShowHistory = true,
+    bool DesktopShowRecentOpened = true,
+    bool DesktopPrivacyMask = false);
 
 public sealed record SearchPreferenceChange(
     bool? EverythingEnabled = null,
@@ -56,7 +61,12 @@ public sealed record SearchPreferenceChange(
     bool? QuickCreateNoteEnabled = null,
     string? QuickCreateDisplayMode = null,
     string? QuickCreateDefaultTarget = null,
-    bool? QuickCreateShowHud = null);
+    bool? QuickCreateShowHud = null,
+    string? CategoryLayout = null,
+    string? DesktopHandoffMode = null,
+    bool? DesktopShowHistory = null,
+    bool? DesktopShowRecentOpened = null,
+    bool? DesktopPrivacyMask = null);
 
 public sealed record SearchHotkeyState(
     bool Available,
@@ -75,7 +85,9 @@ public sealed record SearchSettingsSnapshot(
     SearchPreferences Preferences,
     SearchHotkeyState Hotkey,
     bool TodoFeatureEnabled = true,
-    bool QuickCaptureFeatureEnabled = true);
+    bool QuickCaptureFeatureEnabled = true,
+    bool ClipboardFeatureEnabled = true,
+    bool DesktopEntryEnabled = false);
 
 public readonly record struct SearchHotkeyUpdateResult(bool Succeeded, string? Error = null);
 

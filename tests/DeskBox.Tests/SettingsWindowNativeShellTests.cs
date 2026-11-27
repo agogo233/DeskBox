@@ -154,6 +154,18 @@ public sealed class SettingsWindowNativeShellTests : IDisposable
         string dismissWindow = xaml[xaml.LastIndexOf("<Button", dismissPos, StringComparison.Ordinal)..xaml.IndexOf("/>", dismissPos, StringComparison.Ordinal)];
         Assert.Contains("svc:Localized.AutomationNameKey=\"Common.Close\"", dismissWindow, StringComparison.Ordinal);
         Assert.Contains("svc:Localized.ToolTipKey=\"Common.Close\"", dismissWindow, StringComparison.Ordinal);
+
+        // Seamless single-canvas shell: right content pane shares the window backdrop
+        // without NavigationView's translucent rounded ContentGrid box or borders.
+        Assert.Contains("<SolidColorBrush x:Key=\"NavigationViewContentBackground\" Color=\"Transparent\" />", xaml, StringComparison.Ordinal);
+        Assert.Contains("<SolidColorBrush x:Key=\"NavigationViewContentGridBorderBrush\" Color=\"Transparent\" />", xaml, StringComparison.Ordinal);
+        Assert.Contains("<Thickness x:Key=\"NavigationViewContentGridBorderThickness\">0</Thickness>", xaml, StringComparison.Ordinal);
+        Assert.Contains("<Thickness x:Key=\"NavigationViewMinimalContentGridBorderThickness\">0</Thickness>", xaml, StringComparison.Ordinal);
+        Assert.Contains("<CornerRadius x:Key=\"NavigationViewContentGridCornerRadius\">0</CornerRadius>", xaml, StringComparison.Ordinal);
+
+        string settingsWindowCode = File.ReadAllText(TestPaths.FromRepository("src/DeskBox/Views/SettingsWindow.xaml.cs"));
+        Assert.Contains("WindowsCompatibilityService.ApplySettingsBackdrop(this);", settingsWindowCode, StringComparison.Ordinal);
+        Assert.DoesNotContain("WindowsCompatibilityService.ApplySafeBackdrop(this);", settingsWindowCode, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -522,6 +534,62 @@ public sealed class SettingsWindowNativeShellTests : IDisposable
         string navCode = File.ReadAllText(
             TestPaths.FromRepository("src/DeskBox/Views/SettingsWindow.Navigation.cs"));
         Assert.DoesNotContain("sectionHeaderKeys", navCode, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SettingsWindowConstructor_TracksThemeAndSubscribesThemeChangesBeforeApplyingBackdrop()
+    {
+        string code = File.ReadAllText(
+            TestPaths.FromRepository("src/DeskBox/Views/SettingsWindow.xaml.cs"));
+
+        int ctorStart = code.IndexOf("public SettingsWindow(", StringComparison.Ordinal);
+        int showStart = code.IndexOf("public void ShowWindow()", StringComparison.Ordinal);
+        int nextMethodStart = code.IndexOf("private void EnsureFirstShowPlacementApplied()", StringComparison.Ordinal);
+        Assert.True(ctorStart > 0 && showStart > ctorStart && nextMethodStart > showStart);
+
+        string ctorBody = code[ctorStart..showStart];
+        string showBody = code[showStart..nextMethodStart];
+
+        int appWindowPos = ctorBody.IndexOf("_appWindow = AppWindow.GetFromWindowId(", StringComparison.Ordinal);
+        int actualThemePos = ctorBody.IndexOf("SettingsRoot.ActualThemeChanged += SettingsRoot_ActualThemeChanged;", StringComparison.Ordinal);
+        int trackWindowPos = ctorBody.IndexOf("_themeService.TrackWindow(this);", StringComparison.Ordinal);
+        int applyBackdropPos = ctorBody.IndexOf("WindowsCompatibilityService.ApplySettingsBackdrop(this);", StringComparison.Ordinal);
+
+        Assert.True(appWindowPos > 0);
+        Assert.True(actualThemePos > appWindowPos, "ActualThemeChanged must be subscribed after _appWindow exists.");
+        Assert.True(trackWindowPos > actualThemePos, "ActualThemeChanged must be subscribed before TrackWindow so initial RequestedTheme updates Win10 solid fallback.");
+        Assert.True(applyBackdropPos > trackWindowPos, "ApplySettingsBackdrop must run after TrackWindow applies DeskBox's theme.");
+        Assert.Single(Regex.Matches(ctorBody, Regex.Escape("SettingsRoot.ActualThemeChanged +=")));
+
+        int showApplyThemePos = showBody.IndexOf("_themeService.ApplyToWindow(this);", StringComparison.Ordinal);
+        int showNullBackdropPos = showBody.IndexOf("if (SystemBackdrop is null)", StringComparison.Ordinal);
+        int showApplyBackdropPos = showBody.IndexOf("WindowsCompatibilityService.ApplySettingsBackdrop(this);", StringComparison.Ordinal);
+        int showTitleBarColorsPos = showBody.IndexOf("ApplyTitleBarButtonColors();", StringComparison.Ordinal);
+
+        Assert.True(showApplyThemePos > 0);
+        Assert.True(showNullBackdropPos > showApplyThemePos);
+        Assert.True(showApplyBackdropPos > showNullBackdropPos);
+        Assert.True(showTitleBarColorsPos > showApplyBackdropPos);
+    }
+
+    [Fact]
+    public void Windows10SettingsBackdrop_UsesSolidFallbackAndMatchesEffectiveThemePalette()
+    {
+        Assert.Equal(
+            "Solid",
+            WindowsCompatibilityService.ResolveSettingsBackdropKind(
+                supportsMica: false,
+                isHighContrast: false));
+        Assert.Equal(
+            Windows.UI.Color.FromArgb(255, 32, 32, 32),
+            WindowsCompatibilityService.ResolveSolidSettingsFallbackColor(
+                isDark: true,
+                isHighContrast: false));
+        Assert.Equal(
+            Windows.UI.Color.FromArgb(255, 243, 243, 243),
+            WindowsCompatibilityService.ResolveSolidSettingsFallbackColor(
+                isDark: false,
+                isHighContrast: false));
     }
 
     public void Dispose()

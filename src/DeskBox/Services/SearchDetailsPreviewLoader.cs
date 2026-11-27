@@ -32,7 +32,7 @@ internal static class SearchDetailsPreviewLoader
     private const int MaxTextReadBytes = 4096;
     private const int MaxSnippetLines = 10;
     private const int MaxSnippetChars = 420;
-    private const int PreviewDecodeWidth = 360;
+    private const int PreviewDecodeWidth = 480;
 
     private static readonly System.Collections.Frozen.FrozenSet<string> s_rasterImageExtensions =
         System.Collections.Frozen.FrozenSet.ToFrozenSet(
@@ -80,6 +80,51 @@ internal static class SearchDetailsPreviewLoader
         }
 
         return CanAttemptPathPreview(item.DetailPath);
+    }
+
+    /// <summary>
+    /// Returns true when the Details sidebar expects to render a visual preview image
+    /// (raster image, clipboard/note preview image, video poster frame, PDF page-1 cover,
+    /// or shell-thumbnail document) so the redundant 56x56 hero icon can stay hidden
+    /// while loading and only reappear if image decoding fails.
+    /// </summary>
+    public static bool ExpectsVisualImagePreview(SearchResultItem? item)
+    {
+        if (item is null)
+        {
+            return false;
+        }
+
+        if (!string.IsNullOrWhiteSpace(item.PreviewImagePath))
+        {
+            return true;
+        }
+
+        if (item.Kind != SearchResultKind.File || string.IsNullOrWhiteSpace(item.DetailPath))
+        {
+            return false;
+        }
+
+        return ExpectsVisualImagePreviewPath(item.DetailPath);
+    }
+
+    public static bool ExpectsVisualImagePreviewPath(string? filePath)
+    {
+        if (string.IsNullOrWhiteSpace(filePath))
+        {
+            return false;
+        }
+
+        string ext = Path.GetExtension(filePath);
+        if (string.IsNullOrWhiteSpace(ext))
+        {
+            return false;
+        }
+
+        return s_rasterImageExtensions.Contains(ext) ||
+               IconHelper.IsVideoFile(filePath) ||
+               IsPdfExtension(ext) ||
+               s_shellThumbnailDocumentExtensions.Contains(ext);
     }
 
     public static bool CanAttemptPathPreview(string? filePath)
@@ -521,7 +566,7 @@ internal static class SearchDetailsPreviewLoader
                 return await TryLoadIsolatedShellThumbnailBitmapAsync(filePath, cancellationToken);
             }
 
-            byte[]? bytes = await Task.Run(() =>
+            FileStream? fileStream = await Task.Run(() =>
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 var info = new FileInfo(filePath);
@@ -530,36 +575,44 @@ internal static class SearchDetailsPreviewLoader
                     return null;
                 }
 
-                using var fs = new FileStream(
+                return new FileStream(
                     filePath,
                     FileMode.Open,
                     FileAccess.Read,
                     FileShare.ReadWrite | FileShare.Delete,
                     bufferSize: 16384,
-                    FileOptions.SequentialScan);
-                byte[] data = new byte[fs.Length];
-                int read = 0;
-                while (read < data.Length)
-                {
-                    int n = fs.Read(data, read, data.Length - read);
-                    if (n <= 0)
-                    {
-                        break;
-                    }
-                    read += n;
-                }
-
-                return read == data.Length ? data : data[..read];
+                    FileOptions.Asynchronous | FileOptions.SequentialScan);
             }, cancellationToken).ConfigureAwait(true);
+
+            if (fileStream is not null)
+            {
+                await using (fileStream)
+                {
+                    if (cancellationToken.IsCancellationRequested)
+                    {
+                        return null;
+                    }
+
+                    try
+                    {
+                        using IRandomAccessStream winRtStream = fileStream.AsRandomAccessStream();
+                        var bitmap = new BitmapImage
+                        {
+                            DecodePixelWidth = PreviewDecodeWidth
+                        };
+                        await bitmap.SetSourceAsync(winRtStream);
+                        return bitmap;
+                    }
+                    catch
+                    {
+                        // Fall through to isolated shell thumbnail proxy for unsupported/corrupt frames.
+                    }
+                }
+            }
 
             if (cancellationToken.IsCancellationRequested)
             {
                 return null;
-            }
-
-            if (bytes is { Length: > 0 })
-            {
-                return await DecodeBytesToBitmapImageAsync(bytes);
             }
 
             return await TryLoadIsolatedShellThumbnailBitmapAsync(filePath, cancellationToken);

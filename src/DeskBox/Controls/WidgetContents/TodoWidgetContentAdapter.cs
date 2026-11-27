@@ -71,6 +71,12 @@ public sealed class TodoWidgetContentAdapter :
 
     public bool IsReadyForReuse => ViewModel.IsInitialized && !IsDisposed;
 
+    public bool HasActiveInlineEdit =>
+        MaterializedView is TodoWidgetContent { HasActiveInlineEdit: true };
+
+    internal bool HasActiveInlineOverlay =>
+        MaterializedView is TodoWidgetContent { HasActiveInlineOverlay: true };
+
     public event EventHandler<WidgetFeedbackRequestedEventArgs>? FeedbackRequested;
 
     private bool _pendingWideSelectionWasAutomatic;
@@ -131,8 +137,9 @@ public sealed class TodoWidgetContentAdapter :
     internal Task<bool> AddExternalItemAsync(
         string title,
         DateTimeOffset? dueDate,
-        TodoPriority priority) =>
-        ViewModel.AddExternalItemAsync(title, dueDate, priority);
+        TodoPriority priority,
+        string? explicitItemId = null) =>
+        ViewModel.AddExternalItemAsync(title, dueDate, priority, explicitItemId);
 
     internal Task<bool> ToggleExternalItemAsync(string itemId) =>
         ViewModel.ToggleExternalItemAsync(itemId);

@@ -110,6 +110,8 @@ public abstract partial class WidgetWindowBase
 
         try
         {
+            _isInteractionBackdropDowngraded = false;
+
             // The immersive-dark-mode attribute, shadowless frame and DWM
             // border depend only on the theme, not the material. Re-issuing
             // them on every material change churns DWM state natively, so they
@@ -309,6 +311,11 @@ public abstract partial class WidgetWindowBase
     /// </summary>
     public void SimplifyBackdropForInteraction()
     {
+        // Only Win32's legacy SWCA_ACCENT_POLICY (ACCENT_ENABLE_ACRYLICBLURBEHIND)
+        // suffers from the Win10 SetWindowPos blur-resample stall. Detaching DComp's
+        // DesktopAcrylicController mid-interaction strips the frosted/fallback layer
+        // at frame 0 (causing a visible semi-transparent pop before slide animations)
+        // and churns the controller's internal Compositor unnecessarily.
         if (_isInteractionBackdropDowngraded ||
             !LegacyAccentBackdropActive ||
             !WindowsCompatibilityService.UsesLegacyWindowAcrylic ||
@@ -319,7 +326,7 @@ public abstract partial class WidgetWindowBase
 
         if (!InteractionBackdropSimplificationPolicy.ShouldSimplify(
                 WidgetCompactAnimationCoordinator.RecentFrameOverrunMask,
-                SettingsService.Settings.PerformanceMode))
+                SettingsService.Settings.Performance.PerformanceMode))
         {
             return;
         }
@@ -467,19 +474,20 @@ public abstract partial class WidgetWindowBase
             _materialCornerHooked = false;
         }
 
-        if (_materialBackdropBridge is null)
+        ElementBackdropTargetBridge? bridge = _materialBackdropBridge;
+        if (bridge is null)
         {
             return;
         }
 
-        if (ReferenceEquals(WidgetShellControl.MaterialSurface.SystemBackdrop, _materialBackdropBridge))
-        {
-            WidgetShellControl.MaterialSurface.SystemBackdrop = null;
-        }
-
-        _materialBackdropBridge.Dispose();
         _materialBackdropBridge = null;
         BackdropTarget = null;
+
+        // SystemBackdropElement targets wrap thread-affine native links. Keep
+        // MaterialSurface.SystemBackdrop rooted until XAML disconnects the element
+        // during visual-tree teardown so OnTargetDisconnected closes the native link
+        // on the UI thread instead of leaving it to the GC finalizer thread.
+        bridge.Dispose();
     }
 
     private bool ApplyTransparentHostBackdrop()
@@ -847,6 +855,7 @@ public abstract partial class WidgetWindowBase
             return;
         }
 
+        _isInteractionBackdropDowngraded = false;
         _lastAppliedBackdropSignature = null;
         RoundedBackdropMaskService.TrimIdle();
         DetachAcrylicControllerTarget();
@@ -860,12 +869,13 @@ public abstract partial class WidgetWindowBase
             return;
         }
 
-        ClearSolidColorBackdrop();
-        DisposeMaterialBackdropBridge();
-        _lastAppliedBackdropSignature = null;
-        RoundedBackdropMaskService.TrimIdle();
+        _isInteractionBackdropDowngraded = false;
         DetachAcrylicControllerTarget();
         DetachMicaControllerTarget();
+        _materialBackdropBridge?.Suspend();
+        ClearSolidColorBackdrop();
+        _lastAppliedBackdropSignature = null;
+        RoundedBackdropMaskService.TrimIdle();
     }
 
     protected void DetachMicaControllerTarget()
@@ -1157,9 +1167,9 @@ public abstract partial class WidgetWindowBase
             return;
         }
 
-        // Skip backdrop refresh during drag/resize — the window is moving
-        // and the backdrop will be refreshed once when the operation ends.
-        if (IsDragging || IsResizing)
+        // Skip backdrop refresh during drag/resize or active interaction
+        // simplification — the backdrop restores once the operation ends.
+        if (IsDragging || IsResizing || _isInteractionBackdropDowngraded)
         {
             return;
         }

@@ -706,7 +706,7 @@ settings.WeatherShowHumidity = true;
 settings.WeatherShowWind = true;
 settings.WeatherShowPressure = false;
 settings.WeatherRefreshIntervalMinutes = 60;
-        settings.SearchHotkeyEnabled = false;
+        settings.SearchHotkeyEnabled = true;
         settings.SearchHotkeyModifiers = (int)HotkeyModifierKeys.Alt;
         settings.SearchHotkeyKey = 0x44;
         settings.Search.SearchHotkeyActivationKind = Models.HotkeyActivationKind.Chord;
@@ -737,6 +737,8 @@ settings.WeatherRefreshIntervalMinutes = 60;
         settings.Search.SearchQuickCreateDisplayMode = "always";
         settings.Search.SearchQuickCreateDefaultTarget = "todo";
         settings.Search.SearchQuickCreateShowHud = true;
+        settings.Search.SearchCategoryLayout = SearchSettingsSlice.DefaultCategoryLayout;
+        ApplyDefaultDesktopSearchPreferences(settings.Search);
         settings.TodoNewTaskPosition = TodoNewTaskPositionTop;
         settings.TodoDefaultFilter = TodoDefaultFilterAll;
         settings.TodoTabStyle = WidgetTabStyleButton;
@@ -865,7 +867,7 @@ settings.FocusClickedWidgetOnRaise = false;
                         {
                             AppSettings parsed = JsonSerializer.Deserialize(json, SettingsJsonContext.Default.AppSettings)
                                 ?? throw new InvalidDataException("DeskBox settings JSON is empty.");
-                            loadedJsonHadAutoStartDefaultApplied = AutoStartDefaultPolicy.HasAutoStartDefaultAppliedProperty(json);
+                            loadedJsonHadAutoStartDefaultApplied = parsed.Core.AutoStart || parsed.Core.AutoStartDefaultApplied || AutoStartDefaultPolicy.HasAutoStartDefaultAppliedProperty(json);
                             return parsed;
                         }
                         catch (JsonException) when (ResilientJsonStore.TryReadSchemaVersion(json, out int rawVer) && rawVer > SettingsMigrationPipeline.CurrentSchemaVersion)
@@ -910,6 +912,7 @@ settings.FocusClickedWidgetOnRaise = false;
             }
 
             bool changed;
+            int loadedSettingsSchemaVersion = SettingsMigrationPipeline.CurrentSchemaVersion;
             lock (_lock)
             {
                 changed = false;
@@ -935,9 +938,14 @@ settings.FocusClickedWidgetOnRaise = false;
                 // Run schema migrations if the loaded version is older than current.
                 // Copy-on-write: the pipeline returns the migrated graph (or the
                 // input untouched on failure) and this service swaps the reference.
+                loadedSettingsSchemaVersion = _settings.SchemaVersion;
                 var migrationPipeline = new SettingsMigrationPipeline();
                 (_settings, bool migrationsApplied) = migrationPipeline.RunMigrationsOnCopy(_settings);
                 changed |= migrationsApplied;
+                if (loadedFromDisk && loadedSettingsSchemaVersion < 16)
+                {
+                    changed |= Migration_10_To_11.MigrateLegacyPre160SearchState(_settings);
+                }
                 changed |= AutoStartDefaultPolicy.TryPreserveLegacyOptOut(
                     _settings,
                     loadedFromDisk,
@@ -1002,13 +1010,20 @@ settings.FocusClickedWidgetOnRaise = false;
             // keys so nothing is lost; once authoritative the writer strips
             // them and the layout file is the single owner.
             WidgetLayoutLoadResult layoutResult =
-                await Layout.LoadAsync(_settings.WidgetLayout);
+                await Layout.LoadAsync(
+                    _settings.WidgetLayout,
+                    allowRollbackQuarantineRecovery: loadedFromDisk && loadedSettingsSchemaVersion >= 16);
             lock (_lock)
             {
                 _settings.WidgetLayout.CopyFrom(layoutResult.Data);
                 _widgetLayoutMerged = layoutResult.Authoritative;
                 if (layoutResult.Authoritative)
                 {
+                    if (Layout.LoadedSchemaVersion > 0 && Layout.LoadedSchemaVersion < 2)
+                    {
+                        changed |= Migration_10_To_11.MigrateLegacyPre160SearchState(_settings);
+                    }
+
                     // File-won data has not seen this session's normalize
                     // passes — re-run the ones that own layout members
                     // (idempotent on an adopted seed, safe unconditionally).
@@ -1512,6 +1527,15 @@ settings.FocusClickedWidgetOnRaise = false;
         clipboard.ClipboardHotkeyKey = ClipboardSettingsSlice.DefaultHotkeyKey;
         clipboard.ClipboardPopupPlacementMode = ClipboardSettingsSlice.PopupFollowCaret;
         clipboard.ClipboardDoubleCopyAction = ClipboardSettingsSlice.DoubleCopyNone;
+        clipboard.ClipboardFetchUrlTitles = false;
+    }
+
+    public static void ApplyDefaultDesktopSearchPreferences(SearchSettingsSlice search)
+    {
+        search.SearchDesktopHandoffMode = SearchSettingsSlice.DefaultDesktopHandoffMode;
+        search.SearchDesktopShowHistory = true;
+        search.SearchDesktopShowRecentOpened = true;
+        search.SearchDesktopPrivacyMask = false;
     }
 
     public async Task<bool> ApplyExternalSnapshotAsync(string settingsJson)
@@ -2333,61 +2357,33 @@ settings.FocusClickedWidgetOnRaise = false;
     /// </summary>
     private static void PreserveMainOwnedState(AppSettings before, AppSettings parsed)
     {
-        // Runtime markers only this process authors would otherwise be
-        // rolled back by every settings-host commit that was loaded
-        // before the marker flip.
-        parsed.LastUpdateCheckAt = before.LastUpdateCheckAt;
+        // Runtime markers, auto-start, onboarding, layout, backup, managed-storage root/shortcut,
+        // Everything probe path, search popup custom bounds, and capsule placements are authored by
+        // the MAIN process; host-side snapshot commits carry stale-or-equal copies and must not rewind them.
+        parsed.LastUpdateCheckAt = before.LastUpdateCheckAt >= parsed.LastUpdateCheckAt
+            ? before.LastUpdateCheckAt
+            : (parsed.LastUpdateCheckAt ?? before.LastUpdateCheckAt);
         parsed.LastRunVersion = before.LastRunVersion;
         parsed.HasResolvedInitialFileWidgetSetup = before.HasResolvedInitialFileWidgetSetup;
-        // Auto-start registration and its persisted mirror/mode are owned by
-        // the MAIN process (mutated only via ISettingsAppActions IPC commands),
-        // so host-side snapshot commits must never rewind them.
         parsed.Core.AutoStart = before.Core.AutoStart;
         parsed.Core.AutoStartMode = before.Core.AutoStartMode;
         parsed.Core.AutoStartDefaultApplied = before.Core.AutoStartDefaultApplied;
-        parsed.FullyElevatedNoticeAcknowledgedUtcTicks =
-            before.FullyElevatedNoticeAcknowledgedUtcTicks;
-        // Onboarding completion is authored by the MAIN process's
-        // onboarding window; a host snapshot serialized before the
-        // completion save would otherwise roll it back and force a
-        // second run on next launch (batch R6).
+        parsed.FullyElevatedNoticeAcknowledgedUtcTicks = before.FullyElevatedNoticeAcknowledgedUtcTicks;
         parsed.HasCompletedOnboarding = before.HasCompletedOnboarding;
         parsed.CompletedOnboardingVersion = before.CompletedOnboardingVersion;
         parsed.OnboardingStepIndex = before.OnboardingStepIndex;
-        // The widget-layout domain — widgets list, groups, deleted ids,
-        // topology, AND the feature-widget enabled dictionary — is
-        // authoritative in the MAIN process only: the host's in-memory
-        // copy drifts from the main process's (it reloads settings.json
-        // but never widget-layout.json), so accepting its snapshot here
-        // would rewind whatever the host has not seen. Feature switches
-        // travel as their own IPC command instead
-        // (ISettingsWidgetActions.SetFeatureWidgetEnabled).
         parsed.WidgetLayout.CopyFrom(before.WidgetLayout);
-        // The backup domains are main-owned too, but for a different
-        // reason than the layout domain: every writer (the
-        // backup-settings coordinator on router commands, the
-        // cloud-backup runtime's LastSuccess/Failure/Unverified
-        // bookkeeping, restore path rebasing) runs in the MAIN process,
-        // and the settings host never writes them through its own
-        // graph — its UI reads and commands over the wire. A host
-        // snapshot therefore carries a stale-or-equal copy, and without
-        // this preserve a host commit racing a backup run or a
-        // just-commanded setting change (the reload push is skipped
-        // while the host has a pending debounced save) silently
-        // reverted main-side state (deep review R13).
         parsed.Backup.CopyFrom(before.Backup);
         parsed.CloudBackup.CopyFrom(before.CloudBackup);
-        // Deep review R15 (F2 audit): the managed-storage root is written
-        // only by the MAIN-process migration command; without preserving
-        // it, a host debounced commit racing the migration's disk write
-        // rolled the in-memory root back to the OLD path while widget
-        // MappedFolderPaths already pointed at the new one (orphan-detection
-        // and cleanup silently degraded). Same ownership argument as the
-        // backup domains above.
         parsed.FileWidget.DefaultManagedStorageRootPath = before.FileWidget.DefaultManagedStorageRootPath;
-        // Capsule bar order and free placements are desktop-surface
-        // drag state, owned by the main process; the settings tree never
-        // writes them.
+        parsed.FileWidget.ManagedStorageDesktopShortcutEnabled = before.FileWidget.ManagedStorageDesktopShortcutEnabled;
+        parsed.FileWidget.ManagedStorageDesktopShortcutPath = before.FileWidget.ManagedStorageDesktopShortcutPath;
+        parsed.Search.SearchEverythingExecutablePath = before.Search.SearchEverythingExecutablePath;
+        parsed.Search.SearchPopupCustomX = before.Search.SearchPopupCustomX;
+        parsed.Search.SearchPopupCustomY = before.Search.SearchPopupCustomY;
+        parsed.Search.SearchPopupCustomWidth = before.Search.SearchPopupCustomWidth;
+        parsed.Search.SearchPopupCustomHeight = before.Search.SearchPopupCustomHeight;
+        parsed.QuickCapture.LastQuickCaptureFileWidgetId = before.QuickCapture.LastQuickCaptureFileWidgetId;
         parsed.WidgetShell.WidgetCapsuleBarOrder = before.WidgetShell.WidgetCapsuleBarOrder;
         parsed.WidgetShell.WidgetCapsuleFreePlacements = before.WidgetShell.WidgetCapsuleFreePlacements;
     }
@@ -3646,18 +3642,21 @@ settings.FocusClickedWidgetOnRaise = false;
         return changed;
     }
 
-    private static bool RetireLegacyWidgets(AppSettings settings)
+    private static bool RetireLegacyWidgets(AppSettings settings) =>
+        RetireWidgetKind(settings, WidgetKind.Productivity);
+
+    internal static bool RetireWidgetKind(AppSettings settings, WidgetKind kindToRetire)
     {
         settings.Widgets ??= [];
         bool hasRetiredWidget = settings.Widgets.Any(
-            widget => widget.WidgetKind is WidgetKind.Productivity or WidgetKind.Search);
+            widget => widget.WidgetKind == kindToRetire);
         if (!hasRetiredWidget)
         {
             return false;
         }
 
         HashSet<string> retiredIds = settings.Widgets
-            .Where(widget => widget.WidgetKind is WidgetKind.Productivity or WidgetKind.Search)
+            .Where(widget => widget.WidgetKind == kindToRetire)
             .Select(widget => widget.Id)
             .Where(id => !string.IsNullOrWhiteSpace(id))
             .ToHashSet(StringComparer.Ordinal);
@@ -3732,7 +3731,7 @@ settings.FocusClickedWidgetOnRaise = false;
         }
 
         settings.Widgets.RemoveAll(
-            widget => widget.WidgetKind is WidgetKind.Productivity or WidgetKind.Search);
+            widget => widget.WidgetKind == kindToRetire);
         return true;
     }
 
@@ -3848,33 +3847,7 @@ settings.FocusClickedWidgetOnRaise = false;
 
     internal static bool NormalizeFeatureWidgetSettings(AppSettings settings)
     {
-        bool changed = false;
-        if (HasExplicitlyDisabledLegacySearchWidget(settings) && settings.SearchHotkeyEnabled)
-        {
-            settings.SearchHotkeyEnabled = false;
-            changed = true;
-        }
-
-        changed |= FeatureWidgetSettings.Normalize(settings);
-        return changed;
-    }
-
-    private static bool HasExplicitlyDisabledLegacySearchWidget(AppSettings settings)
-    {
-        if (settings.FeatureWidgetEnabledStates is null)
-        {
-            return false;
-        }
-
-        foreach ((string key, bool enabled) in settings.FeatureWidgetEnabledStates)
-        {
-            if (string.Equals(key, nameof(WidgetKind.Search), StringComparison.OrdinalIgnoreCase))
-            {
-                return !enabled;
-            }
-        }
-
-        return false;
+        return FeatureWidgetSettings.Normalize(settings);
     }
 
     public static string GetDefaultManagedStorageRootPath()
@@ -4353,12 +4326,15 @@ settings.FocusClickedWidgetOnRaise = false;
             changed = true;
         }
 
-        string normalized = settings.SearchDefaultTab?.Trim().ToLowerInvariant() ?? "all";
-        if (normalized is not ("all" or "app" or "file" or "deskbox"))
+        string normalizedLayout = SearchSettingsSlice.NormalizeCategoryLayout(
+            settings.Search.SearchCategoryLayout);
+        if (!string.Equals(settings.Search.SearchCategoryLayout, normalizedLayout, StringComparison.Ordinal))
         {
-            normalized = "all";
+            settings.Search.SearchCategoryLayout = normalizedLayout;
+            changed = true;
         }
 
+        string normalized = SearchSettingsSlice.NormalizeDefaultTabId(settings.SearchDefaultTab);
         if (!string.Equals(settings.SearchDefaultTab, normalized, StringComparison.Ordinal))
         {
             settings.SearchDefaultTab = normalized;
@@ -4408,6 +4384,13 @@ settings.FocusClickedWidgetOnRaise = false;
         if (!string.Equals(settings.Search.SearchCustomWebUrl, customWebUrl, StringComparison.Ordinal))
         {
             settings.Search.SearchCustomWebUrl = customWebUrl;
+            changed = true;
+        }
+
+        string handoffMode = SearchSettingsSlice.NormalizeDesktopHandoffMode(settings.Search.SearchDesktopHandoffMode);
+        if (!string.Equals(settings.Search.SearchDesktopHandoffMode, handoffMode, StringComparison.Ordinal))
+        {
+            settings.Search.SearchDesktopHandoffMode = handoffMode;
             changed = true;
         }
 

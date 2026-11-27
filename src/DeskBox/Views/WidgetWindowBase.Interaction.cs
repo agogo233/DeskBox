@@ -479,7 +479,10 @@ public abstract partial class WidgetWindowBase
 
     private void FlushPendingTitleBarDragFrame()
     {
-        ApplyPendingTitleBarDragFrame();
+        if (CallbackDepth.Depth == 0)
+        {
+            ApplyPendingTitleBarDragFrame();
+        }
         CancelPendingTitleBarDragFrame();
         CompleteBoundsInteractionFrameMetrics(ref _titleBarDragFrameMetrics, "drag");
     }
@@ -554,8 +557,11 @@ public abstract partial class WidgetWindowBase
             manager?.IsWidgetGroupDragMergeReady(Config.Id) == true)
         {
             RectInt32 originBounds = GetTitleBarDragOriginBounds();
+            RectInt32? mergeFallbackExpandedStart = _expandedInteractionStartBounds;
+            RectInt32? mergeFallbackCompactStart = _compactInteractionStartBounds;
             EndWidgetBoundsInteraction();
             DisplayChangeWatcher?.ResumeRestore();
+            RestoreBackdropAfterInteraction();
             HasMovedTitleBarDrag = false;
             _ = manager.CompleteWidgetGroupDragAsync(
                 Config.Id,
@@ -564,37 +570,61 @@ public abstract partial class WidgetWindowBase
                 {
                     if (!IsClosing)
                     {
-                        CompleteNonMergedDragPlacementAndRestore(
-                            hasMoved: true,
-                            normalRestoreReason);
+                        _expandedInteractionStartBounds = mergeFallbackExpandedStart;
+                        _compactInteractionStartBounds = mergeFallbackCompactStart;
+                        try
+                        {
+                            CompleteNonMergedDragPlacementAndRestore(
+                                hasMoved: true,
+                                normalRestoreReason,
+                                endBoundsInteraction: false);
+                        }
+                        finally
+                        {
+                            _expandedInteractionStartBounds = null;
+                            _compactInteractionStartBounds = null;
+                        }
                     }
                 });
             return;
         }
 
         manager?.CancelWidgetGroupDrag(Config.Id);
-        EndWidgetBoundsInteraction();
-        DisplayChangeWatcher?.ResumeRestore();
         HasMovedTitleBarDrag = false;
-        CompleteNonMergedDragPlacementAndRestore(hasMoved, normalRestoreReason);
+        CompleteNonMergedDragPlacementAndRestore(
+            hasMoved,
+            normalRestoreReason,
+            endBoundsInteraction: true);
     }
 
     private void CompleteNonMergedDragPlacementAndRestore(
         bool hasMoved,
-        string layerRestoreReason)
+        string layerRestoreReason,
+        bool endBoundsInteraction)
     {
-        if (hasMoved)
+        try
         {
-            CompleteCompactArrangementDrag();
-            RectInt32 finalBounds = GetActualWindowBounds();
-            finalBounds = CompleteExpandedWidgetDrag(finalBounds);
-            CommitUserPlacementFromWindow(WidgetPlacementSource.Drag);
-            if (_targetCollapsed)
+            if (hasMoved)
             {
-                // The pointer is still resting on the just-dropped capsule; an
-                // immediate Smart hover-expand would look like the placement
-                // snapped back on its own.
-                _suppressHoverExpansionAfterDragUntilPointerExit = true;
+                CompleteCompactArrangementDrag();
+                RectInt32 finalBounds = GetActualWindowBounds();
+                finalBounds = CompleteExpandedWidgetDrag(finalBounds);
+                CommitUserPlacementFromWindow(WidgetPlacementSource.Drag);
+                if (_targetCollapsed)
+                {
+                    // The pointer is still resting on the just-dropped capsule; an
+                    // immediate Smart hover-expand would look like the placement
+                    // snapped back on its own.
+                    _suppressHoverExpansionAfterDragUntilPointerExit = true;
+                }
+            }
+        }
+        finally
+        {
+            if (endBoundsInteraction)
+            {
+                EndWidgetBoundsInteraction();
+                DisplayChangeWatcher?.ResumeRestore();
             }
         }
 
@@ -970,10 +1000,14 @@ public abstract partial class WidgetWindowBase
 
     protected WidgetTrayAnimationProfile GetTrayAnimationProfile(bool isShowing = true)
     {
+        // DeskBox exposes its own explicit tray show/hide animation toggle
+        // (EffectNone = off). Keep v1.5.9 parity so turning off global Windows
+        // UI animations does not silently break DeskBox's explicit tray
+        // animation setting (#1261), while still honoring High Contrast.
         return TrayAnimation.CreateProfile(
             GetEffectiveTrayAnimationOptions(),
             isShowing,
-            WindowsCompatibilityService.AreAnimationsEnabled);
+            !WindowsCompatibilityService.IsHighContrast);
     }
 
     protected WidgetTrayAnimationProfile GetSingleWidgetAnimationProfile(bool isShowing)
@@ -981,7 +1015,7 @@ public abstract partial class WidgetWindowBase
         return TrayAnimation.CreateSingleWidgetLifecycleProfile(
             GetEffectiveTrayAnimationOptions(),
             isShowing,
-            WindowsCompatibilityService.AreAnimationsEnabled);
+            !WindowsCompatibilityService.IsHighContrast);
     }
 
     protected void LogTrayWindow(string message)

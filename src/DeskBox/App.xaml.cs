@@ -29,7 +29,6 @@ using Microsoft.UI.Dispatching;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using Microsoft.Win32;
 using System.Runtime.InteropServices;
 using System.Security.Principal;
 using DrawingPoint = System.Drawing.Point;
@@ -99,7 +98,8 @@ public partial class App : Application
     // static initializer must judge by command line because the instance
     // IsSettingsProcess flag flips later, inside the App constructor.
     private static readonly string LogPath =
-        App.SettingsHostLaunch.IsSettingsHostLaunch(Environment.GetCommandLineArgs())
+        App.SettingsHostLaunch.IsSettingsHostLaunch(Environment.GetCommandLineArgs()) &&
+        App.SettingsHostLaunch.TryGetMainProcessId(Environment.GetCommandLineArgs()) > 0
             ? DeskBoxDataPathService.Current.SettingsHostLogFilePath
             : App.StudioHostLaunch.IsStudioHostLaunch(Environment.GetCommandLineArgs())
                 ? DeskBoxDataPathService.Current.StudioHostLogFilePath
@@ -115,12 +115,14 @@ public partial class App : Application
         PendingUpdateInstallResultFileName);
     private static readonly System.Collections.Concurrent.ConcurrentQueue<string> s_logQueue = new();
     private static readonly SemaphoreSlim s_logSignal = new(0);
+    private static readonly object s_logFileWriteGate = new();
     private static int s_logWorkerStarted;
     private static int s_pendingLogLineCount;
     private static int s_logDirectoryEnsured;
 
     private static Mutex? _singleInstanceMutex;
     private static EventWaitHandle? _activationEvent;
+    private string[] _normalizedLaunchCommandLineArgs = [];
     private static RegisteredWaitHandle? _activationRegistration;
 
     // Written by the primary instance only; secondary activations never touch
@@ -420,43 +422,6 @@ public partial class App : Application
 
     internal IntPtr GetStoreUpdateOwnerWindowHandle() => ResolveStoreUpdateOwnerWindowHandle();
 
-    private IntPtr GetVisibleSettingsWindowHandleCore()
-    {
-#if DESKBOX_NATIVE_AOT && DESKBOX_AOT_SMOKE_HARNESS
-        IntPtr smokeHwnd = TryGetInProcessSettingsWindowHandleForSmoke();
-        if (smokeHwnd != IntPtr.Zero)
-        {
-            return smokeHwnd;
-        }
-#endif
-        if (_settingsHostWindow is { IsVisibleToUser: true } hostWindow)
-        {
-            return WinRT.Interop.WindowNative.GetWindowHandle(hostWindow);
-        }
-
-        return IntPtr.Zero;
-    }
-
-    private IntPtr GetAnySettingsHostWindowHandle()
-    {
-        if (_settingsHostWindow is { } hostWindow)
-        {
-            return WinRT.Interop.WindowNative.GetWindowHandle(hostWindow);
-        }
-
-        return IntPtr.Zero;
-    }
-
-#if DESKBOX_NATIVE_AOT && DESKBOX_AOT_SMOKE_HARNESS
-    private bool HasInProcessSettingsWindow => HasInProcessSettingsWindowForSmoke();
-    private Task StopInProcessSettingsCloudBackupActionsAsync() => StopInProcessSettingsCloudBackupActionsForSmokeAsync();
-    private void CloseInProcessSettingsWindowForShutdown() => CloseInProcessSettingsWindowForSmokeShutdown();
-#else
-    private bool HasInProcessSettingsWindow => false;
-    private static Task StopInProcessSettingsCloudBackupActionsAsync() => Task.CompletedTask;
-    private static void CloseInProcessSettingsWindowForShutdown() { }
-#endif
-
     public static bool IsVerboseLoggingEnabled => EnableVerboseLogging;
 
     public App()
@@ -487,9 +452,15 @@ public partial class App : Application
         // while the process split alone already provides the memory release.
         if (SettingsHostLaunch.IsSettingsHostLaunch(effectiveCommandLineArgs))
         {
-            InitializeSettingsHost();
-            return;
+            if (SettingsHostLaunch.TryGetMainProcessId(effectiveCommandLineArgs) > 0)
+            {
+                InitializeSettingsHost(effectiveCommandLineArgs);
+                return;
+            }
+
+            effectiveCommandLineArgs = [.. effectiveCommandLineArgs, JumpListService.ArgOpenSettings];
         }
+        _normalizedLaunchCommandLineArgs = effectiveCommandLineArgs;
         if (StudioHostLaunch.IsStudioHostLaunch(effectiveCommandLineArgs))
         {
             InitializeStudioHost(effectiveCommandLineArgs);
@@ -619,7 +590,7 @@ public partial class App : Application
                 !_processStartupLaunchDetected
                     ? JumpListService.TryGetJumpListArgument(TryGetPackagedLaunchArguments()) ??
                       JumpListService.TryGetJumpListArgument(
-                        string.Join(' ', Environment.GetCommandLineArgs()))
+                        string.Join(' ', commandLineArgs))
                     : null;
             string activationKind = nativeNotificationActivation is not null
                 ? "notification"
@@ -752,16 +723,6 @@ public partial class App : Application
         }
     }
 
-    private static string GetAppCompatReport()
-    {
-        string exePath = Path.Combine(AppContext.BaseDirectory, "DeskBox.exe");
-        string? currentUser = GetAppCompatLayerValue(Registry.CurrentUser, exePath);
-        string? localMachine = GetAppCompatLayerValue(Registry.LocalMachine, exePath);
-
-        return $"exe='{exePath}' hkcu={(string.IsNullOrWhiteSpace(currentUser) ? "none" : currentUser)} " +
-               $"hklm={(string.IsNullOrWhiteSpace(localMachine) ? "none" : localMachine)}";
-    }
-
     private static string GetParentProcessReport()
     {
         try
@@ -819,30 +780,6 @@ public partial class App : Application
         return $"tokenElevated={tokenElevated} integrity={integrityLevel}";
     }
 
-    private static string GetUacPolicyReport()
-    {
-        try
-        {
-            using var key = Registry.LocalMachine.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Policies\System");
-            object? enableLua = key?.GetValue("EnableLUA");
-            object? consentPrompt = key?.GetValue("ConsentPromptBehaviorAdmin");
-            object? promptOnSecureDesktop = key?.GetValue("PromptOnSecureDesktop");
-
-            return $"EnableLUA={FormatRegistryValue(enableLua)} " +
-                   $"ConsentPromptBehaviorAdmin={FormatRegistryValue(consentPrompt)} " +
-                   $"PromptOnSecureDesktop={FormatRegistryValue(promptOnSecureDesktop)}";
-        }
-        catch (Exception ex)
-        {
-            return $"unknown error={ex.Message}";
-        }
-    }
-
-    private static string FormatRegistryValue(object? value)
-    {
-        return value is null ? "missing" : value.ToString() ?? "unknown";
-    }
-
     private static bool TryGetParentProcessId(int processId, out uint parentProcessId)
     {
         parentProcessId = 0;
@@ -882,29 +819,6 @@ public partial class App : Application
         {
             ProcessDiagnosticsNativeMethods.CloseHandle(snapshot);
         }
-    }
-
-    private static string? GetAppCompatLayerValue(RegistryKey? rootKey, string exePath)
-    {
-        if (rootKey is null)
-        {
-            return null;
-        }
-
-        try
-        {
-            using var key = rootKey.OpenSubKey(@"Software\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\Layers");
-            if (key?.GetValue(exePath) is string value && !string.IsNullOrWhiteSpace(value))
-            {
-                return value;
-            }
-        }
-        catch (Exception ex)
-        {
-            return $"error:{ex.Message}";
-        }
-
-        return null;
     }
 
     private static bool TryGetTokenElevation(IntPtr processHandle, out bool isElevated)
@@ -1131,26 +1045,29 @@ public partial class App : Application
 
     internal static void DrainLogQueue()
     {
-        var builder = new System.Text.StringBuilder();
-        while (s_logQueue.TryDequeue(out string? line))
+        lock (s_logFileWriteGate)
         {
-            Interlocked.Decrement(ref s_pendingLogLineCount);
-            builder.Append(line);
-        }
+            var builder = new System.Text.StringBuilder();
+            while (s_logQueue.TryDequeue(out string? line))
+            {
+                Interlocked.Decrement(ref s_pendingLogLineCount);
+                builder.Append(line);
+            }
 
-        if (builder.Length == 0)
-        {
-            return;
-        }
+            if (builder.Length == 0)
+            {
+                return;
+            }
 
-        try
-        {
-            EnsureLogDirectory();
-            TryRotateLogFileIfNeeded();
-            File.AppendAllText(EffectiveLogPath, builder.ToString());
-        }
-        catch
-        {
+            try
+            {
+                EnsureLogDirectory();
+                TryRotateLogFileIfNeeded();
+                File.AppendAllText(EffectiveLogPath, builder.ToString());
+            }
+            catch
+            {
+            }
         }
     }
 
@@ -1443,6 +1360,7 @@ public partial class App : Application
         {
             "cancelled" => "cancelled",
             "path-mismatch" => "path-mismatch",
+            "blocked-by-policy" => "blocked-by-policy",
             "failed" => "failed",
             _ => null
         };
@@ -1817,6 +1735,7 @@ RunCriticalStartupStep("widget-manager", () =>
                 // widget group; the reverse order is handled per-window at show.
                 WidgetManager.AuxiliaryWindowProvider = GetRaisedBandAuxiliaryWindowHandles;
                 WidgetManager.ClipboardHistoryServiceProvider = () => _clipboardHistoryService;
+                SearchWidgetContentProvider.HostCallbacksFactory = CreateSearchWidgetHostCallbacks;
                 WidgetManager.ResolveStudioAgentUpsertTargetWidgetId = TryGetStudioTargetWidgetIdForAgentUpsert;
                 WidgetManager.NotifyStudioAgentWidgetUpserted = NotifyCustomWidgetStudioAgentUpsert;
                 WidgetManager.PostManagedStorageMigrationCommitAsync = SyncManagedStorageHostEntriesAfterMigrationAsync;
@@ -1983,7 +1902,7 @@ RunCriticalStartupStep("widget-manager", () =>
             RunOptionalStartupStep("settings-ipc-server", StartSettingsIpcServer);
 
             RunOptionalStartupStep("todo-reminders", () => RefreshTodoReminderService());
-            if (FeatureWidgetSettings.IsEnabled(SettingsService.Settings, WidgetKind.Clipboard))
+            if (ClipboardRuntimePolicy.IsMonitoringActive(SettingsService.Settings))
             {
                 RunOptionalStartupStep("clipboard-runtime", ReconcileClipboardFeatureRuntime);
             }
@@ -2257,7 +2176,9 @@ RunCriticalStartupStep("widget-manager", () =>
             string? firstLaunchJumpArg =
                 JumpListService.TryGetJumpListArgument(args.Arguments) ??
                 JumpListService.TryGetJumpListArgument(
-                    string.Join(' ', Environment.GetCommandLineArgs()));
+                    string.Join(' ', _normalizedLaunchCommandLineArgs.Length > 0
+                        ? _normalizedLaunchCommandLineArgs
+                        : Environment.GetCommandLineArgs()));
             if (firstLaunchJumpArg is not null)
             {
                 SafeFireAndForget(
@@ -2685,6 +2606,11 @@ RunCriticalStartupStep("widget-manager", () =>
     /// </summary>
     private async Task WaitForStartupDisplaySettlingAsync()
     {
+        if (!IsStartupMode)
+        {
+            return;
+        }
+
         try
         {
             IReadOnlyList<string> active = DisplayIdentityTokens.ActiveProfileSet(SettingsService.Settings);
@@ -2693,7 +2619,7 @@ RunCriticalStartupStep("widget-manager", () =>
                 return;
             }
 
-            var deadline = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(5);
+            var deadline = DateTimeOffset.UtcNow + TimeSpan.FromMilliseconds(900);
             while (DateTimeOffset.UtcNow < deadline)
             {
                 IReadOnlyList<string> current = DisplayIdentityTokens.CurrentSet();
@@ -2702,7 +2628,7 @@ RunCriticalStartupStep("widget-manager", () =>
                     break;
                 }
 
-                await Task.Delay(500);
+                await Task.Delay(100);
             }
         }
         catch (Exception ex)
@@ -3174,7 +3100,7 @@ RunCriticalStartupStep("widget-manager", () =>
     /// GitHub release tag — which the loader converts to the API endpoint and
     /// seeds the offline disk cache from.
     /// </summary>
-    private async Task<AppUpdateManifest?> LoadReleaseNotesManifestForVersionAsync(
+    internal async Task<AppUpdateManifest?> LoadReleaseNotesManifestForVersionAsync(
         string version,
         CancellationToken cancellationToken)
     {
@@ -3217,7 +3143,11 @@ RunCriticalStartupStep("widget-manager", () =>
 #if DESKBOX_NATIVE_AOT && DESKBOX_AOT_SMOKE_HARNESS
             await RunInProcessOneClickUpdateFromToastForSmokeAsync();
 #else
-            if (IsSettingsHostRunning)
+            if (_inProcessFallbackSettingsWindow is { } fallbackWindow)
+            {
+                await fallbackWindow.RunOneClickUpdateFlowAsync();
+            }
+            else if (IsSettingsHostRunning)
             {
                 _ = PushSettingsIpcEventAsync(SettingsIpcMethods.HostOneClickUpdate, null);
             }
@@ -4055,7 +3985,7 @@ RunCriticalStartupStep("widget-manager", () =>
 
             string outcome = File.ReadAllText(PendingUpdateInstallResultPath);
             File.Delete(PendingUpdateInstallResultPath);
-            return string.IsNullOrWhiteSpace(outcome) ? null : outcome;
+            return NormalizeUpdateInstallOutcome(outcome);
         }
         catch (Exception ex)
         {
@@ -4106,6 +4036,7 @@ RunCriticalStartupStep("widget-manager", () =>
         // never consumed (managed-ui smoke disables the update check) and
         // the retail push is a safe no-op without the IPC server — the
         // unconditional push replaced the #if split.
+        UiDispatcherQueue?.TryEnqueue(() => _inProcessFallbackSettingsWindow?.ViewModel.RefreshCachedUpdateState());
         _ = PushSettingsIpcEventAsync(SettingsIpcMethods.HostUpdateStateRefresh, null);
     }
 
@@ -4818,7 +4749,7 @@ RunCriticalStartupStep("widget-manager", () =>
                 () => UiDispatch.RunOrDefer(LocalizationService.NotifyExternalLanguageChange),
                 enabled => _searchEngineService?.SetDeskBoxContentSearchEnabled(enabled),
                 () => UiDispatch.RunOrDefer(() => _searchHotkeyService?.RefreshRegistration()),
-                () => UiDispatch.RunOrDefer(() => _clipboardHotkeyService?.RefreshRegistration())));
+                () => UiDispatch.RunOrDefer(ReconcileClipboardFeatureRuntime)));
     }
 
     private void RefreshThemeAppearanceOnUi() => ThemeService.RefreshAppearance();
@@ -4833,6 +4764,7 @@ RunCriticalStartupStep("widget-manager", () =>
             return;
         }
 
+        _inProcessFallbackSettingsWindow?.ShowSaveFailedBanner();
         if (DateTimeOffset.UtcNow - _lastSettingsPersistenceNotificationAt <
             TimeSpan.FromMinutes(5))
         {
@@ -5828,7 +5760,8 @@ RunCriticalStartupStep("widget-manager", () =>
                 initialStep,
                 widgetManager: WidgetManager,
                 desktopShortcutService: ManagedStorageDesktopShortcutService,
-                showDesktopOrganization: () => ShowDesktopOrganizationWindow());
+                showDesktopOrganization: () => ShowDesktopOrganizationWindow(),
+                searchHotkeyProvider: () => SearchHotkeyService);
             _onboardingWindow = onboarding;
             SubscribeWindowClosedOnce(onboarding, () =>
             {
@@ -7400,6 +7333,18 @@ RunCriticalStartupStep("widget-manager", () =>
         // bypasses this path via WM_QUERYENDSESSION/WM_ENDSESSION so ARSO stays
         // armed when AutoStart is enabled.
         UnregisterApplicationRestartForCleanExit();
+
+        if (UiDispatcherQueue is { HasThreadAccess: false } queue &&
+            await TryDispatchShutdownToUiAsync(queue))
+        {
+            return;
+        }
+
+        await ShutdownApplicationOnUiCoreAsync();
+    }
+
+    private async Task ShutdownApplicationOnUiCoreAsync()
+    {
         bool dependentTeardownCompleted = true;
         try
         {
@@ -7464,7 +7409,7 @@ RunCriticalStartupStep("widget-manager", () =>
                         dependentTeardownCompleted ? 5 : 3));
                     if (dependentTeardownCompleted &&
                         AppRelaunchService.PendingOsRestartOnShutdown &&
-                        DistributionService.IsMicrosoftStore)
+                        DistributionService.IsPackaged)
                     {
                         // Store builds have no detached updater helper; the
                         // WinAppSDK restart agent terminates this process on
@@ -7860,6 +7805,17 @@ RunCriticalStartupStep("widget-manager", () =>
         return _everythingSearchService;
     }
 
+    internal SearchHistoryService? EnsureSearchHistoryService()
+    {
+        EnsureSearchFeatureShell();
+        return _searchHistoryService;
+    }
+
+    internal SearchSettingsCoordinator? SearchSettingsCoordinator => _searchSettings;
+
+    internal EverythingSearchService? TryGetActiveEverythingSearchService() =>
+        _everythingSearchService;
+
     internal ClipboardHistoryService? TryGetActiveClipboardHistoryService() =>
         _clipboardHistoryService;
 
@@ -7930,7 +7886,7 @@ RunCriticalStartupStep("widget-manager", () =>
             return Task.CompletedTask;
         }
 
-        if (IsShuttingDown || !FeatureWidgetSettings.IsEnabled(SettingsService.Settings, WidgetKind.Clipboard))
+        if (IsShuttingDown || !ClipboardRuntimePolicy.IsMonitoringActive(SettingsService.Settings))
         {
             return Task.CompletedTask;
         }
@@ -8074,6 +8030,9 @@ RunCriticalStartupStep("widget-manager", () =>
         }
     }
 
+    private bool _isReconcilingClipboardRuntime;
+    private bool _clipboardRuntimeReconcilePending;
+
     private void ReconcileClipboardFeatureRuntime()
     {
         if (IsShuttingDown || _clipboardFeatureRuntime is null)
@@ -8081,14 +8040,43 @@ RunCriticalStartupStep("widget-manager", () =>
             return;
         }
 
-        bool enabled = FeatureWidgetSettings.IsEnabled(SettingsService.Settings, WidgetKind.Clipboard);
-        if (enabled)
+        _clipboardRuntimeReconcilePending = true;
+        if (_isReconcilingClipboardRuntime)
         {
-            _ = _clipboardFeatureRuntime.StartAsync();
+            return;
         }
-        else
+
+        _isReconcilingClipboardRuntime = true;
+        SafeFireAndForget(DrainClipboardRuntimeReconcileAsync, nameof(ReconcileClipboardFeatureRuntime));
+    }
+
+    private async Task DrainClipboardRuntimeReconcileAsync()
+    {
+        try
         {
-            _ = _clipboardFeatureRuntime.DisposeAsync();
+            while (_clipboardRuntimeReconcilePending && !IsShuttingDown && _clipboardFeatureRuntime is not null)
+            {
+                _clipboardRuntimeReconcilePending = false;
+                bool enabled = ClipboardRuntimePolicy.IsMonitoringActive(SettingsService.Settings);
+                if (enabled)
+                {
+                    await _clipboardFeatureRuntime.StartAsync();
+                }
+                else
+                {
+                    await _clipboardFeatureRuntime.DisposeAsync();
+                }
+
+                _clipboardHotkeyService?.RefreshRegistration();
+            }
+        }
+        finally
+        {
+            _isReconcilingClipboardRuntime = false;
+            if (_clipboardRuntimeReconcilePending && !IsShuttingDown && _clipboardFeatureRuntime is not null)
+            {
+                UiDispatch.RunOrDefer(ReconcileClipboardFeatureRuntime);
+            }
         }
     }
 

@@ -440,6 +440,14 @@ public sealed partial class TodoWidgetViewModel
         OnPropertyChanged(nameof(ThisMonthFilterText));
         OnPropertyChanged(nameof(ImportantFilterText));
         OnPropertyChanged(nameof(CompletedFilterText));
+        OnPropertyChanged(nameof(AllFilterCountVisibility));
+        OnPropertyChanged(nameof(ActiveFilterCountVisibility));
+        OnPropertyChanged(nameof(TodayFilterCountVisibility));
+        OnPropertyChanged(nameof(OverdueFilterCountVisibility));
+        OnPropertyChanged(nameof(ThisWeekFilterCountVisibility));
+        OnPropertyChanged(nameof(ThisMonthFilterCountVisibility));
+        OnPropertyChanged(nameof(ImportantFilterCountVisibility));
+        OnPropertyChanged(nameof(CompletedFilterCountVisibility));
         OnPropertyChanged(nameof(ColorFilterVisibility));
         RefreshColorFilterVisibilityProperties();
         OnPropertyChanged(nameof(ListVisibility));
@@ -478,6 +486,14 @@ public sealed partial class TodoWidgetViewModel
         OnPropertyChanged(nameof(OverdueTabSummaryText));
         OnPropertyChanged(nameof(TodayOverdueToggleTooltipText));
         OnPropertyChanged(nameof(RescheduleOverdueText));
+        OnPropertyChanged(nameof(AllFilterLabelText));
+        OnPropertyChanged(nameof(ActiveFilterLabelText));
+        OnPropertyChanged(nameof(TodayFilterLabelText));
+        OnPropertyChanged(nameof(OverdueFilterLabelText));
+        OnPropertyChanged(nameof(ThisWeekFilterLabelText));
+        OnPropertyChanged(nameof(ThisMonthFilterLabelText));
+        OnPropertyChanged(nameof(ImportantFilterLabelText));
+        OnPropertyChanged(nameof(CompletedFilterLabelText));
         OnPropertyChanged(nameof(AllFilterText));
         OnPropertyChanged(nameof(ActiveFilterText));
         OnPropertyChanged(nameof(TodayFilterText));
@@ -486,6 +502,14 @@ public sealed partial class TodoWidgetViewModel
         OnPropertyChanged(nameof(ThisMonthFilterText));
         OnPropertyChanged(nameof(ImportantFilterText));
         OnPropertyChanged(nameof(CompletedFilterText));
+        OnPropertyChanged(nameof(AllFilterCountVisibility));
+        OnPropertyChanged(nameof(ActiveFilterCountVisibility));
+        OnPropertyChanged(nameof(TodayFilterCountVisibility));
+        OnPropertyChanged(nameof(OverdueFilterCountVisibility));
+        OnPropertyChanged(nameof(ThisWeekFilterCountVisibility));
+        OnPropertyChanged(nameof(ThisMonthFilterCountVisibility));
+        OnPropertyChanged(nameof(ImportantFilterCountVisibility));
+        OnPropertyChanged(nameof(CompletedFilterCountVisibility));
         OnPropertyChanged(nameof(EmptyStateTitle));
         OnPropertyChanged(nameof(EmptyStateText));
         OnPropertyChanged(nameof(ClearCompletedText));
@@ -796,6 +820,12 @@ public sealed partial class TodoWidgetViewModel
             return left.IsCompleted ? 1 : -1;
         }
 
+        int sortCompare = left.SortOrder.CompareTo(right.SortOrder);
+        if (sortCompare != 0)
+        {
+            return sortCompare;
+        }
+
         if (left.IsCompleted && right.IsCompleted)
         {
             int completedCompare = Nullable.Compare(right.CompletedAt, left.CompletedAt);
@@ -805,10 +835,7 @@ public sealed partial class TodoWidgetViewModel
             }
         }
 
-        int sortCompare = left.SortOrder.CompareTo(right.SortOrder);
-        return sortCompare != 0
-            ? sortCompare
-            : right.UpdatedAt.CompareTo(left.UpdatedAt);
+        return right.UpdatedAt.CompareTo(left.UpdatedAt);
     }
 
     private bool ShouldCountInNonCompletedFilter(TodoItemViewModel item)
@@ -899,7 +926,8 @@ public sealed partial class TodoWidgetViewModel
 
     private string FormatFilterText(string key, int count)
     {
-        return $"{_localizationService.T(key)} {count}";
+        string label = _localizationService.T(key);
+        return count > 0 ? $"{label} {count}" : label;
     }
 
     private int GetUnderlyingInsertIndex(int targetVisibleIndex, TodoItemViewModel movingItem)
@@ -907,13 +935,24 @@ public sealed partial class TodoWidgetViewModel
         var visibleWithoutMoving = VisibleItems
             .Where(item => !string.Equals(item.Id, movingItem.Id, StringComparison.Ordinal))
             .ToList();
-        targetVisibleIndex = Math.Clamp(targetVisibleIndex, 0, visibleWithoutMoving.Count);
-        if (targetVisibleIndex >= visibleWithoutMoving.Count)
+        int clampedVisibleIndex = Math.Clamp(targetVisibleIndex, 0, visibleWithoutMoving.Count);
+        var samePartitionWithoutMoving = visibleWithoutMoving
+            .Where(item => item.IsCompleted == movingItem.IsCompleted)
+            .ToList();
+        if (samePartitionWithoutMoving.Count == 0)
         {
-            return Items.Count;
+            return Math.Max(0, Items.IndexOf(movingItem));
         }
 
-        return Math.Max(0, Items.IndexOf(visibleWithoutMoving[targetVisibleIndex]));
+        int samePartitionTargetIndex = visibleWithoutMoving
+            .Take(clampedVisibleIndex)
+            .Count(item => item.IsCompleted == movingItem.IsCompleted);
+        if (samePartitionTargetIndex >= samePartitionWithoutMoving.Count)
+        {
+            return Items.IndexOf(samePartitionWithoutMoving[^1]) + 1;
+        }
+
+        return Math.Max(0, Items.IndexOf(samePartitionWithoutMoving[samePartitionTargetIndex]));
     }
 
     private void CaptureDeleteUndoSnapshot(IReadOnlyList<TodoItemViewModel> deletedItems, string message)

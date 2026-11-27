@@ -585,39 +585,14 @@ public sealed partial class FileSurfaceContent
         _pendingPointerDragItems = ResolvePendingPointerDragItemsOnPress(
             item,
             listView.SelectedItems.OfType<WidgetItem>().ToArray(),
-            Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Shift));
+            Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Shift),
+            Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Control));
         TryArmElevatedItemPointerDrag(sender, item, e);
-        TryArmWin10ShellItemDrag(sender, item, e);
         // Keep pointer-down selection read-only. The native selector commits
         // its final state after ItemClick; changing SelectedItems here makes
         // the same click toggle twice and can leave a stale custom highlight.
         // The snapshot above only preserves an existing multi-selection for a
         // drag that starts on one of its selected anchors.
-    }
-
-    internal static WidgetItem[] ResolvePendingPointerDragItemsOnPress(
-        WidgetItem pressedItem,
-        IReadOnlyList<WidgetItem> currentSelectedItems,
-        bool shiftPressed)
-    {
-        if (currentSelectedItems.Contains(pressedItem))
-        {
-            return currentSelectedItems
-                .Distinct()
-                .ToArray();
-        }
-
-        // When nothing is visibly selected and the user presses Shift+Drag on an
-        // item, WinUI ListViewBase's hidden focus anchor at index 0 would otherwise
-        // range-select 0..N before DragStarting fires. Snapshotting [pressedItem]
-        // ensures anchorless Shift+Drag drags only the pressed item.
-        if (shiftPressed &&
-            currentSelectedItems.Count == 0)
-        {
-            return [pressedItem];
-        }
-
-        return [];
     }
 
     private static bool IsPointerWithinNameLabel(
@@ -2918,7 +2893,6 @@ public sealed partial class FileSurfaceContent
         border.Background =
             ResolveBrush("SubtleFillColorTertiaryBrush");
         TryArmElevatedStackPointerDrag(border, stack, e);
-        TryArmWin10ShellStackDrag(border, stack, e);
     }
 
     private void StackSurface_PointerReleased(
@@ -2926,7 +2900,6 @@ public sealed partial class FileSurfaceContent
         PointerRoutedEventArgs e)
     {
         DisarmElevatedPointerDragCandidate(e.Pointer.PointerId);
-        DisarmWin10ShellDragCandidate(e.Pointer.PointerId);
         if (sender is not Border border)
         {
             _pressedStack = null;

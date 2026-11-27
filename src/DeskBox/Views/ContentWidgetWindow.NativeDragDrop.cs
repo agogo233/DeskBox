@@ -2751,7 +2751,7 @@ public sealed partial class ContentWidgetWindow
                 !IsCompactBoundsStateActive &&
                 CurrentContentAcceptsFileDrops())
             {
-                ActivateForKeyboardInput("external-native-drop");
+                ActivateForKeyboardInput("external-native-drop", expectTextInput: false);
             }
         }
         finally

@@ -82,12 +82,15 @@ public partial class App
 
     private void OnTrayLeftClickRequested()
     {
-        TrayContextMenuWindow.DismissActiveIfOpen();
-        if (WidgetManager is not null)
+        UiDispatch.PostAfterCallback(() =>
         {
-            SafeFireAndForget(() => ToggleTrayWidgetsAsync(
-                DeskBox.Services.TrayToggleRequestQueue.TrayIconSource));
-        }
+            TrayContextMenuWindow.DismissActiveIfOpen();
+            if (WidgetManager is not null)
+            {
+                SafeFireAndForget(() => ToggleTrayWidgetsAsync(
+                    DeskBox.Services.TrayToggleRequestQueue.TrayIconSource));
+            }
+        });
     }
 
     /// <summary>Attempts per tray creation pass through the early-logon window
@@ -1382,8 +1385,9 @@ public partial class App
 
         try
         {
+            // Never shown (no WS_VISIBLE), so it cannot appear in taskbar/Alt+Tab;
+            // skipping TryHideFromSwitchers avoids a 1s Explorer ITaskbarList COM stall at cold boot (#1283/#1302).
             var lifeline = new Window { Title = "DeskBox XAML Lifeline" };
-            WindowShellState.TryHideFromSwitchers(lifeline.AppWindow);
             _xamlLoopLifelineWindow = lifeline;
         }
         catch (Exception ex)
