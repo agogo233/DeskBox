@@ -428,7 +428,7 @@ internal sealed class Migration_10_To_11 : ISettingsMigration
 
     internal static bool MigrateLegacyPre160SearchState(AppSettings settings)
     {
-        if (settings.FeatureWidgetEnabledStates is { Count: > 0 } featureStates &&
+        if (settings.WidgetLayout.FeatureWidgetEnabledStates is { Count: > 0 } featureStates &&
             featureStates.Any(static pair =>
                 string.Equals(pair.Key, nameof(WidgetKind.Search), StringComparison.OrdinalIgnoreCase) &&
                 !pair.Value) &&
